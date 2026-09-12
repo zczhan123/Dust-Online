@@ -87,17 +87,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'yuqie.breakthrough': {
     run({ g, player, params }) {
       const p = g.players[player];
-      const count = params.meditationCount as number;
-      if (!Number.isInteger(count) || count < 1 || count > 3) throw new Error('meditationCount must be 1..3');
-      const meds = p.areas.meditation.slice(0, count);
-      if (meds.length < count) throw new Error('not enough meditation dice');
-      consumeDice(p, 'meditation', meds.map((d) => d.id));
+      const medIds = (params.meditationDieIds as string[] | undefined) ?? [];
+      if (medIds.length < 1 || medIds.length > 3) throw new Error('meditationDieIds must contain 1..3 dice');
+      if (new Set(medIds).size !== medIds.length) throw new Error('duplicate meditation die id');
+      for (const id of medIds) {
+        if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+      }
+      consumeDice(p, 'meditation', medIds);
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
-      const wanted = ((params.opponentDefenseDieIds as string[]) ?? []).slice(0, count);
-      const owned = g.players[opponent].areas.defense;
-      const valid = wanted.filter((id) => owned.some((d) => d.id === id));
-      consumeDice(g.players[opponent], 'defense', valid);
-      if (count === 3) g.unblockableThisTurn = true;
+      const oppDef = g.players[opponent].areas.defense;
+      const required = Math.min(medIds.length, oppDef.length);
+      const defIds = (params.opponentDefenseDieIds as string[] | undefined) ?? [];
+      if (new Set(defIds).size !== defIds.length) throw new Error('duplicate defense die id');
+      for (const id of defIds) {
+        if (!oppDef.some((d) => d.id === id)) throw new Error(`not an opponent defense die: ${id}`);
+      }
+      if (defIds.length !== required) throw new Error(`must discard exactly ${required} defense dice`);
+      consumeDice(g.players[opponent], 'defense', defIds);
+      if (medIds.length === 3) g.unblockableThisTurn = true;
     },
   },
   // 影袭：使 1 个能力骰点数下降 X（最低 1）→ 按新点数移到对应区域；视为以 X 点进行 1 次（虚拟）攻击

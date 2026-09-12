@@ -115,7 +115,8 @@ describe('中央突破', () => {
     }
     const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
     const bDefBefore = g.players.B.areas.defense.length;
-    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
+    const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDef } });
     expect(g.unblockableThisTurn).toBe(true);
     expect(g.players.B.areas.defense.length).toBe(bDefBefore - 3);
   });
@@ -131,7 +132,8 @@ describe('中央突破', () => {
       g.players.B.areas.defense.push({ id: `d${g.players.B.areas.defense.length}`, value: 3, kind: 'defense' });
     }
     const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
-    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
+    const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDef } });
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
     applyAction(g, { t: 'attack', dieId: 'a1' });
     expect(g.pendingAttack!.unblockable).toBe(true);
@@ -139,6 +141,24 @@ describe('中央突破', () => {
     const lifeBefore = g.players.B.life;
     applyAction(g, { t: 'block', dieId: def?.id });
     expect(g.players.B.life).toBe(lifeBefore - 5);
+  });
+
+  it('中央突破 consumes the SPECIFIC meditation dice chosen', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
+    g.players.A.areas.meditation = [
+      { id: 'm1', value: 2, kind: 'meditation' },
+      { id: 'm2', value: 5, kind: 'meditation' },
+      { id: 'm3', value: 5, kind: 'meditation' },
+      { id: 'm4', value: 2, kind: 'meditation' },
+    ];
+    g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }];
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: ['m2', 'm3'], opponentDefenseDieIds: ['bd1'] } });
+    // m2, m3 consumed; m1, m4 remain
+    expect(g.players.A.areas.meditation.map((d) => d.id).sort()).toEqual(['m1', 'm4']);
+    expect(g.players.B.areas.defense.length).toBe(0);
+    expect(g.unblockableThisTurn).toBe(false); // only 2 consumed
   });
 
   it('virtualAttack is not physical', () => {
