@@ -4,8 +4,8 @@ import { refillPhase, rerollPhase, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { doAttack, resolveBlock } from './combat';
-import { SKILL_HANDLERS, skillActive } from './skills';
+import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage } from './combat';
+import { SKILL_HANDLERS, skillActive, consumeDice } from './skills';
 import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
 
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
@@ -128,6 +128,26 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
 export function getLegalActions(g: GameState): Action[] {
   if (g.phase === 'gameOver') return [];
 
+  if (g.pending) {
+    if (g.pending.kind === 'caiyuliu') {
+      return [
+        { t: 'caiyuliu', to: null },
+        { t: 'caiyuliu', to: 'defense' },
+        { t: 'caiyuliu', to: 'meditation' },
+      ];
+    }
+    const pp = g.players[g.pending.player];
+    const acts: Action[] = [{ t: 'fengmang', accept: false }];
+    if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
+      for (const a of pp.areas.attack) {
+        for (const m of pp.areas.meditation) {
+          acts.push({ t: 'fengmang', accept: true, attackDieId: a.id, meditationDieId: m.id });
+        }
+      }
+    }
+    return acts;
+  }
+
   if (g.pendingAttack) {
     const defender: PlayerId = g.pendingAttack.attacker === 'A' ? 'B' : 'A';
     const acts: Action[] = [{ t: 'block' }];
@@ -176,6 +196,9 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang') {
+    throw new Error('resolve pending decision first');
+  }
   switch (action.t) {
     case 'advance':
       advancePhase(g);
@@ -229,6 +252,31 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (!g.pendingAttack) throw new Error('no pending attack');
       resolveBlock(g, action.dieId);
       break;
+    case 'caiyuliu': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'caiyuliu') throw new Error('no caiyuliu pending');
+      if (action.to) {
+        g.players[pd.player].areas[action.to].push({ id: pd.dieId, value: pd.value, kind: action.to });
+        g.caiyuliuUsed += 1;
+      }
+      g.pending = null;
+      break;
+    }
+    case 'fengmang': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'fengmang') throw new Error('no fengmang pending');
+      if (action.accept) {
+        if (!action.attackDieId || !action.meditationDieId) throw new Error('missing dice');
+        const p = g.players[pd.player];
+        consumeDice(p, 'attack', [action.attackDieId]);
+        consumeDice(p, 'meditation', [action.meditationDieId]);
+        g.players[pd.defenderId].life -= pd.value;
+        checkLifeEnd(g);
+        if ((g.phase as string) !== 'gameOver') dealTrueDamage(g, pd.defenderId, 2);
+      }
+      g.pending = null;
+      break;
+    }
     case 'skill': {
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');

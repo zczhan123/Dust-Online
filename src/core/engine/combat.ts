@@ -66,15 +66,30 @@ export function resolveBlock(g: GameState, blockDieId?: string): void {
   if (!pa) throw new Error('no pending attack');
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   const defender = g.players[defenderId];
+  let blocked = false;
   if (!pa.unblockable && blockDieId) {
     const die = defender.areas.defense.find((d) => d.id === blockDieId);
     if (!die) throw new Error(`not a defense die: ${blockDieId}`);
     removeDie(g, defenderId, blockDieId);
+    blocked = true;
   } else {
     defender.life -= pa.value;
     checkLifeEnd(g);
   }
   g.pendingAttack = null;
+  if (g.phase === 'gameOver') return;
+
+  if (blocked) {
+    // 锋芒·触发：你的攻击被防御骰抵挡后
+    if (hasActiveSkill(g.players[pa.attacker], 'buxiang.fengmang.trigger')) {
+      g.pending = { kind: 'fengmang', player: pa.attacker, defenderId, value: pa.value };
+    }
+  } else if (pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined) {
+    // 裁雨流：当你使用攻击骰造成伤害后
+    if (hasActiveSkill(g.players[pa.attacker], 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
+      g.pending = { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue };
+    }
+  }
 }
 
 /** 真实伤害：不可被防御骰抵挡，直接扣血 */

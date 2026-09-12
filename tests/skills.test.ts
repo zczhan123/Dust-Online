@@ -172,3 +172,60 @@ describe('影袭', () => {
     expect(g.players.B.areas.meditation.some((d) => d.id === 'v2' && d.value === 4)).toBe(true);
   });
 });
+
+describe('裁雨流 / 锋芒触发', () => {
+  it('裁雨流 offers to move the physical attack die after damage; accepting places it', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
+    g.players.A.areas.attack.push({ id: 'atk1', value: 5, kind: 'attack' });
+    applyAction(g, { t: 'attack', dieId: 'atk1' });
+    applyAction(g, { t: 'block' }); // B does not block
+    expect(g.pending).toMatchObject({ kind: 'caiyuliu', player: 'A', dieId: 'atk1', value: 5 });
+    applyAction(g, { t: 'caiyuliu', to: 'defense' });
+    expect(g.players.A.areas.defense.some((d) => d.id === 'atk1' && d.value === 5)).toBe(true);
+    expect(g.caiyuliuUsed).toBe(1);
+  });
+
+  it('裁雨流 does not trigger for a virtual (skill) attack', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '005', '003'] });
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
+    g.players.A.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
+    g.players.A.areas.attack.push({ id: 'v1', value: 6, kind: 'attack' });
+    applyAction(g, { t: 'skill', artifactId: '005', side: 'left', params: { dieId: 'v1', x: 2 } });
+    expect(g.pendingAttack).toMatchObject({ physical: false });
+    applyAction(g, { t: 'block' }); // virtual attack deals damage
+    expect(g.pending).toBeNull();
+  });
+
+  it('锋芒·触发: after a block, the attacker may pay to cancel and deal +2 true damage', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
+    g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
+    g.players.A.areas.attack.push({ id: 'a2', value: 3, kind: 'attack' });
+    g.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
+    g.players.B.areas.defense.push({ id: 'd1', value: 3, kind: 'defense' });
+    applyAction(g, { t: 'attack', dieId: 'a1' });
+    applyAction(g, { t: 'block', dieId: 'd1' });
+    expect(g.pending).toMatchObject({ kind: 'fengmang', player: 'A', defenderId: 'B', value: 5 });
+    const lifeBefore = g.players.B.life;
+    applyAction(g, { t: 'fengmang', accept: true, attackDieId: 'a2', meditationDieId: 'mm' });
+    expect(g.players.B.life).toBe(lifeBefore - 5 - 2);
+  });
+
+  it('锋芒·触发: declining changes nothing', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
+    g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
+    g.players.B.areas.defense.push({ id: 'd1', value: 3, kind: 'defense' });
+    applyAction(g, { t: 'attack', dieId: 'a1' });
+    applyAction(g, { t: 'block', dieId: 'd1' });
+    const lifeBefore = g.players.B.life;
+    applyAction(g, { t: 'fengmang', accept: false });
+    expect(g.players.B.life).toBe(lifeBefore);
+    expect(g.pending).toBeNull();
+  });
+});
