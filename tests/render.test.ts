@@ -35,6 +35,16 @@ describe('renderGame (read-only snapshot)', () => {
     expect(selfAreas[2].dataset.kind).toBe('meditation');
   });
 
+  it('puts self dice areas above the life header', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
+    const self = root.querySelector('.player--self')!;
+    expect(self.firstElementChild!.classList.contains('areas')).toBe(true);
+    const header = self.querySelector('.player-header')!;
+    // header 必须排在 areas 之后
+    const order = Array.from(self.children);
+    expect(order.indexOf(self.querySelector('.areas')!)).toBeLessThan(order.indexOf(header));
+  });
+
   it('renders dice in three areas per player', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
     expect(root.querySelectorAll('.area').length).toBe(6);
@@ -50,8 +60,25 @@ describe('renderGame (read-only snapshot)', () => {
     ]) {
       expect(text).toContain(s);
     }
-    // 每个玩家 3 张卡的技能都能看到 -> 至少 6 张卡
     expect(root.querySelectorAll('.card').length).toBe(6);
+  });
+
+  it('shows dust seal on the second player', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
+    // 后手 B 显示在敌人位（自己=A）
+    expect(root.querySelectorAll('.player--enemy .badge-seal').length).toBe(1);
+    expect(root.querySelectorAll('.player--self .badge-seal').length).toBe(0);
+    expect(root.querySelector('.badge-seal')?.textContent).toContain('尘印');
+  });
+
+  it('marks the activated skill side differently from the inactive one', () => {
+    const state = setupGame({ seed: 1, firstPlayer: 'A' });
+    const yuqie = state.players.A.artifacts.find((a) => a.id === '001')!;
+    yuqie.activeMarkerSide = 'left';
+    renderGame(state, root);
+    const card = root.querySelector('.player--self .card[data-artifact="001"]')!;
+    expect(card.querySelectorAll('.skill--on').length).toBe(1);
+    expect(card.querySelectorAll('.skill--off').length).toBe(1);
   });
 
   it('shows a dustfall counter and a roll/supply zone in the center', () => {

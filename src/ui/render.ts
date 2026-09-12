@@ -26,59 +26,58 @@ function artifactCard(a: Artifact): HTMLElement {
   const card = el('div', 'card');
   card.dataset.artifact = a.id;
 
-  const art = el('div', 'card-art');
-  art.textContent = '（卡图占位）';
-  card.appendChild(art);
-
-  const name = el('div', 'card-name');
+  const head = el('div', 'card-head');
+  const name = el('span', 'card-name');
   name.textContent = a.name;
-  card.appendChild(name);
+  head.appendChild(name);
 
-  const stats = el('div', 'card-stats');
-  const parts: string[] = [`第${a.column}列`];
-  if (a.speed !== undefined) parts.push(`速度 ${a.speed}`);
-  if (a.will !== undefined) parts.push(`意志 ${a.will}`);
-  if (a.life !== undefined) parts.push(`生命 ${a.life}`);
-  if (a.chargeReq !== undefined) parts.push(`充能需求 ${a.chargeReq}`);
+  const subs: string[] = [`第${a.column}列`];
+  if (a.speed !== undefined) subs.push(`速度 ${a.speed}`);
+  if (a.will !== undefined) subs.push(`意志 ${a.will}`);
+  if (a.life !== undefined) subs.push(`生命 ${a.life}`);
+  if (a.chargeReq !== undefined) subs.push(`充能需求 ${a.chargeReq}`);
   if (a.distribution) {
-    parts.push(
-      `分布 防${a.distribution.defense.join('/')} 攻${a.distribution.attack.join('/')} 冥${a.distribution.meditation.join('/')}`,
-    );
+    subs.push(`分布 防${a.distribution.defense.join('/')} 攻${a.distribution.attack.join('/')} 冥${a.distribution.meditation.join('/')}`);
   }
-  stats.textContent = parts.join('　');
-  card.appendChild(stats);
+  const sub = el('span', 'card-sub');
+  sub.textContent = subs.join('　');
+  head.appendChild(sub);
 
-  const badges = el('div', 'card-badges');
   if (a.activeMarkerSide) {
     const act = el('span', 'badge badge-active');
-    act.textContent = `已激活 · ${a.activeMarkerSide === 'left' ? '左' : '右'}侧`;
-    badges.appendChild(act);
+    act.textContent = `已激活·${a.activeMarkerSide === 'left' ? '左' : '右'}侧`;
+    head.appendChild(act);
   }
   if (a.chargeReq !== undefined) {
     const charge = el('span', 'badge badge-charge');
     charge.textContent = `充能 ${a.chargeLayer}/${a.chargeReq}`;
-    badges.appendChild(charge);
+    head.appendChild(charge);
   }
   if (a.count > 0) {
     const count = el('span', 'badge badge-count');
     count.textContent = `计数 ${a.count}`;
-    badges.appendChild(count);
+    head.appendChild(count);
   }
-  if (badges.childElementCount > 0) card.appendChild(badges);
+  card.appendChild(head);
+
+  const art = el('div', 'card-art');
+  art.textContent = '（卡图占位）';
+  card.appendChild(art);
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
     const skills = el('div', 'skills');
     for (const s of text.skills) {
-      const box = el('div', `skill skill--${s.side}`);
-      const head = el('div', 'skill-head');
+      const isActive = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
+      const box = el('div', `skill ${isActive ? 'skill--on' : 'skill--off'}`);
+      const sHead = el('div', 'skill-head');
       const badge = el('span', 'skill-type');
       badge.textContent = s.type;
       const sname = el('span', 'skill-name');
       sname.textContent = s.name;
-      head.appendChild(badge);
-      head.appendChild(sname);
-      box.appendChild(head);
+      sHead.appendChild(badge);
+      sHead.appendChild(sname);
+      box.appendChild(sHead);
       const body = el('div', 'skill-text');
       body.textContent = s.text;
       box.appendChild(body);
@@ -115,17 +114,28 @@ function playerPanel(player: PlayerState, role: 'enemy' | 'self', mirrored: bool
   panel.dataset.player = player.id;
 
   const header = el('div', 'player-header');
-  header.textContent = `${role === 'enemy' ? '敌人' : '自己'}（${player.id}）　生命 ${player.life}/${player.lifeMax}`;
-  panel.appendChild(header);
+  const title = el('span', 'player-title');
+  title.textContent = `${role === 'enemy' ? '敌人' : '自己'}（${player.id}）`;
+  header.appendChild(title);
+  const life = el('span', 'player-life');
+  life.textContent = `生命 ${player.life}/${player.lifeMax}`;
+  header.appendChild(life);
+  if (player.hasDustSeal) {
+    const seal = el('span', 'badge badge-seal');
+    seal.textContent = '尘印标记';
+    header.appendChild(seal);
+  }
 
   const cards = el('div', 'cards');
   for (const a of player.artifacts) cards.appendChild(artifactCard(a));
-  panel.appendChild(cards);
 
   const areas = el('div', 'areas');
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
   for (const k of order) areas.appendChild(areaBox(k, player));
-  panel.appendChild(areas);
+
+  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上（骰区在生命值之上）
+  const seq: HTMLElement[] = role === 'enemy' ? [header, cards, areas] : [areas, cards, header];
+  for (const node of seq) panel.appendChild(node);
 
   return panel;
 }
@@ -134,7 +144,7 @@ function centerBar(state: GameState): HTMLElement {
   const center = el('div', 'center');
 
   const dustfall = el('div', 'dustfall');
-  dustfall.textContent = `尘落　${state.dustfall} / 10`;
+  dustfall.textContent = `尘落 ${state.dustfall} / 10`;
   center.appendChild(dustfall);
 
   const rollzone = el('div', 'rollzone');
