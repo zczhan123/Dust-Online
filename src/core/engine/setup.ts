@@ -63,5 +63,9 @@ export function setupGame(opts: SetupOptions): GameState {
     firstRound: { A: true, B: true },
     rngState: rng.state(),
     log: [],
+    pendingAttack: null,
+    dustRiseDecided: false,
+    rerollDone: false,
+    winner: null,
   };
 }

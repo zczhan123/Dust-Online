@@ -30,6 +30,10 @@ describe('model types', () => {
       firstRound: { A: true, B: true },
       rngState: 12345,
       log: [],
+      pendingAttack: null,
+      dustRiseDecided: false,
+      rerollDone: false,
+      winner: null,
     };
     expect(g.players.A.life).toBe(50);
   });

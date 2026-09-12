@@ -16,6 +16,12 @@ export interface Die {
   kind: DiceKind;
 }
 
+export interface PendingAttack {
+  attacker: PlayerId;
+  value: number;
+  unblockable: boolean;
+}
+
 export interface Distribution {
   defense: number[];
   attack: number[];
@@ -68,4 +74,8 @@ export interface GameState {
   firstRound: Record<PlayerId, boolean>;
   rngState: number;
   log: LogEntry[];
+  pendingAttack: PendingAttack | null;
+  dustRiseDecided: boolean;
+  rerollDone: boolean;
+  winner: PlayerId | null;
 }
