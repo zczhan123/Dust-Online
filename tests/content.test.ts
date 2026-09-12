@@ -32,4 +32,10 @@ describe('artifact content', () => {
     a.count = 2;
     expect(makeArtifact('001').count).toBe(0);
   });
+
+  it('assigns skill keys to 雨切', () => {
+    const keys = ARTIFACTS['001'].skills.map((s) => s.key);
+    expect(keys).toContain('yuqie.breakthrough');
+    expect(keys).toContain('yuqie.caiyuliu');
+  });
 });

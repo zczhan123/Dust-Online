@@ -41,6 +41,12 @@ export interface Buff {
   duration: 'thisTurn' | 'permanent';
 }
 
+export interface SkillDef {
+  side: 'left' | 'right' | 'only';
+  kind: 'activate' | 'continuous' | 'charge' | 'ultimate' | 'trigger';
+  key: string;
+}
+
 export interface Artifact {
   id: string;      // '001'
   name: string;    // '雨切'
@@ -53,6 +59,7 @@ export interface Artifact {
   activeMarkerSide: 'left' | 'right' | null;
   count: number;
   chargeLayer: number;
+  skills: SkillDef[];
 }
 
 export interface PlayerState {
