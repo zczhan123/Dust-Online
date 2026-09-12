@@ -41,6 +41,17 @@ describe('combat', () => {
     expect(g.players.B.life).toBe(before - value);
   });
 
+  it('logs a readable damage line', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A' });
+    const atk = g.players.A.areas.attack[0];
+    doAttack(g, 'A', atk.id);
+    resolveBlock(g);
+    const text = g.log.map((l) => l.text).join('\n');
+    expect(text).toContain('玩家A 使用');
+    expect(text).toContain('玩家B 未抵挡');
+    expect(text).toContain('生命');
+  });
+
   it('true damage ignores defense dice', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const before = g.players.B.life;

@@ -6,6 +6,7 @@ import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage } from './combat';
 import { SKILL_HANDLERS, skillActive, consumeDice } from './skills';
+import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
 
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
@@ -16,6 +17,7 @@ function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
 
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
+  logLine(g, `${pname(g.activePlayer)} 的回合开始`);
   g.pendingAttack = null;
   g.pending = null;
   g.unblockableThisTurn = false;
@@ -51,12 +53,21 @@ export function advancePhase(g: GameState): void {
       g.phase = 'dustRise';
       break;
     case 'dustRise':
-      if (!g.dustRiseActed) incrementDustfall(g);
-      if ((g.phase as string) === 'gameOver') break;
+      if (!g.dustRiseActed) {
+        const before = g.dustfall;
+        const player = g.activePlayer;
+        incrementDustfall(g);
+        logLine(g, `${pname(player)} 未进行尘起行动，尘落 ${before} → ${g.dustfall}`);
+        if ((g.phase as string) === 'gameOver') {
+          logLine(g, `尘落达到 10，游戏结束：${pname(g.winner ?? g.activePlayer)} 获胜`);
+          break;
+        }
+      }
       g.phase = 'main';
       break;
     case 'main':
       endPhase(g, g.activePlayer);
+      logLine(g, `${pname(g.activePlayer)} 回合结束`);
       endTurn(g);
       break;
     default:
@@ -238,9 +249,6 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (action.useSeal) {
         if (!p.hasDustSeal) throw new Error('no dust seal');
         p.hasDustSeal = false;
-        applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
-        runChargeSkill(g, g.activePlayer, action.artifactId);
-        g.dustRiseActed = true;
       } else {
         if (g.freeDustRise > 0) {
           g.freeDustRise -= 1;
@@ -252,10 +260,14 @@ export function applyAction(g: GameState, action: Action): GameState {
         const med = p.areas.meditation[0];
         if (!med) throw new Error('no meditation die');
         p.areas.meditation = p.areas.meditation.filter((d) => d.id !== med.id);
-        applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
-        runChargeSkill(g, g.activePlayer, action.artifactId);
-        g.dustRiseActed = true;
       }
+      const desc = applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
+      logLine(
+        g,
+        `${pname(g.activePlayer)} 尘起：${desc}${action.useSeal ? '（消耗尘印标记）' : ''}`,
+      );
+      runChargeSkill(g, g.activePlayer, action.artifactId);
+      g.dustRiseActed = true;
       break;
     }
     case 'attack':
@@ -273,6 +285,14 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (action.to) {
         g.players[pd.player].areas[action.to].push({ id: pd.dieId, value: pd.value, kind: action.to });
         g.caiyuliuUsed += 1;
+        logLine(
+          g,
+          `${pname(pd.player)} 发动「裁雨流」：将 ${pd.value} 点骰移到${
+            action.to === 'defense' ? '防御' : '冥想'
+          }骰区`,
+        );
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃裁雨流`);
       }
       g.pending = null;
       break;
@@ -283,11 +303,19 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (action.accept) {
         if (!action.attackDieId || !action.meditationDieId) throw new Error('missing dice');
         const p = g.players[pd.player];
+        const av = p.areas.attack.find((d) => d.id === action.attackDieId)?.value ?? 0;
+        const mv = p.areas.meditation.find((d) => d.id === action.meditationDieId)?.value ?? 0;
         consumeDice(p, 'attack', [action.attackDieId]);
         consumeDice(p, 'meditation', [action.meditationDieId]);
         g.players[pd.defenderId].life -= pd.value;
+        logLine(
+          g,
+          `${pname(pd.player)} 发动「锋芒」：消耗 1 颗攻击骰（${av}点）与 1 颗冥想骰（${mv}点），取消抵挡并追加 2 点真实伤害`,
+        );
         checkLifeEnd(g);
         if ((g.phase as string) !== 'gameOver') dealTrueDamage(g, pd.defenderId, 2);
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃锋芒`);
       }
       g.pending = null;
       break;

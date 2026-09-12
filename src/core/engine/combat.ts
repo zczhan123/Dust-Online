@@ -1,5 +1,6 @@
 import type { GameState, PlayerId } from '../model/types';
 import { hasActiveSkill } from './skill-state';
+import { logLine, pname } from './log';
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
   const p = g.players[player];
@@ -22,15 +23,18 @@ export function checkLifeEnd(g: GameState): void {
   if (g.phase === 'gameOver') return;
   const a = g.players.A.life;
   const b = g.players.B.life;
+  let winner: PlayerId | null = null;
   if (a <= 0 && b <= 0) {
-    g.phase = 'gameOver';
-    g.winner = g.activePlayer;
+    winner = g.activePlayer;
   } else if (a <= 0) {
-    g.phase = 'gameOver';
-    g.winner = 'B';
+    winner = 'B';
   } else if (b <= 0) {
+    winner = 'A';
+  }
+  if (winner) {
     g.phase = 'gameOver';
-    g.winner = 'A';
+    g.winner = winner;
+    logLine(g, `游戏结束：${pname(winner)} 获胜`);
   }
 }
 
@@ -40,14 +44,18 @@ export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
   const die = g.players[player].areas.attack.find((d) => d.id === dieId);
   if (!die) throw new Error(`not an attack die: ${dieId}`);
   removeDie(g, player, dieId);
+  const buff = attackDamageBuff(g, player);
   g.pendingAttack = {
     attacker: player,
-    value: die.value + attackDamageBuff(g, player),
+    value: die.value + buff,
     unblockable: g.unblockableThisTurn,
     physical: true,
     sourceDieId: dieId,
     sourceValue: die.value,
   };
+  const defender: PlayerId = player === 'A' ? 'B' : 'A';
+  const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${die.value + buff} 点）` : '';
+  logLine(g, `${pname(player)} 使用 ${die.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
 }
 
 /** 技能发起的“虚拟”攻击（非实体攻击骰） */
@@ -72,8 +80,11 @@ export function resolveBlock(g: GameState, blockDieId?: string): void {
     if (!die) throw new Error(`not a defense die: ${blockDieId}`);
     removeDie(g, defenderId, blockDieId);
     blocked = true;
+    logLine(g, `${pname(defenderId)} 用 ${die.value} 点防御骰抵挡了攻击`);
   } else {
+    const before = defender.life;
     defender.life -= pa.value;
+    logLine(g, `${pname(defenderId)} 未抵挡，受到 ${pa.value} 点伤害（生命 ${before} → ${defender.life}）`);
     checkLifeEnd(g);
   }
   g.pendingAttack = null;
@@ -94,6 +105,8 @@ export function resolveBlock(g: GameState, blockDieId?: string): void {
 
 /** 真实伤害：不可被防御骰抵挡，直接扣血 */
 export function dealTrueDamage(g: GameState, target: PlayerId, amount: number): void {
+  const before = g.players[target].life;
   g.players[target].life -= amount;
+  logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${g.players[target].life}）`);
   checkLifeEnd(g);
 }

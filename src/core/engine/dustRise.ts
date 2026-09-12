@@ -10,26 +10,37 @@ export function canTargetForDustRise(a: Artifact): boolean {
  * 尘起行动对神器的状态变更（不含代价与回合限制，那些由动作层处理）。
  * - 第一/二列：无标记→激活到指定侧；有标记→切换到另一侧。
  * - 第三列：充能层数 +1；达到需求即激活（唯一槽记为 left）。
+ * 返回一段可读的中文描述，供战报日志使用。
  */
 export function applyDustRiseToArtifact(
   g: GameState,
   player: PlayerId,
   artifactId: string,
   side?: 'left' | 'right',
-): void {
+): string {
   const a = g.players[player].artifacts.find((x) => x.id === artifactId);
   if (!a) throw new Error(`no artifact: ${artifactId}`);
   if (!canTargetForDustRise(a)) throw new Error(`artifact ${artifactId} cannot be dust-risen`);
 
+  const sideLabel = (s: 'left' | 'right'): string => (s === 'left' ? '左' : '右');
+
   if (a.column === 3) {
     a.chargeLayer += 1;
-    if (a.chargeLayer >= (a.chargeReq ?? 0)) a.activeMarkerSide = 'left';
-    return;
+    const req = a.chargeReq ?? 0;
+    let desc = `为「${a.name}」充能（${a.chargeLayer}/${req}）`;
+    if (a.chargeLayer >= req) {
+      a.activeMarkerSide = 'left';
+      desc += '，完成充能并激活';
+    }
+    return desc;
   }
 
   if (a.activeMarkerSide == null) {
-    a.activeMarkerSide = side ?? 'left';
-  } else {
-    a.activeMarkerSide = a.activeMarkerSide === 'left' ? 'right' : 'left';
+    const chosen = side ?? 'left';
+    a.activeMarkerSide = chosen;
+    return `激活「${a.name}」的${sideLabel(chosen)}侧`;
   }
+
+  a.activeMarkerSide = a.activeMarkerSide === 'left' ? 'right' : 'left';
+  return `将「${a.name}」切换到${sideLabel(a.activeMarkerSide)}侧`;
 }

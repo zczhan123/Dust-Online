@@ -669,7 +669,7 @@ function confirmSelection(ctx: Ctx): void {
 
 function logPanel(ctx: Ctx): HTMLElement {
   const box = el('div', 'log');
-  const recent = ctx.state.log.slice(-12);
+  const recent = ctx.state.log.slice(-20);
   if (recent.length === 0) {
     box.textContent = '（暂无记录）';
   } else {
