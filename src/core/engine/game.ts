@@ -152,6 +152,16 @@ export function getLegalActions(g: GameState): Action[] {
   }
 }
 
+/** 对第三列神器执行充能后，触发其「充能」技能效果（无论是否完成充能） */
+function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): void {
+  const a = g.players[player].artifacts.find((x) => x.id === artifactId);
+  if (!a || a.column !== 3) return;
+  const cs = a.skills.find((s) => s.kind === 'charge');
+  if (cs && SKILL_HANDLERS[cs.key]) {
+    withRng(g, (rng) => SKILL_HANDLERS[cs.key].run({ g, player, artifact: a, rng, params: {} }));
+  }
+}
+
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
   switch (action.t) {
@@ -179,6 +189,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         if (!p.hasDustSeal) throw new Error('no dust seal');
         p.hasDustSeal = false;
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
+        runChargeSkill(g, g.activePlayer, action.artifactId);
         g.dustRiseActed = true;
       } else {
         if (g.freeDustRise > 0) {
@@ -192,13 +203,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         if (!med) throw new Error('no meditation die');
         p.areas.meditation = p.areas.meditation.filter((d) => d.id !== med.id);
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
-        const a = p.artifacts.find((x) => x.id === action.artifactId)!;
-        if (a.column === 3) {
-          const cs = a.skills.find((s) => s.kind === 'charge');
-          if (cs && SKILL_HANDLERS[cs.key]) {
-            withRng(g, (rng) => SKILL_HANDLERS[cs.key].run({ g, player: g.activePlayer, artifact: a, rng, params: {} }));
-          }
-        }
+        runChargeSkill(g, g.activePlayer, action.artifactId);
         g.dustRiseActed = true;
       }
       break;

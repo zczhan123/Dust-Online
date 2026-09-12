@@ -90,4 +90,13 @@ describe('charge effects', () => {
     expect(g.players.B.areas.attack.length).toBe(before + 1);
     expect(g.players.B.areas.attack[g.players.B.areas.attack.length - 1]!.value).toBe(1);
   });
+
+  it('charging a col3 artifact via dust seal also triggers its charge effect', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' });
+    g.players.B.hasDustSeal = true;
+    const before = g.players.B.areas.attack.length;
+    applyAction(g, { t: 'dustRise', artifactId: '006', useSeal: true });
+    expect(g.players.B.artifacts.find((a) => a.id === '006')!.chargeLayer).toBe(1);
+    expect(g.players.B.areas.attack.length).toBe(before + 1);
+  });
 });
