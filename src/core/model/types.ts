@@ -21,7 +21,8 @@ export type Action =
   | { t: 'reroll'; dieIds: string[] }
   | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean }
   | { t: 'attack'; dieId: string }
-  | { t: 'block'; dieId?: string };
+  | { t: 'block'; dieId?: string }
+  | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
   attacker: PlayerId;
@@ -92,5 +93,6 @@ export interface GameState {
   dustRiseNormalUsed: boolean;
   dustRiseActed: boolean;
   rerollUsed: number;
+  skillsUsedThisTurn: string[];
   winner: PlayerId | null;
 }

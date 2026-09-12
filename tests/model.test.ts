@@ -34,6 +34,7 @@ describe('model types', () => {
       dustRiseNormalUsed: false,
       dustRiseActed: false,
       rerollUsed: 0,
+      skillsUsedThisTurn: [],
       winner: null,
     };
     expect(g.players.A.life).toBe(50);

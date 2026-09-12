@@ -5,7 +5,8 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock } from './combat';
-import type { Action, GameState, PlayerId } from '../model/types';
+import { SKILL_HANDLERS, skillActive } from './skills';
+import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
 
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
   const rng = new SeededRng(g.rngState);
@@ -19,6 +20,7 @@ export function beginTurn(g: GameState): void {
   g.dustRiseNormalUsed = false;
   g.dustRiseActed = false;
   g.rerollUsed = 0;
+  g.skillsUsedThisTurn = [];
   const p = g.activePlayer;
   if (g.firstRound[p]) {
     g.phase = 'dustRise'; // 第一回合跳过补充与重掷
@@ -92,6 +94,24 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   return acts;
 }
 
+function activateSkillActions(g: GameState, p: PlayerState): Action[] {
+  const acts: Action[] = [];
+  for (const a of p.artifacts) {
+    for (const s of a.skills) {
+      if (s.kind !== 'activate' || !skillActive(a, s)) continue;
+      if (g.skillsUsedThisTurn.includes(s.key)) continue;
+      if (s.key === 'buxiang.cuilian') {
+        for (const d of p.areas.attack) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: d.id } });
+      } else if (s.key === 'youlong.tengwan') {
+        if (p.areas.meditation.length >= 3) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) } });
+      } else if (s.key === 'yingle.qianxing') {
+        if (p.areas.attack.length >= 2) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 2).map((d) => d.id) } });
+      }
+    }
+  }
+  return acts;
+}
+
 export function getLegalActions(g: GameState): Action[] {
   if (g.phase === 'gameOver') return [];
 
@@ -123,6 +143,7 @@ export function getLegalActions(g: GameState): Action[] {
     case 'main': {
       const acts: Action[] = [{ t: 'advance' }];
       for (const d of p.areas.attack) acts.push({ t: 'attack', dieId: d.id });
+      acts.push(...activateSkillActions(g, p));
       return acts;
     }
     default:
@@ -178,6 +199,22 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (!g.pendingAttack) throw new Error('no pending attack');
       resolveBlock(g, action.dieId);
       break;
+    case 'skill': {
+      if (g.phase !== 'main') throw new Error('not main phase');
+      if (g.pendingAttack) throw new Error('pending attack unresolved');
+      const p = g.players[g.activePlayer];
+      const a = p.artifacts.find((x) => x.id === action.artifactId);
+      if (!a) throw new Error(`no artifact: ${action.artifactId}`);
+      const s = a.skills.find((x) => x.side === action.side && x.kind === 'activate');
+      if (!s) throw new Error('no activate skill on that side');
+      if (!skillActive(a, s)) throw new Error('skill not active');
+      if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
+      const handler = SKILL_HANDLERS[s.key];
+      if (!handler) throw new Error(`no handler for skill: ${s.key}`);
+      withRng(g, (rng) => handler.run({ g, player: g.activePlayer, artifact: a, rng, params: action.params ?? {} }));
+      g.skillsUsedThisTurn.push(s.key);
+      break;
+    }
   }
   return g;
 }
