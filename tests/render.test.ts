@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
-import { createGame, applyAction, getLegalActions } from '../src/core/engine/game';
-import { renderGame } from '../src/ui/render';
+import { createGame, applyAction } from '../src/core/engine/game';
+import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
+import type { Action } from '../src/core/model/types';
 
-const noop = { onAction: () => {} };
+const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null });
+
+const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => ({
+  onAction,
+  ui: freshUi(),
+  requestRender: () => {},
+});
 
 describe('renderGame (read-only snapshot)', () => {
   let root: HTMLElement;
@@ -13,7 +20,7 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('renders all six artifact names', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const text = root.textContent ?? '';
     for (const name of ['雨切', '游龙', '明镜', '不祥', '影掠', '完杀']) {
       expect(text).toContain(name);
@@ -21,7 +28,7 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('stacks enemy above self', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const panels = root.querySelectorAll('.player');
     expect(panels.length).toBe(2);
     expect(panels[0].classList.contains('player--enemy')).toBe(true);
@@ -29,7 +36,7 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('mirrors the enemy area order (attack <-> meditation)', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const enemyAreas = root.querySelectorAll<HTMLElement>('.player--enemy .area');
     const selfAreas = root.querySelectorAll<HTMLElement>('.player--self .area');
     expect(enemyAreas[0].dataset.kind).toBe('meditation');
@@ -39,7 +46,7 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('puts self dice areas above the life header', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const self = root.querySelector('.player--self')!;
     expect(self.firstElementChild!.classList.contains('areas')).toBe(true);
     const header = self.querySelector('.player-header')!;
@@ -49,13 +56,13 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('renders dice in three areas per player', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     expect(root.querySelectorAll('.area').length).toBe(6);
     expect(root.querySelectorAll('.die').length).toBe(15); // A will 7 + B will 8
   });
 
   it('shows skill text so skills can be read/switched', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const text = root.textContent ?? '';
     for (const s of [
       '中央突破', '裁雨流', '龙游万象', '龙腾万丈', '斩神切',
@@ -67,7 +74,7 @@ describe('renderGame (read-only snapshot)', () => {
   });
 
   it('shows dust seal on the second player', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     // 后手 B 显示在敌人位（自己=A）
     expect(root.querySelectorAll('.player--enemy .badge-seal').length).toBe(1);
     expect(root.querySelectorAll('.player--self .badge-seal').length).toBe(0);
@@ -78,14 +85,14 @@ describe('renderGame (read-only snapshot)', () => {
     const state = setupGame({ seed: 1, firstPlayer: 'A' });
     const yuqie = state.players.A.artifacts.find((a) => a.id === '001')!;
     yuqie.activeMarkerSide = 'left';
-    renderGame(state, root, noop);
+    renderGame(state, root, hooksFor());
     const card = root.querySelector('.player--self .card[data-artifact="001"]')!;
     expect(card.querySelectorAll('.skill--on').length).toBe(1);
     expect(card.querySelectorAll('.skill--off').length).toBe(1);
   });
 
   it('shows a dustfall counter and a roll/supply zone in the center', () => {
-    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     expect(root.querySelector('.dustfall')?.textContent).toContain('尘落');
     expect(root.querySelector('.rollzone')).not.toBeNull();
   });
@@ -94,7 +101,7 @@ describe('renderGame (read-only snapshot)', () => {
     const state = setupGame({ seed: 1, firstPlayer: 'A' });
     state.players.B.artifacts.find((a) => a.id === '004')!.count = 2; // 不祥
     state.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer = 2; // 明镜
-    renderGame(state, root, noop);
+    renderGame(state, root, hooksFor());
     const text = root.textContent ?? '';
     expect(text).toContain('计数 2');
     expect(text).toContain('充能 2/4');
@@ -109,8 +116,20 @@ describe('renderGame (interaction)', () => {
   });
 
   it('shows status text including the phase', () => {
-    renderGame(createGame({ seed: 1, firstPlayer: 'A' }), root, noop);
+    renderGame(createGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     expect(root.querySelector('.status')?.textContent).toContain('阶段');
+  });
+
+  it('renders a non-empty phase hint', () => {
+    renderGame(createGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    expect((root.querySelector('.hint')?.textContent ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('renders an operation list with buttons in the main phase', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    renderGame(state, root, hooksFor());
+    expect(root.querySelectorAll('.actionlist .btn').length).toBeGreaterThan(0);
   });
 
   it('clicking a legal attack die dispatches an attack action', () => {
@@ -118,7 +137,7 @@ describe('renderGame (interaction)', () => {
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const die = state.players.A.areas.attack[0];
     const onAction = vi.fn();
-    renderGame(state, root, { onAction });
+    renderGame(state, root, hooksFor(onAction));
 
     const dieEl = root.querySelector<HTMLElement>(
       `.player--self .die[data-id="${die.id}"]`,
@@ -129,28 +148,84 @@ describe('renderGame (interaction)', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'attack', dieId: die.id });
   });
 
-  it('clicking a clickable skill dispatches a skill action', () => {
+  it('clicking a parameterized skill card opens the dice chooser (no default dispatch)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const yuqie = state.players.A.artifacts.find((a) => a.id === '001')!;
     yuqie.activeMarkerSide = 'left';
     state.players.A.areas.meditation.push(
       { id: 'test-m1', value: 2, kind: 'meditation' },
-      { id: 'test-m2', value: 5, kind: 'meditation' },
-      { id: 'test-m3', value: 2, kind: 'meditation' },
     );
-    const skillAction = getLegalActions(state).find(
-      (a) => a.t === 'skill' && a.artifactId === '001' && a.side === 'left',
-    );
-    expect(skillAction).toBeTruthy();
 
+    const ui = freshUi();
     const onAction = vi.fn();
-    renderGame(state, root, { onAction });
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    renderGame(state, root, hooks);
+
     const box = root.querySelector<HTMLElement>(
       '.player--self .card[data-artifact="001"] .skill.clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
-    expect(onAction).toHaveBeenCalledWith(skillAction);
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(root.querySelector('.selector')).not.toBeNull();
+  });
+
+  it('enters the skill chooser from the operation list', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
+    buxiang.activeMarkerSide = 'left';
+    state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
+
+    const ui = freshUi();
+    const onAction = vi.fn();
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    renderGame(state, root, hooks);
+
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('淬炼'),
+    );
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(ui.selection).not.toBeNull();
+    expect(root.querySelector('.selector')).not.toBeNull();
+  });
+
+  it('completes the chooser and dispatches explicit dice params', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
+    buxiang.activeMarkerSide = 'left';
+    state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
+
+    const ui = freshUi();
+    const onAction = vi.fn();
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    renderGame(state, root, hooks);
+
+    const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('淬炼'),
+    )!;
+    openBtn.click();
+
+    const die = root.querySelector<HTMLElement>('.player--self .die[data-id="atk-test"]');
+    expect(die).not.toBeNull();
+    die!.click();
+
+    const okBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    );
+    expect(okBtn).toBeTruthy();
+    expect(okBtn!.disabled).toBe(false);
+    okBtn!.click();
+
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '004',
+      side: 'left',
+      params: { attackDieId: 'atk-test' },
+    });
   });
 });

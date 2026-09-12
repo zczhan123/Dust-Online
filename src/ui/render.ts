@@ -2,6 +2,7 @@ import type {
   Action,
   Artifact,
   DiceKind,
+  Die,
   GameState,
   Phase,
   PlayerId,
@@ -10,6 +11,7 @@ import type {
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
+import { SKILL_SELECTION, type SelectStep } from './skillSelection';
 
 const AREA_LABEL: Record<DiceKind, string> = {
   attack: '攻击骰区',
@@ -31,18 +33,37 @@ const PHASE_LABEL: Record<Phase, string> = {
   gameOver: '结束',
 };
 
+export interface UiState {
+  rerollSelected: Set<string>;
+  selection: null | {
+    key: string;
+    artifactId: string;
+    side: 'left' | 'right' | 'only';
+    stepIndex: number;
+    chosenDice: string[][];
+    currentSel: Set<string>;
+    numbers: number[];
+  };
+}
+
 export interface RenderHooks {
   onAction: (a: Action) => void;
+  ui: UiState;
+  requestRender: () => void;
 }
+
+type ActiveSelection = NonNullable<UiState['selection']>;
+type DiceStep = Extract<SelectStep, { kind: 'dice' }>;
+
+const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
 
 interface Ctx {
   state: GameState;
   legal: Action[];
   hooks: RenderHooks;
-  selected: Set<string>;
   maxReroll: number;
-  rerollRef: { current: HTMLButtonElement | null };
-  refreshReroll: () => void;
+  selectionStep: SelectStep | null;
+  selectionOwner: PlayerId | null;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -59,6 +80,17 @@ function button(label: string, action: Action, hooks: RenderHooks, cls = ''): HT
   b.textContent = label;
   b.addEventListener('click', () => hooks.onAction(action));
   return b;
+}
+
+function findDie(state: GameState, id: string): Die | undefined {
+  for (const pid of ['A', 'B'] as PlayerId[]) {
+    const p = state.players[pid];
+    for (const k of AREA_ORDER) {
+      const d = p.areas[k].find((x) => x.id === id);
+      if (d) return d;
+    }
+  }
+  return undefined;
 }
 
 function kindFromType(type: string): SkillDef['kind'] | undefined {
@@ -83,7 +115,19 @@ function findSkillKey(a: Artifact, side: SkillDef['side'], type: string): string
   return a.skills.find((s) => s.side === side)?.key;
 }
 
+function skillLabel(
+  a: Artifact | undefined,
+  side: 'left' | 'right' | 'only',
+  kind: SkillDef['kind'] | undefined,
+): string | undefined {
+  if (!a || !kind) return undefined;
+  const text = ARTIFACT_TEXT[a.id];
+  const t = text?.skills.find((s) => s.side === side && kindFromType(s.type) === kind);
+  return t?.name;
+}
+
 type DustRiseAction = Extract<Action, { t: 'dustRise' }>;
+type SkillAction = Extract<Action, { t: 'skill' }>;
 
 function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
   let label: string;
@@ -98,19 +142,31 @@ function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
   return label;
 }
 
-function toggleSelect(die: HTMLElement, id: string, ctx: Ctx): void {
-  if (ctx.selected.has(id)) {
-    ctx.selected.delete(id);
-    die.classList.remove('selected');
-  } else if (ctx.selected.size < ctx.maxReroll) {
-    ctx.selected.add(id);
-    die.classList.add('selected');
-  }
-  ctx.refreshReroll();
-}
-
 function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
   return ctx.state.phase === 'reroll' && player.id === ctx.state.activePlayer && ctx.maxReroll > 0;
+}
+
+function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
+  const spec = SKILL_SELECTION[key];
+  if (spec) {
+    const player = ctx.state.activePlayer;
+    const steps = spec.steps({ state: ctx.state, player, chosenDice: [] });
+    if (steps.length === 0) {
+      const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], numbers: [] });
+      ctx.hooks.onAction({ t: 'skill', artifactId: action.artifactId, side: action.side, params });
+      return;
+    }
+  }
+  ctx.hooks.ui.selection = {
+    key,
+    artifactId: action.artifactId,
+    side: action.side,
+    stepIndex: 0,
+    chosenDice: [],
+    currentSel: new Set<string>(),
+    numbers: [],
+  };
+  ctx.hooks.requestRender();
 }
 
 function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
@@ -180,13 +236,21 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
       box.appendChild(body);
 
       const skillAction = ctx.legal.find(
-        (x) => x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
+        (x): x is SkillAction =>
+          x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
       );
       if (skillAction && isActivatableType(s.type)) {
         box.classList.add('clickable');
         box.dataset.act = 'skill';
         box.title = '点击启动技能';
-        box.addEventListener('click', () => ctx.hooks.onAction(skillAction));
+        const skillKey = key;
+        box.addEventListener('click', () => {
+          if (skillKey && SKILL_SELECTION[skillKey]) {
+            startSkillSelection(ctx, skillAction, skillKey);
+          } else {
+            ctx.hooks.onAction(skillAction);
+          }
+        });
       }
 
       skills.appendChild(box);
@@ -217,29 +281,58 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
   box.appendChild(label);
 
   const dice = el('div', 'dice');
+  const diceStep: DiceStep | null =
+    ctx.selectionStep &&
+    ctx.selectionStep.kind === 'dice' &&
+    ctx.selectionOwner === player.id &&
+    ctx.selectionStep.areas.includes(kind)
+      ? ctx.selectionStep
+      : null;
+
   for (const d of player.areas[kind]) {
     const die = el('span', 'die');
     die.dataset.id = d.id;
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    const attackAction = ctx.legal.find((x) => x.t === 'attack' && x.dieId === d.id);
-    const blockAction = ctx.legal.find((x) => x.t === 'block' && x.dieId === d.id);
-    if (attackAction) {
+    if (diceStep) {
+      const step = diceStep;
       die.classList.add('clickable');
-      die.dataset.act = 'attack';
-      die.title = '点击发起攻击';
-      die.addEventListener('click', () => ctx.hooks.onAction(attackAction));
-    } else if (blockAction) {
-      die.classList.add('clickable');
-      die.dataset.act = 'block';
-      die.title = '点击抵挡';
-      die.addEventListener('click', () => ctx.hooks.onAction(blockAction));
-    } else if (canSelectForReroll(player, ctx)) {
-      die.classList.add('clickable');
-      die.dataset.act = 'select';
-      die.title = '点击选择重掷';
-      die.addEventListener('click', () => toggleSelect(die, d.id, ctx));
+      die.title = '点击选择该骰';
+      const sel = ctx.hooks.ui.selection;
+      if (sel?.currentSel.has(d.id)) die.classList.add('selected');
+      die.addEventListener('click', () => {
+        const active = ctx.hooks.ui.selection;
+        if (!active) return;
+        if (active.currentSel.has(d.id)) active.currentSel.delete(d.id);
+        else if (active.currentSel.size < step.max) active.currentSel.add(d.id);
+        ctx.hooks.requestRender();
+      });
+    } else {
+      const attackAction = ctx.legal.find((x) => x.t === 'attack' && x.dieId === d.id);
+      const blockAction = ctx.legal.find((x) => x.t === 'block' && x.dieId === d.id);
+      if (attackAction) {
+        die.classList.add('clickable');
+        die.dataset.act = 'attack';
+        die.title = '点击发起攻击';
+        die.addEventListener('click', () => ctx.hooks.onAction(attackAction));
+      } else if (blockAction) {
+        die.classList.add('clickable');
+        die.dataset.act = 'block';
+        die.title = '点击抵挡';
+        die.addEventListener('click', () => ctx.hooks.onAction(blockAction));
+      } else if (canSelectForReroll(player, ctx)) {
+        die.classList.add('clickable');
+        die.dataset.act = 'select';
+        die.title = '点击选择重掷';
+        if (ctx.hooks.ui.rerollSelected.has(d.id)) die.classList.add('selected');
+        die.addEventListener('click', () => {
+          const set = ctx.hooks.ui.rerollSelected;
+          if (set.has(d.id)) set.delete(d.id);
+          else if (set.size < ctx.maxReroll) set.add(d.id);
+          ctx.hooks.requestRender();
+        });
+      }
     }
 
     dice.appendChild(die);
@@ -299,12 +392,32 @@ function centerBar(state: GameState): HTMLElement {
   return center;
 }
 
+function phaseHint(ctx: Ctx): string {
+  const { state } = ctx;
+  const pd = state.pending;
+  if (pd && pd.kind === 'caiyuliu') return '裁雨流：选择该骰去向。';
+  if (pd && pd.kind === 'fengmang') return '锋芒：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。';
+  if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
+  switch (state.phase) {
+    case 'reroll':
+      return '重掷阶段：点击你的骰子选择，再点「重掷选中」；或跳过。';
+    case 'dustRise':
+      return '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。';
+    case 'main':
+      return '主要阶段：用下方操作列表攻击/启动技能，完成后结束回合。';
+    case 'gameOver':
+      return `游戏结束，胜者：${state.winner ?? '—'}。`;
+    default:
+      return '';
+  }
+}
+
 function statusBar(ctx: Ctx): HTMLElement {
   const { state } = ctx;
   const bar = el('div', 'status');
 
   const turn = el('span', 'status-item');
-  const enemyId: PlayerId = state.activePlayer === 'A' ? 'B' : 'A';
+  const enemyId: PlayerId = oppOf(state.activePlayer);
   turn.textContent = `回合：自己（${state.activePlayer}） / 敌人（${enemyId}）`;
   bar.appendChild(turn);
 
@@ -321,6 +434,10 @@ function statusBar(ctx: Ctx): HTMLElement {
     winner.textContent = `胜者：${state.winner ?? '—'}`;
     bar.appendChild(winner);
   }
+
+  const hint = el('div', 'hint');
+  hint.textContent = phaseHint(ctx);
+  bar.appendChild(hint);
 
   return bar;
 }
@@ -340,82 +457,206 @@ function advanceLabel(phase: Phase): string {
 
 function actionBar(ctx: Ctx): HTMLElement {
   const bar = el('div', 'actionbar');
-  const blockNone = ctx.legal.find((x) => x.t === 'block' && !x.dieId);
-  const advance = ctx.legal.find((x) => x.t === 'advance');
-  const reroll = ctx.legal.find((x) => x.t === 'reroll');
+  const reroll = ctx.legal.find((x): x is Extract<Action, { t: 'reroll' }> => x.t === 'reroll');
+  if (!reroll) return bar;
 
-  if (blockNone) bar.appendChild(button('不抵挡', blockNone, ctx.hooks));
-
-  if (reroll) {
-    const rb = document.createElement('button');
-    rb.type = 'button';
-    rb.className = 'btn btn-reroll';
-    rb.dataset.act = 'reroll';
-    rb.textContent = '重掷选中(0)';
-    rb.disabled = true;
-    rb.addEventListener('click', () => {
-      if (ctx.selected.size === 0) return;
-      ctx.hooks.onAction({ t: 'reroll', dieIds: [...ctx.selected] });
-    });
-    ctx.rerollRef.current = rb;
-    bar.appendChild(rb);
-    if (advance) bar.appendChild(button('跳过重掷', advance, ctx.hooks));
-  } else if (advance) {
-    bar.appendChild(button(advanceLabel(ctx.state.phase), advance, ctx.hooks));
-  }
+  const count = ctx.hooks.ui.rerollSelected.size;
+  const rb = document.createElement('button');
+  rb.type = 'button';
+  rb.className = 'btn btn-reroll';
+  rb.dataset.act = 'reroll';
+  rb.textContent = `重掷选中(${count})`;
+  rb.disabled = count === 0;
+  rb.addEventListener('click', () => {
+    if (ctx.hooks.ui.rerollSelected.size === 0) return;
+    ctx.hooks.onAction({ t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] });
+  });
+  bar.appendChild(rb);
 
   return bar;
 }
 
-function promptPanel(ctx: Ctx): HTMLElement | null {
-  const { state, legal, hooks } = ctx;
-  const pd = state.pending;
-
-  if (pd && pd.kind === 'caiyuliu') {
-    const p = el('div', 'prompt');
-    const text = el('div', 'prompt-text');
-    text.textContent = `裁雨流：选择「${pd.value}」点骰的去向`;
-    p.appendChild(text);
-    const row = el('div', 'prompt-actions');
-    for (const a of legal) {
-      if (a.t !== 'caiyuliu') continue;
-      const label = a.to === 'defense' ? '移到防御骰区' : a.to === 'meditation' ? '移到冥想骰区' : '不移动';
-      row.appendChild(button(label, a, hooks));
+function actionLabel(ctx: Ctx, a: Action): string | null {
+  const { state } = ctx;
+  switch (a.t) {
+    case 'advance':
+      return advanceLabel(state.phase);
+    case 'attack': {
+      const v = findDie(state, a.dieId)?.value ?? '?';
+      return `攻击：用 ${v} 点攻击骰`;
     }
-    p.appendChild(row);
-    return p;
-  }
-
-  if (pd && pd.kind === 'fengmang') {
-    const p = el('div', 'prompt');
-    const text = el('div', 'prompt-text');
-    text.textContent = '锋芒：可消耗 1 攻击骰与 1 冥想骰，取消该防御骰效果并追加 2 点真实伤害';
-    p.appendChild(text);
-    const row = el('div', 'prompt-actions');
-    for (const a of legal) {
-      if (a.t !== 'fengmang') continue;
-      if (!a.accept) {
-        row.appendChild(button('不发动', a, hooks));
-        continue;
-      }
-      const pp = state.players[pd.player];
+    case 'block': {
+      if (!a.dieId) return '不抵挡';
+      const v = findDie(state, a.dieId)?.value ?? '?';
+      return `抵挡：用 ${v} 点防御骰`;
+    }
+    case 'dustRise': {
+      const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+      return art ? dustRiseLabel(art, a) : '尘起';
+    }
+    case 'caiyuliu':
+      return a.to === 'defense' ? '移到防御骰区' : a.to === 'meditation' ? '移到冥想骰区' : '不移动';
+    case 'fengmang': {
+      if (!a.accept) return '不发动';
+      const pd = state.pending;
+      const pp = pd && pd.kind === 'fengmang' ? state.players[pd.player] : state.players[state.activePlayer];
       const av = pp.areas.attack.find((d) => d.id === a.attackDieId)?.value ?? '?';
       const mv = pp.areas.meditation.find((d) => d.id === a.meditationDieId)?.value ?? '?';
-      row.appendChild(button(`发动（消耗 攻击${av} 与 冥想${mv}）`, a, hooks));
+      return `发动（消耗 攻击${av} 与 冥想${mv}）`;
     }
-    p.appendChild(row);
-    return p;
+    case 'reroll':
+    case 'skill':
+      return null;
+  }
+}
+
+function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
+  const { state, hooks } = ctx;
+  const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+  const skill = art?.skills.find(
+    (s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'),
+  );
+  const key = skill?.key;
+  const name = skillLabel(art, a.side, skill?.kind) ?? key ?? '技能';
+  if (key && SKILL_SELECTION[key]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-skill';
+    b.dataset.act = 'skill';
+    b.textContent = `启动技能：${name}`;
+    b.addEventListener('click', () => startSkillSelection(ctx, a, key));
+    return b;
+  }
+  return button(`启动技能：${name}`, a, hooks, 'btn-skill');
+}
+
+function operationList(ctx: Ctx): HTMLElement {
+  const box = el('div', 'actionlist');
+  const seenSkill = new Set<string>();
+  for (const a of ctx.legal) {
+    if (a.t === 'reroll') continue;
+    if (a.t === 'skill') {
+      const sig = `${a.artifactId}:${a.side}`;
+      if (seenSkill.has(sig)) continue;
+      seenSkill.add(sig);
+      box.appendChild(skillButton(ctx, a));
+      continue;
+    }
+    const label = actionLabel(ctx, a);
+    if (label === null) continue;
+    box.appendChild(button(label, a, ctx.hooks));
+  }
+  if (box.childElementCount === 0) {
+    const empty = el('div', 'actionlist-empty');
+    empty.textContent = '（无可用操作）';
+    box.appendChild(empty);
+  }
+  return box;
+}
+
+function chooserPanel(ctx: Ctx): HTMLElement | null {
+  const sel: ActiveSelection | null = ctx.hooks.ui.selection;
+  if (!sel) return null;
+  const spec = SKILL_SELECTION[sel.key];
+  if (!spec) return null;
+  const { state, hooks } = ctx;
+  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice });
+  const step = steps[sel.stepIndex];
+  const panel = el('div', 'selector');
+  if (!step) return panel;
+
+  const title = el('div', 'selector-title');
+  title.textContent = `步骤 ${sel.stepIndex + 1}/${steps.length} · ${step.label}`;
+  panel.appendChild(title);
+
+  if (step.kind === 'dice') {
+    const info = el('div', 'selector-info');
+    info.textContent = `已选 ${sel.currentSel.size}（需 ${step.min}–${step.max} 颗）`;
+    panel.appendChild(info);
+  } else {
+    const nums = el('div', 'number-row');
+    for (let n = step.min; n <= step.max; n++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn number-btn';
+      if (sel.numbers[sel.stepIndex] === n) b.classList.add('number-btn--on');
+      b.textContent = String(n);
+      b.addEventListener('click', () => {
+        sel.numbers[sel.stepIndex] = n;
+        hooks.requestRender();
+      });
+      nums.appendChild(b);
+    }
+    panel.appendChild(nums);
   }
 
-  if (state.pendingAttack) {
-    const p = el('div', 'prompt');
-    const text = el('div', 'prompt-text');
-    text.textContent = '对方可抵挡：点击对方防御骰进行抵挡，或点击「不抵挡」';
-    p.appendChild(text);
-    return p;
+  const actions = el('div', 'selector-actions');
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    hooks.ui.selection = null;
+    hooks.requestRender();
+  });
+  actions.appendChild(cancel);
+
+  const chosenNum = sel.numbers[sel.stepIndex];
+  const satisfied =
+    step.kind === 'dice'
+      ? sel.currentSel.size >= step.min && sel.currentSel.size <= step.max
+      : Number.isInteger(chosenNum) && chosenNum >= step.min && chosenNum <= step.max;
+
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'btn btn-confirm';
+  ok.textContent = '确认';
+  ok.disabled = !satisfied;
+  ok.addEventListener('click', () => confirmSelection(ctx));
+  actions.appendChild(ok);
+
+  panel.appendChild(actions);
+  return panel;
+}
+
+function confirmSelection(ctx: Ctx): void {
+  const sel = ctx.hooks.ui.selection;
+  if (!sel) return;
+  const spec = SKILL_SELECTION[sel.key];
+  if (!spec) {
+    ctx.hooks.ui.selection = null;
+    ctx.hooks.requestRender();
+    return;
+  }
+  const { state, hooks } = ctx;
+  const player = state.activePlayer;
+  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice });
+  const step = steps[sel.stepIndex];
+  if (!step) {
+    hooks.ui.selection = null;
+    hooks.requestRender();
+    return;
   }
 
-  return null;
+  if (step.kind === 'dice') {
+    sel.chosenDice.push([...sel.currentSel]);
+    sel.currentSel = new Set<string>();
+  }
+  sel.stepIndex += 1;
+
+  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice });
+  if (sel.stepIndex >= nextSteps.length) {
+    const numberIdx = nextSteps
+      .map((s, i) => (s.kind === 'number' ? i : -1))
+      .filter((i) => i >= 0);
+    const numbers = numberIdx.map((i) => sel.numbers[i]);
+    const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, numbers });
+    const action: Action = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
+    hooks.ui.selection = null;
+    hooks.onAction(action);
+  }
+  hooks.requestRender();
 }
 
 function logPanel(ctx: Ctx): HTMLElement {
@@ -436,21 +677,28 @@ function logPanel(ctx: Ctx): HTMLElement {
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   const legal = getLegalActions(state);
   const selfId: PlayerId = state.activePlayer;
-  const enemyId: PlayerId = selfId === 'A' ? 'B' : 'A';
+  const enemyId: PlayerId = oppOf(selfId);
 
-  const selected = new Set<string>();
-  const rerollRef: { current: HTMLButtonElement | null } = { current: null };
-  const rerollAction = legal.find((a) => a.t === 'reroll') as
-    | { t: 'reroll'; dieIds: string[] }
-    | undefined;
+  const rerollAction = legal.find((a): a is Extract<Action, { t: 'reroll' }> => a.t === 'reroll');
   const maxReroll = rerollAction?.dieIds.length ?? 0;
-  const refreshReroll = () => {
-    const b = rerollRef.current;
-    if (!b) return;
-    b.textContent = `重掷选中(${selected.size})`;
-    b.disabled = selected.size === 0;
-  };
-  const ctx: Ctx = { state, legal, hooks, selected, maxReroll, rerollRef, refreshReroll };
+
+  const sel = hooks.ui.selection;
+  let selectionStep: SelectStep | null = null;
+  let selectionOwner: PlayerId | null = null;
+  if (sel && SKILL_SELECTION[sel.key]) {
+    const steps = SKILL_SELECTION[sel.key].steps({
+      state,
+      player: state.activePlayer,
+      chosenDice: sel.chosenDice,
+    });
+    const step = steps[sel.stepIndex];
+    if (step && step.kind === 'dice') {
+      selectionStep = step;
+      selectionOwner = step.owner === 'self' ? state.activePlayer : enemyId;
+    }
+  }
+
+  const ctx: Ctx = { state, legal, hooks, maxReroll, selectionStep, selectionOwner };
 
   root.innerHTML = '';
   const board = el('div', 'board');
@@ -458,9 +706,15 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   board.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
   board.appendChild(centerBar(state));
   board.appendChild(playerPanel(state.players[selfId], 'self', false, ctx));
-  board.appendChild(actionBar(ctx));
-  const prompt = promptPanel(ctx);
-  if (prompt) board.appendChild(prompt);
+
+  if (hooks.ui.selection) {
+    const chooser = chooserPanel(ctx);
+    if (chooser) board.appendChild(chooser);
+  } else {
+    board.appendChild(actionBar(ctx));
+    board.appendChild(operationList(ctx));
+  }
+
   board.appendChild(logPanel(ctx));
   root.appendChild(board);
 }

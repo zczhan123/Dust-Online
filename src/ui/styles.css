@@ -265,6 +265,100 @@ body {
   flex-wrap: wrap;
 }
 
+/* 阶段提示 */
+.hint {
+  flex: 1 1 100%;
+  font-weight: 400;
+  font-size: 13px;
+  color: #7a5a1e;
+  background: #fdf6e6;
+  border: 1px solid #e7d3a2;
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+/* 操作列表 */
+.actionlist {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.actionlist-empty {
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn-skill {
+  background: #eaf7ee;
+  border-color: #8fc7a5;
+  color: #1d6b43;
+}
+.btn-skill:hover:not(:disabled) {
+  background: #d9f0e1;
+}
+
+/* 技能选择器 */
+.selector {
+  background: #f2f7fd;
+  border: 1px solid #9dc0e0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.selector-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1b4f9c;
+}
+.selector-info {
+  font-size: 13px;
+  color: #3a4658;
+}
+.selector-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-confirm {
+  background: #dff0e4;
+  border-color: #82bd97;
+  color: #1d6b43;
+}
+.btn-confirm:hover:not(:disabled) {
+  background: #cbe8d5;
+}
+.btn-cancel {
+  background: #f3ecec;
+  border-color: #cbb2b2;
+  color: #7a3b3b;
+}
+.btn-cancel:hover:not(:disabled) {
+  background: #ebdcdc;
+}
+.number-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.number-btn {
+  min-width: 34px;
+  padding: 5px 8px;
+  text-align: center;
+}
+.number-btn--on {
+  background: #23405c;
+  border-color: #23405c;
+  color: #fff;
+}
+.number-btn--on:hover:not(:disabled) {
+  background: #2d5175;
+}
+
 /* 日志 */
 .log {
   background: #262b33;
