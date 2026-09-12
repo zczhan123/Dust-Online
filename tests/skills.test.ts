@@ -201,6 +201,22 @@ describe('影袭', () => {
     // 6-2=4 → 冥想区（影掠 冥想 4/5）
     expect(g.players.B.areas.meditation.some((d) => d.id === 'v2' && d.value === 4)).toBe(true);
   });
+
+  it('rejects X that would reduce the die below 1 (no 3-3=1 weirdness)', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack.push({ id: 'v3', value: 3, kind: 'attack' });
+    // x=3 would give 3-3=0 → invalid (max x is 2)
+    expect(() =>
+      applyAction(g, { t: 'skill', artifactId: '005', side: 'left', params: { dieId: 'v3', x: 3 } }),
+    ).toThrow();
+    // x=2 is allowed → die becomes exactly 1, attack = 2
+    applyAction(g, { t: 'skill', artifactId: '005', side: 'left', params: { dieId: 'v3', x: 2 } });
+    expect(g.pendingAttack).toMatchObject({ value: 2, physical: false });
+    expect(g.players.B.areas.attack.some((d) => d.id === 'v3' && d.value === 1)).toBe(true);
+  });
 });
 
 describe('裁雨流 / 锋芒触发', () => {

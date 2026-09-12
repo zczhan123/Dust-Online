@@ -162,20 +162,22 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const x = params.x as number;
       if (!Number.isInteger(x) || x < 1) throw new Error('x must be >= 1');
       const kinds = ['attack', 'defense', 'meditation'] as const;
-      let newValue = 0;
       let old = 0;
       let found = false;
       for (const k of kinds) {
         const die = p.areas[k].find((d) => d.id === dieId);
         if (die) {
           old = die.value;
-          p.areas[k] = p.areas[k].filter((d) => d.id !== dieId);
-          newValue = Math.max(1, die.value - x);
           found = true;
           break;
         }
       }
       if (!found) throw new Error(`die not found: ${dieId}`);
+      if (x > old - 1) throw new Error('x cannot reduce the die below 1');
+      const newValue = old - x;
+      for (const k of kinds) {
+        p.areas[k] = p.areas[k].filter((d) => d.id !== dieId);
+      }
       const dist = p.artifacts.find((a) => a.column === 2)!.distribution!;
       const newKind = areaOf(newValue, dist);
       p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });

@@ -156,7 +156,7 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
           acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDefIds } });
         }
       } else if (s.key === 'yingle.yingxi') {
-        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].find((d) => d.value >= 2);
         if (anyDie) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id, x: 1 } });
       } else if (s.key === 'mingjing.ultimate') {
         acts.push({ t: 'skill', artifactId: a.id, side: s.side });

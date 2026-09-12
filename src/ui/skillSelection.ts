@@ -1,7 +1,7 @@
 import type { DiceKind, GameState, PlayerId } from '../core/model/types';
 
 export type SelectStep =
-  | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number }
+  | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number; filter?: (d: { value: number }) => boolean }
   | { kind: 'number'; label: string; min: number; max: number };
 
 export interface SelectionArgs {
@@ -49,11 +49,12 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     steps: ({ state, player, chosenDice }) => {
       const first = chosenDice[0]?.[0];
       const steps: SelectStep[] = [
-        { kind: 'dice', label: '选择要降低点数的能力骰（恰好 1 颗）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1 },
+        { kind: 'dice', label: '选择要降低点数的能力骰（恰好 1 颗，点数≥2）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1, filter: (d) => d.value >= 2 },
       ];
       if (first) {
         const die = KINDS.flatMap((k) => state.players[player].areas[k]).find((d) => d.id === first);
-        steps.push({ kind: 'number', label: `选择 X（1 ~ ${die?.value ?? 1}）`, min: 1, max: die?.value ?? 1 });
+        const max = Math.max(1, (die?.value ?? 2) - 1);
+        steps.push({ kind: 'number', label: `选择 X（1 ~ ${max}，降完不低于 1 点）`, min: 1, max });
       }
       return steps;
     },

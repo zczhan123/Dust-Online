@@ -337,17 +337,20 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
 
     if (diceStep) {
       const step = diceStep;
-      die.classList.add('clickable');
-      die.title = '点击选择该骰';
-      const sel = ctx.hooks.ui.selection;
-      if (sel?.currentSel.has(d.id)) die.classList.add('selected');
-      die.addEventListener('click', () => {
-        const active = ctx.hooks.ui.selection;
-        if (!active) return;
-        if (active.currentSel.has(d.id)) active.currentSel.delete(d.id);
-        else if (active.currentSel.size < step.max) active.currentSel.add(d.id);
-        ctx.hooks.requestRender();
-      });
+      const selectable = !step.filter || step.filter(d);
+      if (selectable) {
+        die.classList.add('clickable');
+        die.title = '点击选择该骰';
+        const sel = ctx.hooks.ui.selection;
+        if (sel?.currentSel.has(d.id)) die.classList.add('selected');
+        die.addEventListener('click', () => {
+          const active = ctx.hooks.ui.selection;
+          if (!active) return;
+          if (active.currentSel.has(d.id)) active.currentSel.delete(d.id);
+          else if (active.currentSel.size < step.max) active.currentSel.add(d.id);
+          ctx.hooks.requestRender();
+        });
+      }
     } else {
       const attackAction = ctx.legal.find((x) => x.t === 'attack' && x.dieId === d.id);
       const blockAction = ctx.legal.find((x) => x.t === 'block' && x.dieId === d.id);
