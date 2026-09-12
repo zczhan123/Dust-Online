@@ -373,3 +373,73 @@ body {
 .log-line {
   white-space: pre-wrap;
 }
+
+/* 开始新对局设置页（浅色主题） */
+.setup {
+  max-width: 640px;
+  margin: 48px auto;
+  padding: 24px 28px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.setup-title {
+  margin: 0;
+  font-size: 22px;
+  color: var(--ink);
+}
+.setup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.setup-label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+}
+.choice-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.choice {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: #23405c;
+  background: #f1efe9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.choice:hover {
+  background: #e8f1fb;
+  border-color: #9dc0e0;
+}
+.choice.selected {
+  background: #23405c;
+  border-color: #23405c;
+  color: #fff;
+}
+.setup-start {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: #1d7a4d;
+  border: 1px solid #14603b;
+  border-radius: 10px;
+  padding: 9px 26px;
+  cursor: pointer;
+}
+.setup-start:hover {
+  background: #176440;
+}

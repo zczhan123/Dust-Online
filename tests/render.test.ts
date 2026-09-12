@@ -10,6 +10,7 @@ const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => ({
   onAction,
   ui: freshUi(),
   requestRender: () => {},
+  onRestart: () => {},
 });
 
 describe('renderGame (read-only snapshot)', () => {
@@ -159,7 +160,7 @@ describe('renderGame (interaction)', () => {
 
     const ui = freshUi();
     const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
     renderGame(state, root, hooks);
 
     const box = root.querySelector<HTMLElement>(
@@ -181,7 +182,7 @@ describe('renderGame (interaction)', () => {
 
     const ui = freshUi();
     const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
     renderGame(state, root, hooks);
 
     const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
@@ -202,7 +203,7 @@ describe('renderGame (interaction)', () => {
 
     const ui = freshUi();
     const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks) };
+    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
     renderGame(state, root, hooks);
 
     const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>

@@ -1,28 +1,39 @@
 import './ui/styles.css';
 import { createGame, applyAction } from './core/engine/game';
 import { renderGame, type UiState } from './ui/render';
+import { renderSetup } from './ui/setupScreen';
 import type { GameState } from './core/model/types';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
-const state: GameState = createGame({ seed: 20240913, firstPlayer: 'A' });
+
+let state: GameState | null = null;
 const ui: UiState = { rerollSelected: new Set(), selection: null };
 let lastError = '';
-const render = () =>
+
+const render = () => {
+  if (!state) return;
   renderGame(state, root, {
     ui,
     requestRender: render,
+    onRestart: () => { state = null; showSetup(); },
     onAction: (a) => {
-      try {
-        applyAction(state, a);
-        lastError = '';
-        ui.rerollSelected.clear();
-        ui.selection = null;
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
-      }
+      if (!state) return;
+      try { applyAction(state, a); lastError = ''; ui.rerollSelected.clear(); ui.selection = null; }
+      catch (e) { lastError = e instanceof Error ? e.message : String(e); }
       if (lastError) state.log.push({ turn: state.turnIndex, phase: state.phase, text: `非法操作：${lastError}` });
       render();
     },
   });
-render();
+};
+
+const showSetup = () => {
+  renderSetup(root, (opts) => {
+    state = createGame({ seed: 20240913, firstPlayer: opts.firstPlayer, heroA: opts.heroA, heroB: opts.heroB });
+    ui.rerollSelected.clear();
+    ui.selection = null;
+    render();
+  });
+};
+
+showSetup();

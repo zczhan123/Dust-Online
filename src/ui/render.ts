@@ -50,6 +50,7 @@ export interface RenderHooks {
   onAction: (a: Action) => void;
   ui: UiState;
   requestRender: () => void;
+  onRestart: () => void;
 }
 
 type ActiveSelection = NonNullable<UiState['selection']>;
@@ -353,7 +354,7 @@ function playerPanel(
 
   const header = el('div', 'player-header');
   const title = el('span', 'player-title');
-  title.textContent = `${role === 'enemy' ? '敌人' : '自己'}（${player.id}）`;
+  title.textContent = `玩家${player.id}`;
   header.appendChild(title);
   const life = el('span', 'player-life');
   life.textContent = `生命 ${player.life}/${player.lifeMax}`;
@@ -417,8 +418,7 @@ function statusBar(ctx: Ctx): HTMLElement {
   const bar = el('div', 'status');
 
   const turn = el('span', 'status-item');
-  const enemyId: PlayerId = oppOf(state.activePlayer);
-  turn.textContent = `回合：自己（${state.activePlayer}） / 敌人（${enemyId}）`;
+  turn.textContent = `当前回合：玩家${state.activePlayer}`;
   bar.appendChild(turn);
 
   const phase = el('span', 'status-item');
@@ -434,6 +434,14 @@ function statusBar(ctx: Ctx): HTMLElement {
     winner.textContent = `胜者：${state.winner ?? '—'}`;
     bar.appendChild(winner);
   }
+
+  const restart = document.createElement('button');
+  restart.type = 'button';
+  restart.className = 'btn btn-restart';
+  restart.dataset.act = 'restart';
+  restart.textContent = '重开';
+  restart.addEventListener('click', () => ctx.hooks.onRestart());
+  bar.appendChild(restart);
 
   const hint = el('div', 'hint');
   hint.textContent = phaseHint(ctx);
