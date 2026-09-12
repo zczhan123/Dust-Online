@@ -15,7 +15,9 @@ function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
 
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
-  g.dustRiseDecided = false;
+  g.pendingAttack = null;
+  g.dustRiseNormalUsed = false;
+  g.dustRiseActed = false;
   g.rerollDone = false;
   const p = g.activePlayer;
   if (g.firstRound[p]) {
@@ -28,6 +30,8 @@ export function beginTurn(g: GameState): void {
 
 export function endTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
+  const p = g.players[g.activePlayer];
+  p.buffs = p.buffs.filter((b) => b.duration !== 'thisTurn');
   g.firstRound[g.activePlayer] = false;
   g.activePlayer = g.activePlayer === 'A' ? 'B' : 'A';
   g.turnIndex += 1;
@@ -41,6 +45,8 @@ export function advancePhase(g: GameState): void {
       g.phase = 'dustRise';
       break;
     case 'dustRise':
+      if (!g.dustRiseActed) incrementDustfall(g);
+      if ((g.phase as string) === 'gameOver') break;
       g.phase = 'main';
       break;
     case 'main':
@@ -62,13 +68,14 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   const p = g.players[player];
   const acts: Action[] = [];
   const hasMed = p.areas.meditation.length > 0;
+  const canNormal = !g.dustRiseNormalUsed && hasMed;
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (a.column === 3) {
-      if (hasMed) acts.push({ t: 'dustRise', artifactId: a.id });
+      if (canNormal) acts.push({ t: 'dustRise', artifactId: a.id });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
-      if (hasMed) {
+      if (canNormal) {
         acts.push({ t: 'dustRise', artifactId: a.id, side: 'left' });
         acts.push({ t: 'dustRise', artifactId: a.id, side: 'right' });
       }
@@ -78,7 +85,7 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       }
     } else {
       const other = a.activeMarkerSide === 'left' ? 'right' : 'left';
-      if (hasMed) acts.push({ t: 'dustRise', artifactId: a.id, side: other });
+      if (canNormal) acts.push({ t: 'dustRise', artifactId: a.id, side: other });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
     }
   }
@@ -111,10 +118,8 @@ export function getLegalActions(g: GameState): Action[] {
       }
       return acts;
     }
-    case 'dustRise': {
-      if (g.dustRiseDecided) return [{ t: 'advance' }];
-      return [{ t: 'passDustRise' }, ...dustRiseActions(g, g.activePlayer)];
-    }
+    case 'dustRise':
+      return [...dustRiseActions(g, g.activePlayer), { t: 'advance' }];
     case 'main': {
       const acts: Action[] = [{ t: 'advance' }];
       for (const d of p.areas.attack) acts.push({ t: 'attack', dieId: d.id });
@@ -131,35 +136,46 @@ export function applyAction(g: GameState, action: Action): GameState {
     case 'advance':
       advancePhase(g);
       break;
-    case 'reroll':
-      if (!g.rerollDone) {
-        withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
-        g.rerollDone = true;
-      }
+    case 'reroll': {
+      if (g.phase !== 'reroll') throw new Error('not reroll phase');
+      if (g.rerollDone) throw new Error('already rerolled');
+      const p = g.players[g.activePlayer];
+      const owned = new Set(
+        [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id),
+      );
+      if (action.dieIds.length > effectiveSpeed(p)) throw new Error('reroll exceeds speed');
+      if (new Set(action.dieIds).size !== action.dieIds.length) throw new Error('duplicate die id');
+      for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
+      withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
+      g.rerollDone = true;
       break;
+    }
     case 'dustRise': {
+      if (g.phase !== 'dustRise') throw new Error('not dust rise phase');
       const p = g.players[g.activePlayer];
       if (action.useSeal) {
         if (!p.hasDustSeal) throw new Error('no dust seal');
         p.hasDustSeal = false;
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
+        g.dustRiseActed = true;
       } else {
+        if (g.dustRiseNormalUsed) throw new Error('normal dust rise already used');
         const med = p.areas.meditation[0];
         if (!med) throw new Error('no meditation die');
         p.areas.meditation = p.areas.meditation.filter((d) => d.id !== med.id);
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
-        g.dustRiseDecided = true;
+        g.dustRiseNormalUsed = true;
+        g.dustRiseActed = true;
       }
       break;
     }
-    case 'passDustRise':
-      incrementDustfall(g);
-      g.dustRiseDecided = true;
-      break;
     case 'attack':
+      if (g.phase !== 'main') throw new Error('not main phase');
+      if (g.pendingAttack) throw new Error('pending attack unresolved');
       doAttack(g, g.activePlayer, action.dieId);
       break;
     case 'block':
+      if (!g.pendingAttack) throw new Error('no pending attack');
       resolveBlock(g, action.dieId);
       break;
   }

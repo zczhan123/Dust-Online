@@ -30,6 +30,7 @@ export function checkLifeEnd(g: GameState): void {
 
 /** 使用 1 个攻击骰发起攻击：消耗该骰，产生待结算攻击（伤害=点数+攻击伤害加成） */
 export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
+  if (g.pendingAttack) throw new Error('pending attack unresolved');
   const die = g.players[player].areas.attack.find((d) => d.id === dieId);
   if (!die) throw new Error(`not an attack die: ${dieId}`);
   const value = die.value + attackDamageBuff(g, player);

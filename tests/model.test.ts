@@ -31,7 +31,8 @@ describe('model types', () => {
       rngState: 12345,
       log: [],
       pendingAttack: null,
-      dustRiseDecided: false,
+      dustRiseNormalUsed: false,
+      dustRiseActed: false,
       rerollDone: false,
       winner: null,
     };

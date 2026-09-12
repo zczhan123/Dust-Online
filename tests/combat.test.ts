@@ -47,4 +47,12 @@ describe('combat', () => {
     expect(g.phase).toBe('gameOver');
     expect(g.winner).toBe('A');
   });
+
+  it('does not allow a second attack while one is pending', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A' });
+    g.players.A.areas.attack.push({ id: 'x1', value: 3, kind: 'attack' });
+    g.players.A.areas.attack.push({ id: 'x2', value: 4, kind: 'attack' });
+    doAttack(g, 'A', 'x1');
+    expect(() => doAttack(g, 'A', 'x2')).toThrow();
+  });
 });

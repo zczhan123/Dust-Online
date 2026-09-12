@@ -20,7 +20,6 @@ export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
   | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean }
-  | { t: 'passDustRise' }
   | { t: 'attack'; dieId: string }
   | { t: 'block'; dieId?: string };
 
@@ -83,7 +82,8 @@ export interface GameState {
   rngState: number;
   log: LogEntry[];
   pendingAttack: PendingAttack | null;
-  dustRiseDecided: boolean;
+  dustRiseNormalUsed: boolean;
+  dustRiseActed: boolean;
   rerollDone: boolean;
   winner: PlayerId | null;
 }

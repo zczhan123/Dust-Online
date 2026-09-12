@@ -64,7 +64,8 @@ export function setupGame(opts: SetupOptions): GameState {
     rngState: rng.state(),
     log: [],
     pendingAttack: null,
-    dustRiseDecided: false,
+    dustRiseNormalUsed: false,
+    dustRiseActed: false,
     rerollDone: false,
     winner: null,
   };
