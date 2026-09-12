@@ -82,4 +82,21 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       g.players[player].areas.attack.push(createDie(newDieId(`${player}-`), artifact.chargeLayer, 'attack'));
     },
   },
+  // 中央突破：消耗最多 3 个冥想骰 → 弃置对方等量防御骰；恰好 3 个则本回合攻击不可抵挡
+  'yuqie.breakthrough': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const count = params.meditationCount as number;
+      if (!Number.isInteger(count) || count < 1 || count > 3) throw new Error('meditationCount must be 1..3');
+      const meds = p.areas.meditation.slice(0, count);
+      if (meds.length < count) throw new Error('not enough meditation dice');
+      consumeDice(p, 'meditation', meds.map((d) => d.id));
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const wanted = ((params.opponentDefenseDieIds as string[]) ?? []).slice(0, count);
+      const owned = g.players[opponent].areas.defense;
+      const valid = wanted.filter((id) => owned.some((d) => d.id === id));
+      consumeDice(g.players[opponent], 'defense', valid);
+      if (count === 3) g.unblockableThisTurn = true;
+    },
+  },
 };

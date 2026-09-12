@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction } from '../src/core/engine/game';
 import { totalDice } from '../src/core/engine/derive';
+import { virtualAttack } from '../src/core/engine/combat';
 
 describe('basic activate skills', () => {
   it('淬炼 consumes an attack die and increments 不祥 count (cap 3)', () => {
@@ -98,5 +99,51 @@ describe('charge effects', () => {
     applyAction(g, { t: 'dustRise', artifactId: '006', useSeal: true });
     expect(g.players.B.artifacts.find((a) => a.id === '006')!.chargeLayer).toBe(1);
     expect(g.players.B.areas.attack.length).toBe(before + 1);
+  });
+});
+
+describe('中央突破', () => {
+  it('consumes 3 meditation dice and discards the chosen opponent defense dice, granting unblockable', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
+    while (g.players.A.areas.meditation.length < 3) {
+      g.players.A.areas.meditation.push({ id: `m${g.players.A.areas.meditation.length}`, value: 2, kind: 'meditation' });
+    }
+    while (g.players.B.areas.defense.length < 3) {
+      g.players.B.areas.defense.push({ id: `d${g.players.B.areas.defense.length}`, value: 3, kind: 'defense' });
+    }
+    const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
+    const bDefBefore = g.players.B.areas.defense.length;
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
+    expect(g.unblockableThisTurn).toBe(true);
+    expect(g.players.B.areas.defense.length).toBe(bDefBefore - 3);
+  });
+
+  it('an unblockable attack deals damage even if a defense die is offered', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
+    while (g.players.A.areas.meditation.length < 3) {
+      g.players.A.areas.meditation.push({ id: `m${g.players.A.areas.meditation.length}`, value: 2, kind: 'meditation' });
+    }
+    while (g.players.B.areas.defense.length < 3) {
+      g.players.B.areas.defense.push({ id: `d${g.players.B.areas.defense.length}`, value: 3, kind: 'defense' });
+    }
+    const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
+    g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
+    applyAction(g, { t: 'attack', dieId: 'a1' });
+    expect(g.pendingAttack!.unblockable).toBe(true);
+    const def = g.players.B.areas.defense[0];
+    const lifeBefore = g.players.B.life;
+    applyAction(g, { t: 'block', dieId: def?.id });
+    expect(g.players.B.life).toBe(lifeBefore - 5);
+  });
+
+  it('virtualAttack is not physical', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    virtualAttack(g, 'A', 4);
+    expect(g.pendingAttack).toMatchObject({ value: 4, physical: false });
   });
 });

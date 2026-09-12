@@ -110,6 +110,12 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         if (p.areas.meditation.length >= 3) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) } });
       } else if (s.key === 'yingle.qianxing') {
         if (p.areas.attack.length >= 2) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 2).map((d) => d.id) } });
+      } else if (s.key === 'yuqie.breakthrough') {
+        if (p.areas.meditation.length >= 3) {
+          const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
+          const oppDef = g.players[opp].areas.defense.slice(0, 3).map((d) => d.id);
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
+        }
       }
     }
   }

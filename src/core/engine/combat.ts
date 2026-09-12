@@ -43,10 +43,20 @@ export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
   g.pendingAttack = {
     attacker: player,
     value: die.value + attackDamageBuff(g, player),
-    unblockable: false,
+    unblockable: g.unblockableThisTurn,
     physical: true,
     sourceDieId: dieId,
     sourceValue: die.value,
+  };
+}
+
+/** 技能发起的“虚拟”攻击（非实体攻击骰） */
+export function virtualAttack(g: GameState, player: PlayerId, baseValue: number): void {
+  g.pendingAttack = {
+    attacker: player,
+    value: baseValue + attackDamageBuff(g, player),
+    unblockable: g.unblockableThisTurn,
+    physical: false,
   };
 }
 
