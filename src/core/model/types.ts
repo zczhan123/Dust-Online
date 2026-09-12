@@ -92,6 +92,7 @@ export interface GameState {
   pendingAttack: PendingAttack | null;
   dustRiseNormalUsed: boolean;
   dustRiseActed: boolean;
+  freeDustRise: number;
   rerollUsed: number;
   skillsUsedThisTurn: string[];
   winner: PlayerId | null;

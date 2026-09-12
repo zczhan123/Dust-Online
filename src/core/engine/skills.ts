@@ -77,4 +77,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       p.areas.meditation.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'meditation'));
     },
   },
+  // 明镜·充能：立即再次进行 1 次需要正常使用冥想骰的额外尘起行动（不占每回合 1 次上限）
+  'mingjing.charge': {
+    run({ g }) {
+      g.freeDustRise += 1;
+    },
+  },
+  // 完杀·充能：获得 1 个点数等于当前充能层数的攻击骰
+  'wansha.charge': {
+    run({ g, player, artifact }) {
+      g.players[player].areas.attack.push(createDie(newDieId(`${player}-`), artifact.chargeLayer, 'attack'));
+    },
+  },
 };

@@ -66,6 +66,7 @@ export function setupGame(opts: SetupOptions): GameState {
     pendingAttack: null,
     dustRiseNormalUsed: false,
     dustRiseActed: false,
+    freeDustRise: 0,
     rerollUsed: 0,
     skillsUsedThisTurn: [],
     winner: null,

@@ -19,6 +19,7 @@ export function beginTurn(g: GameState): void {
   g.pendingAttack = null;
   g.dustRiseNormalUsed = false;
   g.dustRiseActed = false;
+  g.freeDustRise = 0;
   g.rerollUsed = 0;
   g.skillsUsedThisTurn = [];
   const p = g.activePlayer;
@@ -70,7 +71,7 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   const p = g.players[player];
   const acts: Action[] = [];
   const hasMed = p.areas.meditation.length > 0;
-  const canNormal = !g.dustRiseNormalUsed && hasMed;
+  const canNormal = (g.freeDustRise > 0 || !g.dustRiseNormalUsed) && hasMed;
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (a.column === 3) {
@@ -180,12 +181,24 @@ export function applyAction(g: GameState, action: Action): GameState {
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
         g.dustRiseActed = true;
       } else {
-        if (g.dustRiseNormalUsed) throw new Error('normal dust rise already used');
+        if (g.freeDustRise > 0) {
+          g.freeDustRise -= 1;
+        } else if (!g.dustRiseNormalUsed) {
+          g.dustRiseNormalUsed = true;
+        } else {
+          throw new Error('no dust rise action available');
+        }
         const med = p.areas.meditation[0];
         if (!med) throw new Error('no meditation die');
         p.areas.meditation = p.areas.meditation.filter((d) => d.id !== med.id);
         applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
-        g.dustRiseNormalUsed = true;
+        const a = p.artifacts.find((x) => x.id === action.artifactId)!;
+        if (a.column === 3) {
+          const cs = a.skills.find((s) => s.kind === 'charge');
+          if (cs && SKILL_HANDLERS[cs.key]) {
+            withRng(g, (rng) => SKILL_HANDLERS[cs.key].run({ g, player: g.activePlayer, artifact: a, rng, params: {} }));
+          }
+        }
         g.dustRiseActed = true;
       }
       break;
