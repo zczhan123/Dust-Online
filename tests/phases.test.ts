@@ -29,3 +29,29 @@ describe('turn flow', () => {
     expect(nextPhase('end')).toBe('end');
   });
 });
+
+import { refillPhase } from '../src/core/engine/phases';
+import { totalDice, effectiveSpeed, effectiveWill } from '../src/core/engine/derive';
+import { SeededRng } from '../src/core/rng/rng';
+
+describe('refill phase', () => {
+  it('adds dice equal to speed', () => {
+    const g = setupGame({ seed: 3, firstPlayer: 'A' });
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    refillPhase(g, 'A', new SeededRng(3));
+    expect(totalDice(g.players.A)).toBe(effectiveSpeed(g.players.A));
+  });
+
+  it('never exceeds will cap', () => {
+    const g = setupGame({ seed: 3, firstPlayer: 'A' });
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    const will = effectiveWill(g.players.A);
+    const speed = effectiveSpeed(g.players.A);
+    g.players.A.areas.meditation.push(
+      ...Array.from({ length: will - 1 }, (_, i) => ({ id: `pre${i}`, value: 2, kind: 'meditation' as const })),
+    );
+    refillPhase(g, 'A', new SeededRng(3));
+    expect(totalDice(g.players.A)).toBe(will);
+    expect(speed).toBeGreaterThan(1);
+  });
+});
