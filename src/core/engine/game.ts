@@ -107,15 +107,16 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   const acts: Action[] = [];
   const hasMed = p.areas.meditation.length > 0;
   const canNormal = (g.freeDustRise > 0 || !g.dustRiseNormalUsed) && hasMed;
+  const medId = hasMed ? p.areas.meditation[0].id : undefined; // 默认候选（仅供 AI）；UI 会让玩家自选
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (a.column === 3) {
-      if (canNormal) acts.push({ t: 'dustRise', artifactId: a.id });
+      if (canNormal && medId) acts.push({ t: 'dustRise', artifactId: a.id, meditationDieId: medId });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
-      if (canNormal) {
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left' });
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right' });
+      if (canNormal && medId) {
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', meditationDieId: medId });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', meditationDieId: medId });
       }
       if (p.hasDustSeal) {
         acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
@@ -123,7 +124,7 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       }
     } else {
       const other = a.activeMarkerSide === 'left' ? 'right' : 'left';
-      if (canNormal) acts.push({ t: 'dustRise', artifactId: a.id, side: other });
+      if (canNormal && medId) acts.push({ t: 'dustRise', artifactId: a.id, side: other, meditationDieId: medId });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
     }
   }
@@ -298,9 +299,10 @@ export function applyAction(g: GameState, action: Action): GameState {
         } else {
           throw new Error('no dust rise action available');
         }
-        const med = p.areas.meditation[0];
-        if (!med) throw new Error('no meditation die');
-        p.areas.meditation = p.areas.meditation.filter((d) => d.id !== med.id);
+        const medId = action.meditationDieId;
+        if (!medId) throw new Error('meditationDieId required');
+        if (!p.areas.meditation.some((d) => d.id === medId)) throw new Error('not your meditation die');
+        p.areas.meditation = p.areas.meditation.filter((d) => d.id !== medId);
       }
       const desc = applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
       logLine(

@@ -12,12 +12,24 @@ describe('game actions and turn flow', () => {
   it('dust rise consumes a meditation die and activates', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
+    g.players.A.areas.meditation.push({ id: 'med-a', value: 2, kind: 'meditation' });
     const before = g.players.A.areas.meditation.length;
-    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left' });
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'med-a' });
     expect(g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide).toBe('left');
     expect(g.players.A.areas.meditation.length).toBe(before - 1);
     expect(g.dustRiseActed).toBe(true);
     expect(g.dustRiseNormalUsed).toBe(true);
+  });
+
+  it('dust rise consumes the SPECIFIC meditation die chosen', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
+    g.players.A.areas.meditation = [
+      { id: 'q1', value: 2, kind: 'meditation' },
+      { id: 'q2', value: 5, kind: 'meditation' },
+    ];
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'q2' });
+    expect(g.players.A.areas.meditation.map((d) => d.id)).toEqual(['q1']);
   });
 
   it('advancing without a dust rise action increments dustfall', () => {
@@ -31,7 +43,8 @@ describe('game actions and turn flow', () => {
   it('advancing after a dust rise action does not increment dustfall', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left' });
+    g.players.A.areas.meditation.push({ id: 'med-a', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'med-a' });
     applyAction(g, { t: 'advance' });
     expect(g.dustfall).toBe(0);
     expect(g.phase).toBe('main');
@@ -41,7 +54,8 @@ describe('game actions and turn flow', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' });
     skipInitialReroll(g);
     g.players.B.hasDustSeal = true; // B 持有尘印
-    applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left' });
+    g.players.B.areas.meditation.push({ id: 'med-b', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left', meditationDieId: 'med-b' });
     applyAction(g, { t: 'dustRise', artifactId: '005', side: 'left', useSeal: true });
     expect(g.players.B.hasDustSeal).toBe(false);
     expect(g.players.B.artifacts.find((a) => a.id === '005')!.activeMarkerSide).toBe('left');

@@ -75,13 +75,13 @@ describe('charge effects', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '003' });
+    applyAction(g, { t: 'dustRise', artifactId: '003', meditationDieId: 'm0' });
     expect(g.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer).toBe(1);
     expect(g.freeDustRise).toBe(1);
     expect(getLegalActions(g).some((a) => a.t === 'dustRise')).toBe(true);
     // 用掉这次额外尘起（再次充能 → 又获得 1 次额外）
     g.players.A.areas.meditation.push({ id: 'm1', value: 3, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '003' });
+    applyAction(g, { t: 'dustRise', artifactId: '003', meditationDieId: 'm1' });
     expect(g.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer).toBe(2);
     expect(g.freeDustRise).toBe(1);
   });
@@ -91,7 +91,7 @@ describe('charge effects', () => {
     skipInitialReroll(g);
     g.players.B.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
     const before = g.players.B.areas.attack.length;
-    applyAction(g, { t: 'dustRise', artifactId: '006' });
+    applyAction(g, { t: 'dustRise', artifactId: '006', meditationDieId: 'm0' });
     const wansha = g.players.B.artifacts.find((a) => a.id === '006')!;
     expect(wansha.chargeLayer).toBe(1);
     expect(g.players.B.areas.attack.length).toBe(before + 1);

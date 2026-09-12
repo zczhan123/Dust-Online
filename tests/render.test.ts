@@ -288,4 +288,28 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelectorAll('.player--self .die.die-A').length).toBe(7); // A will 7
     expect(root.querySelectorAll('.player--enemy .die.die-B').length).toBe(8); // B will 8
   });
+
+  it('clicking a dust-rise button opens the meditation-die chooser (no auto-pick)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    state.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
+    const ui = freshUi();
+    const onAction = vi.fn();
+    const hooks: RenderHooks = {
+      onAction,
+      ui,
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+    };
+    renderGame(state, root, hooks);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.btn')).find(
+      (b) => b.dataset.act === 'dustRise',
+    );
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('@dustRise');
+    expect(root.querySelector('.selector')).not.toBeNull();
+  });
 });

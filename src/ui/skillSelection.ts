@@ -104,4 +104,11 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       return { opponentDiceByKind: map };
     },
   },
+  // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
+  '@dustRise': {
+    steps: () => [
+      { kind: 'dice', label: '选择 1 颗冥想骰作为尘起代价', owner: 'self', areas: ['meditation'], min: 1, max: 1 },
+    ],
+    buildParams: () => ({}),
+  },
 };

@@ -20,7 +20,7 @@ export interface Die {
 export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
-  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean }
+  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; meditationDieId?: string }
   | { t: 'attack'; dieId: string }
   | { t: 'block'; dieId?: string }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }

@@ -175,6 +175,19 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   ctx.hooks.requestRender();
 }
 
+function startDustRiseSelection(ctx: Ctx, act: DustRiseAction): void {
+  ctx.hooks.ui.selection = {
+    key: '@dustRise',
+    artifactId: act.artifactId,
+    side: act.side ?? 'left',
+    stepIndex: 0,
+    chosenDice: [],
+    currentSel: new Set<string>(),
+    numbers: [],
+  };
+  ctx.hooks.requestRender();
+}
+
 function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   const card = el('div', 'card');
   card.dataset.artifact = a.id;
@@ -279,7 +292,19 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   if (dustActions.length) {
     const actions = el('div', 'card-actions');
     for (const act of dustActions) {
-      actions.appendChild(button(dustRiseLabel(a, act), act, ctx.hooks));
+      const label = dustRiseLabel(a, act);
+      if (act.useSeal) {
+        actions.appendChild(button(label, act, ctx.hooks));
+      } else {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn';
+        b.dataset.act = 'dustRise';
+        b.textContent = label;
+        b.title = '选择 1 颗冥想骰作为尘起代价';
+        b.addEventListener('click', () => startDustRiseSelection(ctx, act));
+        actions.appendChild(b);
+      }
     }
     card.appendChild(actions);
   }
@@ -572,6 +597,17 @@ function operationList(ctx: Ctx): HTMLElement {
     }
     const label = actionLabel(ctx, a);
     if (label === null) continue;
+    if (a.t === 'dustRise' && !a.useSeal) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn';
+      b.dataset.act = 'dustRise';
+      b.textContent = label;
+      b.title = '选择 1 颗冥想骰作为尘起代价';
+      b.addEventListener('click', () => startDustRiseSelection(ctx, a));
+      box.appendChild(b);
+      continue;
+    }
     box.appendChild(button(label, a, ctx.hooks));
   }
   if (box.childElementCount === 0) {
@@ -675,6 +711,18 @@ function confirmSelection(ctx: Ctx): void {
 
   const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice });
   if (sel.stepIndex >= nextSteps.length) {
+    if (sel.key === '@dustRise') {
+      const medId = sel.chosenDice.flat()[0];
+      hooks.ui.selection = null;
+      hooks.onAction({
+        t: 'dustRise',
+        artifactId: sel.artifactId,
+        side: sel.side === 'only' ? undefined : sel.side,
+        meditationDieId: medId,
+      });
+      hooks.requestRender();
+      return;
+    }
     const numberIdx = nextSteps
       .map((s, i) => (s.kind === 'number' ? i : -1))
       .filter((i) => i >= 0);
