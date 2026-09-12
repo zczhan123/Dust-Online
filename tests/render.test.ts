@@ -276,4 +276,16 @@ describe('renderGame (interaction)', () => {
     btn!.click();
     expect(onRestart).toHaveBeenCalledTimes(1);
   });
+
+  it('colors dice by owner class (die-A / die-B)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    const dice = root.querySelectorAll('.die');
+    expect(dice.length).toBe(15);
+    for (const d of Array.from(dice)) {
+      expect(d.classList.contains('die-A') !== d.classList.contains('die-B')).toBe(true);
+    }
+    expect(root.querySelectorAll('.player--self .die.die-A').length).toBe(7); // A will 7
+    expect(root.querySelectorAll('.player--enemy .die.die-B').length).toBe(8); // B will 8
+  });
 });

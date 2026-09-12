@@ -305,7 +305,7 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
       : null;
 
   for (const d of player.areas[kind]) {
-    const die = el('span', 'die');
+    const die = el('span', `die die-${player.id}`);
     die.dataset.id = d.id;
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
@@ -367,6 +367,8 @@ function playerPanel(
   panel.dataset.player = player.id;
 
   const header = el('div', 'player-header');
+  const dot = el('span', `dot dot-${player.id}`);
+  header.appendChild(dot);
   const title = el('span', 'player-title');
   title.textContent = `玩家${player.id}`;
   header.appendChild(title);
