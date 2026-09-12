@@ -72,6 +72,7 @@ export function setupGame(opts: SetupOptions): GameState {
     freeDustRise: 0,
     rerollUsed: 0,
     skillsUsedThisTurn: [],
+    ultimatesUsed: [],
     winner: null,
   };
 }

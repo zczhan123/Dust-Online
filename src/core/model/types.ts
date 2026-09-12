@@ -107,5 +107,6 @@ export interface GameState {
   freeDustRise: number;
   rerollUsed: number;
   skillsUsedThisTurn: string[];
+  ultimatesUsed: string[];
   winner: PlayerId | null;
 }

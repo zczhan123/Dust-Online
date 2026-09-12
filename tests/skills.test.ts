@@ -229,3 +229,62 @@ describe('裁雨流 / 锋芒触发', () => {
     expect(g.pending).toBeNull();
   });
 });
+
+describe('必杀', () => {
+  it('斩神切: discards all own dice + matching opponent dice, deals true damage, gains 3 defense dice', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' }); // A has 003 明镜
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [{ id: 'a1', value: 3, kind: 'attack' }, { id: 'a2', value: 4, kind: 'attack' }],
+      defense: [{ id: 'd1', value: 1, kind: 'defense' }, { id: 'd2', value: 6, kind: 'defense' }],
+      meditation: [{ id: 'm1', value: 2, kind: 'meditation' }, { id: 'm2', value: 5, kind: 'meditation' }],
+    };
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [
+      { id: 'bd1', value: 3, kind: 'defense' },
+      { id: 'bd2', value: 3, kind: 'defense' },
+      { id: 'bd3', value: 3, kind: 'defense' },
+    ];
+    g.players.B.areas.meditation = [{ id: 'bm1', value: 4, kind: 'meditation' }];
+    const lifeBefore = g.players.B.life;
+    applyAction(g, { t: 'skill', artifactId: '003', side: 'only' });
+    // 己方弃 6；对方弃 1 冥想 + 2 防御 = 3；X = 9
+    expect(g.players.B.life).toBe(lifeBefore - 9);
+    expect(g.players.A.areas.defense.length).toBe(3); // 获得 3 防御骰
+    expect(g.players.A.areas.attack.length).toBe(0);
+    expect(g.ultimatesUsed).toContain('mingjing.ultimate');
+    expect(() => applyAction(g, { t: 'skill', artifactId: '003', side: 'only' })).toThrow();
+  });
+
+  it('零时枭首: discards X defense dice; if any remain, gains X attack dice', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' }); // B has 006 完杀
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack = [{ id: 'k1', value: 3, kind: 'attack' }];
+    g.players.A.areas.defense = [
+      { id: 'x1', value: 1, kind: 'defense' },
+      { id: 'x2', value: 2, kind: 'defense' },
+      { id: 'x3', value: 3, kind: 'defense' },
+      { id: 'x4', value: 4, kind: 'defense' },
+      { id: 'x5', value: 5, kind: 'defense' },
+    ];
+    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { attackDieId: 'k1' } });
+    expect(g.players.A.areas.defense.length).toBe(2); // 3 discarded
+    expect(g.players.B.areas.attack.length).toBe(3); // gained 3
+    expect(g.ultimatesUsed).toContain('wansha.ultimate');
+  });
+
+  it('零时枭首: gains nothing when opponent has no defense dice left', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' });
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack = [{ id: 'k1', value: 3, kind: 'attack' }];
+    g.players.A.areas.defense = [{ id: 'x1', value: 1, kind: 'defense' }];
+    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { attackDieId: 'k1' } });
+    expect(g.players.A.areas.defense.length).toBe(0);
+    expect(g.players.B.areas.attack.length).toBe(0);
+  });
+});

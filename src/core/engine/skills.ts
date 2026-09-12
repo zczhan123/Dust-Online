@@ -1,7 +1,7 @@
 import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
-import { virtualAttack } from './combat';
+import { dealTrueDamage, virtualAttack } from './combat';
 export { skillActive, hasActiveSkill };
 
 export interface SkillCtx {
@@ -124,6 +124,56 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const newKind = areaOf(newValue, dist);
       p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });
       virtualAttack(g, player, x);
+    },
+  },
+  // 明镜·必杀 斩神切：弃置自己全部能力骰；对方弃置对应种类对应数量；造成 X 真实伤害；获得 3 随机防御骰
+  'mingjing.ultimate': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const o = g.players[opponent];
+      const own = { attack: p.areas.attack.length, defense: p.areas.defense.length, meditation: p.areas.meditation.length };
+      const total = own.attack + own.defense + own.meditation;
+      p.areas.attack = []; p.areas.defense = []; p.areas.meditation = [];
+      const chosen = (params.opponentDiceByKind as Record<string, string[]>) ?? {};
+      let oppDiscarded = 0;
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        const want = Math.min(own[k], o.areas[k].length);
+        const provided = (chosen[k] ?? []).filter((id) => o.areas[k].some((d) => d.id === id)).slice(0, want);
+        const remaining = o.areas[k].filter((d) => !provided.includes(d.id)).map((d) => d.id);
+        while (provided.length < want) provided.push(remaining.shift()!);
+        if (provided.length) consumeDice(o, k, provided);
+        oppDiscarded += provided.length;
+      }
+      dealTrueDamage(g, opponent, total + oppDiscarded);
+      if (g.phase === 'gameOver') return;
+      for (let i = 0; i < 3; i++) p.areas.defense.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'defense'));
+    },
+  },
+  // 完杀·必杀 零时枭首：消耗 1 攻击骰 → 弃对方 X 个防御骰；若对方仍有剩余防御骰，再获得 X 个随机攻击骰（X=消耗骰点数）
+  'wansha.ultimate': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const o = g.players[opponent];
+      const dieId = params.attackDieId as string;
+      const die = p.areas.attack.find((d) => d.id === dieId);
+      if (!die) throw new Error('need an attack die');
+      const x = die.value;
+      consumeDice(p, 'attack', [dieId]);
+      const wanted = ((params.opponentDefenseDieIds as string[]) ?? [])
+        .filter((id) => o.areas.defense.some((d) => d.id === id))
+        .slice(0, x);
+      if (wanted.length < x) {
+        for (const d of o.areas.defense) {
+          if (wanted.length >= x) break;
+          if (!wanted.includes(d.id)) wanted.push(d.id);
+        }
+      }
+      consumeDice(o, 'defense', wanted);
+      if (o.areas.defense.length > 0) {
+        for (let i = 0; i < x; i++) p.areas.attack.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'attack'));
+      }
     },
   },
 };

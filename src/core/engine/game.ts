@@ -102,7 +102,9 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
   const acts: Action[] = [];
   for (const a of p.artifacts) {
     for (const s of a.skills) {
-      if (s.kind !== 'activate' || !skillActive(a, s)) continue;
+      if (s.kind !== 'activate' && s.kind !== 'ultimate') continue;
+      if (!skillActive(a, s)) continue;
+      if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) continue;
       if (g.skillsUsedThisTurn.includes(s.key)) continue;
       if (s.key === 'buxiang.cuilian') {
         for (const d of p.areas.attack) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: d.id } });
@@ -119,6 +121,15 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
       } else if (s.key === 'yingle.yingxi') {
         const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
         if (anyDie) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id, x: 1 } });
+      } else if (s.key === 'mingjing.ultimate') {
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side });
+      } else if (s.key === 'wansha.ultimate') {
+        const atk = p.areas.attack[0];
+        if (atk) {
+          const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
+          const oppDef = g.players[opp].areas.defense.slice(0, atk.value).map((d) => d.id);
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: atk.id, opponentDefenseDieIds: oppDef } });
+        }
       }
     }
   }
@@ -283,14 +294,16 @@ export function applyAction(g: GameState, action: Action): GameState {
       const p = g.players[g.activePlayer];
       const a = p.artifacts.find((x) => x.id === action.artifactId);
       if (!a) throw new Error(`no artifact: ${action.artifactId}`);
-      const s = a.skills.find((x) => x.side === action.side && x.kind === 'activate');
-      if (!s) throw new Error('no activate skill on that side');
+      const s = a.skills.find((x) => x.side === action.side && (x.kind === 'activate' || x.kind === 'ultimate'));
+      if (!s) throw new Error('no usable skill on that side');
       if (!skillActive(a, s)) throw new Error('skill not active');
+      if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) throw new Error('ultimate already used');
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
       withRng(g, (rng) => handler.run({ g, player: g.activePlayer, artifact: a, rng, params: action.params ?? {} }));
       g.skillsUsedThisTurn.push(s.key);
+      if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
       break;
     }
   }
