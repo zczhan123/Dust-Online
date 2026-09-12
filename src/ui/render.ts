@@ -224,6 +224,10 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
       const key = findSkillKey(a, s.side, s.type);
       if (key) box.dataset.key = key;
 
+      const isUsedUltimate =
+        key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
+      if (isUsedUltimate) box.classList.add('skill--used');
+
       const sHead = el('div', 'skill-head');
       const badge = el('span', 'skill-type');
       badge.textContent = s.type;
@@ -231,6 +235,11 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
       sname.textContent = s.name;
       sHead.appendChild(badge);
       sHead.appendChild(sname);
+      if (isUsedUltimate) {
+        const used = el('span', 'badge badge-used');
+        used.textContent = '已使用';
+        sHead.appendChild(used);
+      }
       box.appendChild(sHead);
       const body = el('div', 'skill-text');
       body.textContent = s.text;
@@ -240,7 +249,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         (x): x is SkillAction =>
           x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
       );
-      if (skillAction && isActivatableType(s.type)) {
+      if (skillAction && isActivatableType(s.type) && !isUsedUltimate) {
         box.classList.add('clickable');
         box.dataset.act = 'skill';
         box.title = '点击启动技能';
@@ -669,7 +678,7 @@ function confirmSelection(ctx: Ctx): void {
 
 function logPanel(ctx: Ctx): HTMLElement {
   const box = el('div', 'log');
-  const recent = ctx.state.log.slice(-20);
+  const recent = ctx.state.log.slice(-20).reverse();
   if (recent.length === 0) {
     box.textContent = '（暂无记录）';
   } else {

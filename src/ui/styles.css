@@ -101,6 +101,9 @@ body {
 }
 .skill--on { background: var(--on-bg); border-left-color: var(--on); }
 .skill--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
+.skill--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
+.skill--used .skill-name { text-decoration: line-through; }
+.badge-used { background: #d1d5db; color: #4b5563; }
 
 .skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
 .skill-type {

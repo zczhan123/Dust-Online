@@ -229,4 +229,30 @@ describe('renderGame (interaction)', () => {
       params: { attackDieId: 'atk-test' },
     });
   });
+
+  it('shows the log newest-first', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    state.log.length = 0;
+    state.log.push(
+      { turn: 0, phase: 'main', text: '第一条' },
+      { turn: 0, phase: 'main', text: '第二条' },
+      { turn: 0, phase: 'main', text: '第三条' },
+    );
+    renderGame(state, root, hooksFor());
+    const lines = root.querySelectorAll('.log .log-line');
+    expect(lines.length).toBe(3);
+    expect(lines[0].textContent).toContain('第三条');
+    expect(lines[2].textContent).toContain('第一条');
+  });
+
+  it('marks a used ultimate with a 已使用 badge and disables it', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    state.ultimatesUsed.push('mingjing.ultimate');
+    state.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
+    renderGame(state, root, hooksFor());
+    const used = root.querySelectorAll<HTMLElement>('.player--self .skill--used');
+    expect(used.length).toBe(1);
+    expect(used[0].textContent).toContain('已使用');
+    expect(used[0].classList.contains('clickable')).toBe(false);
+  });
 });
