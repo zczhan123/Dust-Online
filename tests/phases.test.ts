@@ -55,3 +55,27 @@ describe('refill phase', () => {
     expect(speed).toBeGreaterThan(1);
   });
 });
+
+import { rerollPhase, endPhase } from '../src/core/engine/phases';
+
+describe('reroll and end phases', () => {
+  it('rerolls at most speed dice and re-places by distribution', () => {
+    const g = setupGame({ seed: 8, firstPlayer: 'A' });
+    const p = g.players.A;
+    const before = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
+    const ids = before.slice(0, effectiveSpeed(p)).map((d) => d.id);
+    rerollPhase(g, 'A', ids, new SeededRng(8));
+    const dist = p.artifacts.find((a) => a.column === 2)!.distribution!;
+    for (const d of p.areas.attack) expect(dist.attack).toContain(d.value);
+    expect(totalDice(p)).toBe(before.length); // count unchanged
+  });
+
+  it('end phase discards down to will cap', () => {
+    const g = setupGame({ seed: 8, firstPlayer: 'A' });
+    const p = g.players.A;
+    const will = effectiveWill(p);
+    while (totalDice(p) <= will) p.areas.meditation.push({ id: `x${totalDice(p)}`, value: 2, kind: 'meditation' });
+    endPhase(g, 'A');
+    expect(totalDice(p)).toBe(will);
+  });
+});
