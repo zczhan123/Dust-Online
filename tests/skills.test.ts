@@ -147,3 +147,28 @@ describe('中央突破', () => {
     expect(g.pendingAttack).toMatchObject({ value: 4, physical: false });
   });
 });
+
+describe('影袭', () => {
+  it('lowers a die by X, moves it by its new value, and makes a virtual X attack', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack.push({ id: 'v1', value: 6, kind: 'attack' });
+    applyAction(g, { t: 'skill', artifactId: '005', side: 'left', params: { dieId: 'v1', x: 4 } });
+    // 6-4=2 → 攻击区（影掠 攻击 1/2/6）
+    expect(g.players.B.areas.attack.some((d) => d.id === 'v1' && d.value === 2)).toBe(true);
+    expect(g.pendingAttack).toMatchObject({ value: 4, physical: false, attacker: 'B' });
+  });
+
+  it('moves the die to another area when the new value belongs there', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack.push({ id: 'v2', value: 6, kind: 'attack' });
+    applyAction(g, { t: 'skill', artifactId: '005', side: 'left', params: { dieId: 'v2', x: 2 } });
+    // 6-2=4 → 冥想区（影掠 冥想 4/5）
+    expect(g.players.B.areas.meditation.some((d) => d.id === 'v2' && d.value === 4)).toBe(true);
+  });
+});

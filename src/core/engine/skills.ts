@@ -1,6 +1,7 @@
-import { createDie, newDieId } from '../model/dice';
+import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
+import { virtualAttack } from './combat';
 export { skillActive, hasActiveSkill };
 
 export interface SkillCtx {
@@ -97,6 +98,32 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const valid = wanted.filter((id) => owned.some((d) => d.id === id));
       consumeDice(g.players[opponent], 'defense', valid);
       if (count === 3) g.unblockableThisTurn = true;
+    },
+  },
+  // 影袭：使 1 个能力骰点数下降 X（最低 1）→ 按新点数移到对应区域；视为以 X 点进行 1 次（虚拟）攻击
+  'yingle.yingxi': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const dieId = params.dieId as string;
+      const x = params.x as number;
+      if (!Number.isInteger(x) || x < 1) throw new Error('x must be >= 1');
+      const kinds = ['attack', 'defense', 'meditation'] as const;
+      let newValue = 0;
+      let found = false;
+      for (const k of kinds) {
+        const die = p.areas[k].find((d) => d.id === dieId);
+        if (die) {
+          p.areas[k] = p.areas[k].filter((d) => d.id !== dieId);
+          newValue = Math.max(1, die.value - x);
+          found = true;
+          break;
+        }
+      }
+      if (!found) throw new Error(`die not found: ${dieId}`);
+      const dist = p.artifacts.find((a) => a.column === 2)!.distribution!;
+      const newKind = areaOf(newValue, dist);
+      p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });
+      virtualAttack(g, player, x);
     },
   },
 };

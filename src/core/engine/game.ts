@@ -116,6 +116,9 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
           const oppDef = g.players[opp].areas.defense.slice(0, 3).map((d) => d.id);
           acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationCount: 3, opponentDefenseDieIds: oppDef } });
         }
+      } else if (s.key === 'yingle.yingxi') {
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        if (anyDie) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id, x: 1 } });
       }
     }
   }
