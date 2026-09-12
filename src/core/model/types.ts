@@ -3,6 +3,7 @@ export type DiceKind = 'attack' | 'defense' | 'meditation';
 export type Column = 1 | 2 | 3;
 export type Phase =
   | 'setup'
+  | 'initialReroll'
   | 'refill'
   | 'reroll'
   | 'dustRise'
@@ -92,6 +93,8 @@ export interface LogEntry {
 export interface GameState {
   players: Record<PlayerId, PlayerState>;
   activePlayer: PlayerId;
+  firstPlayer: PlayerId;
+  initialRerollQueue: PlayerId[];
   phase: Phase;
   dustfall: number;
   turnIndex: number;

@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, applyAction } from '../src/core/engine/game';
+import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { totalDice } from '../src/core/engine/derive';
 import { virtualAttack } from '../src/core/engine/combat';
 
 describe('basic activate skills', () => {
   it('淬炼 consumes an attack die and increments 不祥 count (cap 3)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
@@ -17,6 +18,7 @@ describe('basic activate skills', () => {
 
   it('龙腾万丈 consumes 3 meditation dice, gains 4, moves 2 to attack and adds +1 damage', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     const youlong = g.players.A.artifacts.find((a) => a.id === '002')!;
     youlong.activeMarkerSide = 'right';
@@ -48,6 +50,7 @@ describe('basic activate skills', () => {
 
   it('rejects activating a skill that is not active', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.areas.attack.push({ id: 'x', value: 3, kind: 'attack' });
     expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { attackDieId: 'x' } })).toThrow();
@@ -55,6 +58,7 @@ describe('basic activate skills', () => {
 
   it('rejects using the same activate skill twice in one turn', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
@@ -69,6 +73,7 @@ import { getLegalActions } from '../src/core/engine/game';
 describe('charge effects', () => {
   it('明镜 charge grants a free extra dust rise (not counting the 1/round limit)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
     applyAction(g, { t: 'dustRise', artifactId: '003' });
     expect(g.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer).toBe(1);
@@ -83,6 +88,7 @@ describe('charge effects', () => {
 
   it('完杀 charge grants an attack die equal to the charge layer', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' }); // B 持 006
+    skipInitialReroll(g);
     g.players.B.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
     const before = g.players.B.areas.attack.length;
     applyAction(g, { t: 'dustRise', artifactId: '006' });
@@ -94,6 +100,7 @@ describe('charge effects', () => {
 
   it('charging a col3 artifact via dust seal also triggers its charge effect', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' });
+    skipInitialReroll(g);
     g.players.B.hasDustSeal = true;
     const before = g.players.B.areas.attack.length;
     applyAction(g, { t: 'dustRise', artifactId: '006', useSeal: true });
@@ -105,6 +112,7 @@ describe('charge effects', () => {
 describe('中央突破', () => {
   it('consumes 3 meditation dice and discards the chosen opponent defense dice, granting unblockable', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     while (g.players.A.areas.meditation.length < 3) {
@@ -123,6 +131,7 @@ describe('中央突破', () => {
 
   it('an unblockable attack deals damage even if a defense die is offered', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     while (g.players.A.areas.meditation.length < 3) {
@@ -145,6 +154,7 @@ describe('中央突破', () => {
 
   it('中央突破 consumes the SPECIFIC meditation dice chosen', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     g.players.A.areas.meditation = [
@@ -196,6 +206,7 @@ describe('影袭', () => {
 describe('裁雨流 / 锋芒触发', () => {
   it('裁雨流 offers to move the physical attack die after damage; accepting places it', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'atk1', value: 5, kind: 'attack' });
@@ -209,6 +220,7 @@ describe('裁雨流 / 锋芒触发', () => {
 
   it('裁雨流 does not trigger for a virtual (skill) attack', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '005', '003'] });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
     g.players.A.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
@@ -221,6 +233,7 @@ describe('裁雨流 / 锋芒触发', () => {
 
   it('锋芒·触发: after a block, the attacker may pay to cancel and deal +2 true damage', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
@@ -237,6 +250,7 @@ describe('裁雨流 / 锋芒触发', () => {
 
   it('锋芒·触发: declining changes nothing', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
@@ -253,6 +267,7 @@ describe('裁雨流 / 锋芒触发', () => {
 describe('必杀', () => {
   it('斩神切: discards all own dice + matching opponent dice, deals true damage, gains 3 defense dice', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' }); // A has 003 明镜
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
     g.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
     g.players.A.areas = {

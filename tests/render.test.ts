@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
-import { createGame, applyAction } from '../src/core/engine/game';
+import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import type { Action } from '../src/core/model/types';
 
@@ -128,6 +128,7 @@ describe('renderGame (interaction)', () => {
 
   it('renders an operation list with buttons in the main phase', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     renderGame(state, root, hooksFor());
     expect(root.querySelectorAll('.actionlist .btn').length).toBeGreaterThan(0);
@@ -135,6 +136,7 @@ describe('renderGame (interaction)', () => {
 
   it('clicking a legal attack die dispatches an attack action', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const die = state.players.A.areas.attack[0];
     const onAction = vi.fn();
@@ -151,6 +153,7 @@ describe('renderGame (interaction)', () => {
 
   it('clicking a parameterized skill card opens the dice chooser (no default dispatch)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const yuqie = state.players.A.artifacts.find((a) => a.id === '001')!;
     yuqie.activeMarkerSide = 'left';
@@ -175,6 +178,7 @@ describe('renderGame (interaction)', () => {
 
   it('enters the skill chooser from the operation list', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
@@ -196,6 +200,7 @@ describe('renderGame (interaction)', () => {
 
   it('completes the chooser and dispatches explicit dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';

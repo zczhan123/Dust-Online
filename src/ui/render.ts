@@ -25,6 +25,7 @@ const AREA_ORDER_MIRRORED: DiceKind[] = ['meditation', 'defense', 'attack'];
 
 const PHASE_LABEL: Record<Phase, string> = {
   setup: '准备',
+  initialReroll: '初始重掷',
   refill: '补充',
   reroll: '重掷',
   dustRise: '尘起',
@@ -144,7 +145,11 @@ function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
 }
 
 function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
-  return ctx.state.phase === 'reroll' && player.id === ctx.state.activePlayer && ctx.maxReroll > 0;
+  return (
+    (ctx.state.phase === 'reroll' || ctx.state.phase === 'initialReroll') &&
+    player.id === ctx.state.activePlayer &&
+    ctx.maxReroll > 0
+  );
 }
 
 function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
@@ -409,6 +414,8 @@ function phaseHint(ctx: Ctx): string {
   if (pd && pd.kind === 'fengmang') return '锋芒：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。';
   if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
   switch (state.phase) {
+    case 'initialReroll':
+      return '初始重掷：可点选任意数量的骰子后点「重掷选中」，或点「跳过」。';
     case 'reroll':
       return '重掷阶段：点击你的骰子选择，再点「重掷选中」；或跳过。';
     case 'dustRise':
@@ -463,6 +470,8 @@ function advanceLabel(phase: Phase): string {
   switch (phase) {
     case 'dustRise':
       return '结束尘起阶段';
+    case 'initialReroll':
+      return '跳过';
     case 'reroll':
       return '跳过重掷';
     case 'main':

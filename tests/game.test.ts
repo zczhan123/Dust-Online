@@ -1,15 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, getLegalActions, applyAction } from '../src/core/engine/game';
+import { createGame, getLegalActions, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { totalDice } from '../src/core/engine/derive';
 
 describe('game actions and turn flow', () => {
   it('first turn skips refill and starts at dustRise', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     expect(g.phase).toBe('dustRise');
   });
 
   it('dust rise consumes a meditation die and activates', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     const before = g.players.A.areas.meditation.length;
     applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left' });
     expect(g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide).toBe('left');
@@ -20,6 +22,7 @@ describe('game actions and turn flow', () => {
 
   it('advancing without a dust rise action increments dustfall', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     expect(g.dustfall).toBe(1);
     expect(g.phase).toBe('main');
@@ -27,6 +30,7 @@ describe('game actions and turn flow', () => {
 
   it('advancing after a dust rise action does not increment dustfall', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left' });
     applyAction(g, { t: 'advance' });
     expect(g.dustfall).toBe(0);
@@ -35,6 +39,7 @@ describe('game actions and turn flow', () => {
 
   it('seal can be used after a normal dust rise in the same phase', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' });
+    skipInitialReroll(g);
     g.players.B.hasDustSeal = true; // B 持有尘印
     applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left' });
     applyAction(g, { t: 'dustRise', artifactId: '005', side: 'left', useSeal: true });
@@ -44,6 +49,7 @@ describe('game actions and turn flow', () => {
 
   it('seal-only use prevents dustfall on advance', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' });
+    skipInitialReroll(g);
     g.players.B.hasDustSeal = true; // B 持有尘印
     g.players.B.areas.meditation = [];
     applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left', useSeal: true });
@@ -54,6 +60,7 @@ describe('game actions and turn flow', () => {
 
   it('main phase attack produces a block decision for the opponent', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     const atk = g.players.A.areas.attack[0];
     applyAction(g, { t: 'attack', dieId: atk.id });
@@ -64,12 +71,14 @@ describe('game actions and turn flow', () => {
 
   it('attack outside main phase throws', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     const atk = g.players.A.areas.attack[0];
     expect(() => applyAction(g, { t: 'attack', dieId: atk.id })).toThrow();
   });
 
   it('ending main starts the opponent turn (still first round -> dustRise, no refill)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
     const bBefore = totalDice(g.players.B);
     applyAction(g, { t: 'advance' }); // end main -> B
@@ -80,6 +89,7 @@ describe('game actions and turn flow', () => {
 
   it('second turn of A refills (no longer first round)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // A: dustRise -> main
     applyAction(g, { t: 'advance' }); // end A -> B
     applyAction(g, { t: 'advance' }); // B: dustRise -> main
@@ -104,6 +114,7 @@ describe('game actions and turn flow', () => {
 
   it('thisTurn buffs expire at end of turn', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
     g.players.A.buffs.push({ attr: 'attackDamage', add: 5, duration: 'thisTurn' });
     g.players.A.buffs.push({ attr: 'will', add: 1, duration: 'permanent' });
     applyAction(g, { t: 'advance' }); // -> main

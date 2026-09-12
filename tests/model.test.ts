@@ -24,6 +24,8 @@ describe('model types', () => {
     const g: GameState = {
       players: { A: p, B: { ...p, id: 'B' } },
       activePlayer: 'A',
+      firstPlayer: 'A',
+      initialRerollQueue: [],
       phase: 'setup',
       dustfall: 0,
       turnIndex: 0,

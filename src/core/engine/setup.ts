@@ -57,6 +57,8 @@ export function setupGame(opts: SetupOptions): GameState {
   return {
     players: { A: playerA, B: playerB },
     activePlayer: opts.firstPlayer,
+    firstPlayer: opts.firstPlayer,
+    initialRerollQueue: [],
     phase: 'setup',
     dustfall: 0,
     turnIndex: 0,

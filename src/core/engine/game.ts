@@ -77,8 +77,29 @@ export function advancePhase(g: GameState): void {
 
 export function createGame(opts: SetupOptions): GameState {
   const g = setupGame(opts);
-  beginTurn(g);
+  const second: PlayerId = g.firstPlayer === 'A' ? 'B' : 'A';
+  g.phase = 'initialReroll';
+  g.activePlayer = g.firstPlayer;
+  g.initialRerollQueue = [g.firstPlayer, second];
+  logLine(g, `${pname(g.firstPlayer)} 先手；初始重掷：可重掷任意数量的初始能力骰`);
   return g;
+}
+
+/** 跳过后手/先手的初始重掷，进入先手第一回合（供快速开始/测试） */
+export function skipInitialReroll(g: GameState): void {
+  let guard = 0;
+  while (g.phase === 'initialReroll' && guard++ < 4) applyAction(g, { t: 'advance' });
+}
+
+function finishInitialRerollStep(g: GameState): void {
+  g.initialRerollQueue.shift();
+  if (g.initialRerollQueue.length > 0) {
+    g.activePlayer = g.initialRerollQueue[0];
+    logLine(g, `${pname(g.activePlayer)} 进行初始重掷`);
+  } else {
+    g.activePlayer = g.firstPlayer;
+    beginTurn(g);
+  }
 }
 
 function dustRiseActions(g: GameState, player: PlayerId): Action[] {
@@ -174,6 +195,14 @@ export function getLegalActions(g: GameState): Action[] {
     return acts;
   }
 
+  if (g.phase === 'initialReroll') {
+    const p = g.players[g.activePlayer];
+    const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id);
+    const acts: Action[] = [{ t: 'advance' }];
+    if (all.length) acts.push({ t: 'reroll', dieIds: all });
+    return acts;
+  }
+
   if (g.pendingAttack) {
     const defender: PlayerId = g.pendingAttack.attacker === 'A' ? 'B' : 'A';
     const acts: Action[] = [{ t: 'block' }];
@@ -227,9 +256,21 @@ export function applyAction(g: GameState, action: Action): GameState {
   }
   switch (action.t) {
     case 'advance':
-      advancePhase(g);
+      if (g.phase === 'initialReroll') finishInitialRerollStep(g);
+      else advancePhase(g);
       break;
     case 'reroll': {
+      if (g.phase === 'initialReroll') {
+        const p = g.players[g.activePlayer];
+        const owned = new Set(
+          [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id),
+        );
+        if (new Set(action.dieIds).size !== action.dieIds.length) throw new Error('duplicate die id');
+        for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
+        withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
+        finishInitialRerollStep(g);
+        break;
+      }
       if (g.phase !== 'reroll') throw new Error('not reroll phase');
       const p = g.players[g.activePlayer];
       if (g.rerollUsed >= rerollAllowance(p)) throw new Error('reroll limit reached');
