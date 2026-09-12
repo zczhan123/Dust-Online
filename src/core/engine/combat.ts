@@ -1,5 +1,5 @@
 import type { GameState, PlayerId } from '../model/types';
-import { hasActiveSkill } from './skills';
+import { hasActiveSkill } from './skill-state';
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
   const p = g.players[player];
@@ -39,9 +39,15 @@ export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   const die = g.players[player].areas.attack.find((d) => d.id === dieId);
   if (!die) throw new Error(`not an attack die: ${dieId}`);
-  const value = die.value + attackDamageBuff(g, player);
   removeDie(g, player, dieId);
-  g.pendingAttack = { attacker: player, value, unblockable: false };
+  g.pendingAttack = {
+    attacker: player,
+    value: die.value + attackDamageBuff(g, player),
+    unblockable: false,
+    physical: true,
+    sourceDieId: dieId,
+    sourceValue: die.value,
+  };
 }
 
 /** 结算待处理攻击：给出防御骰=抵挡（无伤害）；不给/不可抵挡=造成伤害 */

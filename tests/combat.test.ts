@@ -9,7 +9,14 @@ describe('combat', () => {
     const die = g.players.A.areas.attack[0];
     const before = totalDice(g.players.A);
     doAttack(g, 'A', die.id);
-    expect(g.pendingAttack).toEqual({ attacker: 'A', value: die.value, unblockable: false });
+    expect(g.pendingAttack).toMatchObject({
+      attacker: 'A',
+      value: die.value,
+      unblockable: false,
+      physical: true,
+      sourceDieId: die.id,
+      sourceValue: die.value,
+    });
     expect(totalDice(g.players.A)).toBe(before - 1);
   });
 

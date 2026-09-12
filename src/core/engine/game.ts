@@ -17,6 +17,9 @@ function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
   g.pendingAttack = null;
+  g.pending = null;
+  g.unblockableThisTurn = false;
+  g.caiyuliuUsed = 0;
   g.dustRiseNormalUsed = false;
   g.dustRiseActed = false;
   g.freeDustRise = 0;

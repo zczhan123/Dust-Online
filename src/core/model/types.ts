@@ -22,13 +22,22 @@ export type Action =
   | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean }
   | { t: 'attack'; dieId: string }
   | { t: 'block'; dieId?: string }
+  | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
+  | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
   attacker: PlayerId;
   value: number;
   unblockable: boolean;
+  physical: boolean;
+  sourceDieId?: string;
+  sourceValue?: number;
 }
+
+export type Pending =
+  | { kind: 'caiyuliu'; player: PlayerId; dieId: string; value: number }
+  | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number };
 
 export interface Distribution {
   defense: number[];
@@ -90,6 +99,9 @@ export interface GameState {
   rngState: number;
   log: LogEntry[];
   pendingAttack: PendingAttack | null;
+  pending: Pending | null;
+  unblockableThisTurn: boolean;
+  caiyuliuUsed: number;
   dustRiseNormalUsed: boolean;
   dustRiseActed: boolean;
   freeDustRise: number;

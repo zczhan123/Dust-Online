@@ -1,5 +1,5 @@
 import type { Buff, Distribution, PlayerState } from '../model/types';
-import { hasActiveSkill } from './skills';
+import { hasActiveSkill } from './skill-state';
 
 export function artifactByColumn(p: PlayerState, column: 1 | 2 | 3) {
   return p.artifacts.find((a) => a.column === column);
