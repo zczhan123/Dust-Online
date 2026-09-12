@@ -17,22 +17,56 @@ describe('renderGame (read-only snapshot)', () => {
     }
   });
 
-  it('renders both players life', () => {
+  it('stacks enemy above self', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
-    expect(root.querySelectorAll('.player').length).toBe(2);
-    expect(root.textContent).toContain('50');
+    const panels = root.querySelectorAll('.player');
+    expect(panels.length).toBe(2);
+    expect(panels[0].classList.contains('player--enemy')).toBe(true);
+    expect(panels[1].classList.contains('player--self')).toBe(true);
+  });
+
+  it('mirrors the enemy area order (attack <-> meditation)', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
+    const enemyAreas = root.querySelectorAll<HTMLElement>('.player--enemy .area');
+    const selfAreas = root.querySelectorAll<HTMLElement>('.player--self .area');
+    expect(enemyAreas[0].dataset.kind).toBe('meditation');
+    expect(enemyAreas[2].dataset.kind).toBe('attack');
+    expect(selfAreas[0].dataset.kind).toBe('attack');
+    expect(selfAreas[2].dataset.kind).toBe('meditation');
   });
 
   it('renders dice in three areas per player', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
-    expect(root.querySelectorAll('.area').length).toBe(6); // 2 players × 3 areas
-    const dice = root.querySelectorAll('.die');
-    expect(dice.length).toBe(15); // A will 7 + B will 8
+    expect(root.querySelectorAll('.area').length).toBe(6);
+    expect(root.querySelectorAll('.die').length).toBe(15); // A will 7 + B will 8
   });
 
-  it('shows speed/will for column-1 artifacts', () => {
+  it('shows skill text so skills can be read/switched', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
-    expect(root.textContent).toContain('速度');
-    expect(root.textContent).toContain('意志');
+    const text = root.textContent ?? '';
+    for (const s of [
+      '中央突破', '裁雨流', '龙游万象', '龙腾万丈', '斩神切',
+      '淬炼', '锋芒', '影袭', '潜行', '零时枭首',
+    ]) {
+      expect(text).toContain(s);
+    }
+    // 每个玩家 3 张卡的技能都能看到 -> 至少 6 张卡
+    expect(root.querySelectorAll('.card').length).toBe(6);
+  });
+
+  it('shows a dustfall counter and a roll/supply zone in the center', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root);
+    expect(root.querySelector('.dustfall')?.textContent).toContain('尘落');
+    expect(root.querySelector('.rollzone')).not.toBeNull();
+  });
+
+  it('shows count and charge badges when present', () => {
+    const state = setupGame({ seed: 1, firstPlayer: 'A' });
+    state.players.B.artifacts.find((a) => a.id === '004')!.count = 2; // 不祥
+    state.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer = 2; // 明镜
+    renderGame(state, root);
+    const text = root.textContent ?? '';
+    expect(text).toContain('计数 2');
+    expect(text).toContain('充能 2/4');
   });
 });

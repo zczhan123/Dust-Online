@@ -1,15 +1,141 @@
 :root { color-scheme: dark; }
-body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #14161a; color: #e8e8e8; }
-.board { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
-.player { flex: 1; background: #1d2026; border: 1px solid #2c313a; border-radius: 10px; padding: 12px; }
-.player-header { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
-.cards { display: flex; gap: 10px; flex-wrap: wrap; }
-.card { background: #262b33; border: 1px solid #3a4150; border-radius: 8px; padding: 8px 10px; min-width: 150px; }
-.card-name { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
-.card-stats { font-size: 12px; color: #a9b1bd; line-height: 1.6; }
+
+body {
+  margin: 0;
+  font-family: system-ui, "Microsoft YaHei", sans-serif;
+  background: #14161a;
+  color: #e8e8e8;
+}
+
+/* 上下布局：敌人 / 中央 / 自己 */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.player {
+  background: #1d2026;
+  border: 1px solid #2c313a;
+  border-radius: 10px;
+  padding: 12px;
+}
+.player--enemy { border-color: #5a2b2b; }
+.player--self { border-color: #2b4a5a; }
+
+.player-header {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.card {
+  flex: 1 1 260px;
+  min-width: 260px;
+  max-width: 400px;
+  background: #262b33;
+  border: 1px solid #3a4150;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-art {
+  height: 96px;
+  border-radius: 6px;
+  border: 1px dashed #4a5265;
+  background: repeating-linear-gradient(45deg, #20242b, #20242b 8px, #23272f 8px, #23272f 16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7485;
+  font-size: 12px;
+}
+
+.card-name { font-weight: 700; font-size: 18px; }
+
+.card-stats { font-size: 12px; color: #c7cdd7; line-height: 1.7; }
+
+.card-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+.badge-active { background: #3b5bdb; color: #fff; }
+.badge-charge { background: #b8860b; color: #fff; }
+.badge-count { background: #c2410c; color: #fff; }
+
+.skills { display: flex; flex-direction: column; gap: 6px; }
+.skill { border: 1px solid #3a4150; border-radius: 8px; padding: 6px 8px; background: #20242b; }
+.skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.skill-type {
+  font-size: 11px;
+  background: #334155;
+  color: #dbeafe;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.skill-name { font-weight: 700; font-size: 14px; }
+.skill-text { font-size: 12px; color: #aeb6c2; line-height: 1.7; }
+
 .areas { display: flex; gap: 10px; margin-top: 12px; }
-.area { flex: 1; background: #20242b; border: 1px dashed #3a4150; border-radius: 8px; padding: 8px; min-height: 64px; }
+.area {
+  flex: 1;
+  background: #20242b;
+  border: 1px dashed #3a4150;
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 76px;
+}
 .area-label { font-size: 12px; color: #8b93a1; margin-bottom: 6px; }
 .dice { display: flex; gap: 6px; flex-wrap: wrap; }
-.die { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center;
-  background: #3b82f6; color: #fff; border-radius: 6px; font-weight: 700; }
+.die {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  background: #3b82f6;
+  color: #fff;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+/* 中央：尘落 + 投掷区 / 供应堆 */
+.center {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.dustfall {
+  flex: 0 0 auto;
+  background: #2a2118;
+  border: 1px solid #6b4e2a;
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+}
+.rollzone {
+  flex: 1;
+  background: #1a1d22;
+  border: 2px dashed #3a4150;
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7485;
+  font-size: 14px;
+}
