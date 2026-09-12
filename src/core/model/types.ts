@@ -16,6 +16,14 @@ export interface Die {
   kind: DiceKind;
 }
 
+export type Action =
+  | { t: 'advance' }
+  | { t: 'reroll'; dieIds: string[] }
+  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean }
+  | { t: 'passDustRise' }
+  | { t: 'attack'; dieId: string }
+  | { t: 'block'; dieId?: string };
+
 export interface PendingAttack {
   attacker: PlayerId;
   value: number;
