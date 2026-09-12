@@ -91,6 +91,6 @@ export interface GameState {
   pendingAttack: PendingAttack | null;
   dustRiseNormalUsed: boolean;
   dustRiseActed: boolean;
-  rerollDone: boolean;
+  rerollUsed: number;
   winner: PlayerId | null;
 }

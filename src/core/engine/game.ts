@@ -1,7 +1,7 @@
 import { setupGame, type SetupOptions } from './setup';
 import { SeededRng } from '../rng/rng';
 import { refillPhase, rerollPhase, endPhase } from './phases';
-import { effectiveSpeed } from './derive';
+import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock } from './combat';
@@ -18,7 +18,7 @@ export function beginTurn(g: GameState): void {
   g.pendingAttack = null;
   g.dustRiseNormalUsed = false;
   g.dustRiseActed = false;
-  g.rerollDone = false;
+  g.rerollUsed = 0;
   const p = g.activePlayer;
   if (g.firstRound[p]) {
     g.phase = 'dustRise'; // 第一回合跳过补充与重掷
@@ -108,7 +108,7 @@ export function getLegalActions(g: GameState): Action[] {
   switch (g.phase) {
     case 'reroll': {
       const acts: Action[] = [{ t: 'advance' }];
-      if (!g.rerollDone) {
+      if (g.rerollUsed < rerollAllowance(p)) {
         const speed = effectiveSpeed(p);
         const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].sort(
           (a, b) => a.value - b.value,
@@ -138,8 +138,8 @@ export function applyAction(g: GameState, action: Action): GameState {
       break;
     case 'reroll': {
       if (g.phase !== 'reroll') throw new Error('not reroll phase');
-      if (g.rerollDone) throw new Error('already rerolled');
       const p = g.players[g.activePlayer];
+      if (g.rerollUsed >= rerollAllowance(p)) throw new Error('reroll limit reached');
       const owned = new Set(
         [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id),
       );
@@ -147,7 +147,7 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (new Set(action.dieIds).size !== action.dieIds.length) throw new Error('duplicate die id');
       for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
       withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
-      g.rerollDone = true;
+      g.rerollUsed += 1;
       break;
     }
     case 'dustRise': {

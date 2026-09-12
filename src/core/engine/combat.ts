@@ -1,8 +1,14 @@
 import type { GameState, PlayerId } from '../model/types';
+import { hasActiveSkill } from './skills';
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
-  const adds = g.players[player].buffs.filter((b) => b.attr === 'attackDamage').map((b) => b.add);
-  return adds.length ? Math.max(...adds) : 0;
+  const p = g.players[player];
+  const adds = p.buffs.filter((b) => b.attr === 'attackDamage').map((b) => b.add);
+  const buffMax = adds.length ? Math.max(...adds) : 0;
+  const fengmang = hasActiveSkill(p, 'buxiang.fengmang')
+    ? p.artifacts.find((a) => a.id === '004')?.count ?? 0
+    : 0;
+  return Math.max(buffMax, fengmang);
 }
 
 function removeDie(g: GameState, player: PlayerId, dieId: string): void {

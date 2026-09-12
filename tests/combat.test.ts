@@ -56,3 +56,24 @@ describe('combat', () => {
     expect(() => doAttack(g, 'A', 'x2')).toThrow();
   });
 });
+
+import { attackDamageBuff } from '../src/core/engine/combat';
+
+describe('锋芒 continuous', () => {
+  it('adds 不祥 count as attack damage when active right', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A' });
+    const buxiang = g.players.B.artifacts.find((a) => a.id === '004')!;
+    expect(attackDamageBuff(g, 'B')).toBe(0);
+    buxiang.activeMarkerSide = 'right';
+    buxiang.count = 2;
+    expect(attackDamageBuff(g, 'B')).toBe(2);
+  });
+  it('takes the max of buff and 锋芒 (golden rule)', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A' });
+    const buxiang = g.players.B.artifacts.find((a) => a.id === '004')!;
+    buxiang.activeMarkerSide = 'right';
+    buxiang.count = 2;
+    g.players.B.buffs.push({ attr: 'attackDamage', add: 5, duration: 'thisTurn' });
+    expect(attackDamageBuff(g, 'B')).toBe(5);
+  });
+});

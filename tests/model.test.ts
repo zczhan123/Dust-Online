@@ -33,7 +33,7 @@ describe('model types', () => {
       pendingAttack: null,
       dustRiseNormalUsed: false,
       dustRiseActed: false,
-      rerollDone: false,
+      rerollUsed: 0,
       winner: null,
     };
     expect(g.players.A.life).toBe(50);

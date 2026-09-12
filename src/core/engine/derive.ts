@@ -1,4 +1,5 @@
 import type { Buff, Distribution, PlayerState } from '../model/types';
+import { hasActiveSkill } from './skills';
 
 export function artifactByColumn(p: PlayerState, column: 1 | 2 | 3) {
   return p.artifacts.find((a) => a.column === column);
@@ -22,7 +23,8 @@ function maxBuff(p: PlayerState, attr: Buff['attr']): number {
 }
 
 export function effectiveSpeed(p: PlayerState): number {
-  return baseSpeed(p) + maxBuff(p, 'speed');
+  const extra = hasActiveSkill(p, 'youlong.wanxiang') ? 1 : 0;
+  return baseSpeed(p) + Math.max(maxBuff(p, 'speed'), extra);
 }
 
 export function effectiveWill(p: PlayerState): number {
@@ -35,4 +37,8 @@ export function totalDice(p: PlayerState): number {
 
 export function initialLife(p: PlayerState): number {
   return artifactByColumn(p, 3)?.life ?? 0;
+}
+
+export function rerollAllowance(p: PlayerState): number {
+  return hasActiveSkill(p, 'youlong.wanxiang') ? 2 : 1;
 }

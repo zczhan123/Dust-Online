@@ -39,3 +39,25 @@ describe('attribute derivation (single source per column)', () => {
     expect(effectiveWill(p)).toBe(10);
   });
 });
+
+import { rerollAllowance } from '../src/core/engine/derive';
+
+describe('continuous skills', () => {
+  it('龙游万象 grants +1 speed when 游龙 is activated left', () => {
+    const p = player(['001', '002', '003']);
+    expect(effectiveSpeed(p)).toBe(4);
+    p.artifacts.find((a) => a.id === '002')!.activeMarkerSide = 'left';
+    expect(effectiveSpeed(p)).toBe(5);
+    expect(rerollAllowance(p)).toBe(2);
+  });
+  it('default reroll allowance is 1', () => {
+    const p = player(['001', '002', '003']);
+    expect(rerollAllowance(p)).toBe(1);
+  });
+  it('龙游万象 speed +1 takes max with speed buffs', () => {
+    const p = player(['001', '002', '003']);
+    p.artifacts.find((a) => a.id === '002')!.activeMarkerSide = 'left';
+    p.buffs.push({ attr: 'speed', add: 3, duration: 'thisTurn' });
+    expect(effectiveSpeed(p)).toBe(7); // 4 + max(3,1)
+  });
+});

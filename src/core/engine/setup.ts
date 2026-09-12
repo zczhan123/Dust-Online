@@ -66,7 +66,7 @@ export function setupGame(opts: SetupOptions): GameState {
     pendingAttack: null,
     dustRiseNormalUsed: false,
     dustRiseActed: false,
-    rerollDone: false,
+    rerollUsed: 0,
     winner: null,
   };
 }
