@@ -700,6 +700,34 @@ function logPanel(ctx: Ctx): HTMLElement {
   return box;
 }
 
+function gameOverModal(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const overlay = el('div', 'gameover-overlay');
+  const modal = el('div', 'gameover-modal');
+
+  const title = el('div', 'gameover-title');
+  title.textContent = '游戏结束';
+  modal.appendChild(title);
+
+  const winner = el('div', 'gameover-winner');
+  winner.textContent = state.winner ? `玩家${state.winner} 获胜！` : '平局';
+  modal.appendChild(winner);
+
+  const reason = el('div', 'gameover-reason');
+  reason.textContent = state.dustfall >= 10 ? '尘落达到 10（生命更高者胜）' : '对方生命归零';
+  modal.appendChild(reason);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn setup-start gameover-restart';
+  btn.textContent = '重新开始游戏';
+  btn.addEventListener('click', () => hooks.onRestart());
+  modal.appendChild(btn);
+
+  overlay.appendChild(modal);
+  return overlay;
+}
+
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   const legal = getLegalActions(state);
   const selfId: PlayerId = state.activePlayer;
@@ -743,4 +771,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   board.appendChild(logPanel(ctx));
   root.appendChild(board);
+
+  if (state.phase === 'gameOver') {
+    root.appendChild(gameOverModal(ctx));
+  }
 }

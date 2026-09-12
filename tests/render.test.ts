@@ -260,4 +260,20 @@ describe('renderGame (interaction)', () => {
     expect(used[0].textContent).toContain('已使用');
     expect(used[0].classList.contains('clickable')).toBe(false);
   });
+
+  it('shows a game-over modal with the winner and a working restart button', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    state.phase = 'gameOver';
+    state.winner = 'B';
+    const onRestart = vi.fn();
+    renderGame(state, root, { ...hooksFor(), onRestart });
+    const modal = root.querySelector('.gameover-modal');
+    expect(modal).not.toBeNull();
+    expect(modal!.textContent).toContain('玩家B');
+    expect(modal!.textContent).toContain('获胜');
+    const btn = root.querySelector<HTMLButtonElement>('.gameover-restart');
+    expect(btn).not.toBeNull();
+    btn!.click();
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
 });

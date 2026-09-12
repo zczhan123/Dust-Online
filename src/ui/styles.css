@@ -446,3 +446,27 @@ body {
 .setup-start:hover {
   background: #176440;
 }
+
+/* 终局弹框 */
+.gameover-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.gameover-modal {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 26px 36px;
+  text-align: center;
+  min-width: 280px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
+}
+.gameover-title { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+.gameover-winner { font-size: 26px; font-weight: 800; color: #b23a3a; margin-bottom: 8px; }
+.gameover-reason { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+.gameover-restart { font-size: 16px; }
