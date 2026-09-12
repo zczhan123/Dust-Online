@@ -34,3 +34,23 @@ describe('model types', () => {
     expect(g.players.A.life).toBe(50);
   });
 });
+
+import { createDie, placeDieByDistribution, areaOf } from '../src/core/model/dice';
+import type { Distribution } from '../src/core/model/types';
+
+describe('dice helpers', () => {
+  const dist: Distribution = { defense: [1, 6], attack: [3, 4], meditation: [2, 5] };
+
+  it('areaOf maps value to kind per distribution', () => {
+    expect(areaOf(1, dist)).toBe('defense');
+    expect(areaOf(6, dist)).toBe('defense');
+    expect(areaOf(3, dist)).toBe('attack');
+    expect(areaOf(2, dist)).toBe('meditation');
+  });
+
+  it('placeDieByDistribution puts die into correct area', () => {
+    const areas: Record<DiceKind, Die[]> = { attack: [], defense: [], meditation: [] };
+    placeDieByDistribution(areas, createDie('x1', 5), dist);
+    expect(areas.meditation.map((d) => d.value)).toEqual([5]);
+  });
+});
