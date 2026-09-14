@@ -130,7 +130,15 @@ body {
 .card-name { font-weight: 700; font-size: 17px; }
 .card-sub { font-size: 12px; color: var(--muted); }
 
-.card-art {
+.card-art { display: block; }
+.card-art-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.card-art--missing {
   height: 52px;
   border-radius: 6px;
   border: 1px dashed #cfc8ba;

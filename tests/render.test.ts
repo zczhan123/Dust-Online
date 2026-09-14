@@ -412,4 +412,13 @@ describe('renderGame (interaction)', () => {
     expect(turn.querySelector('.player-B')).not.toBeNull(); // 玩家名按颜色类标出
     expect(root.querySelector('.hint .hint-phase')).not.toBeNull(); // 提示在同一行
   });
+
+  it('renders the card art image for each artifact', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    const imgs = root.querySelectorAll<HTMLImageElement>('img.card-art-img');
+    expect(imgs.length).toBe(6);
+    const srcs = Array.from(imgs).map((i) => i.getAttribute('src'));
+    expect(srcs).toContain('/cards/001.jpg');
+    expect(srcs).toContain('/cards/006.jpg');
+  });
 });

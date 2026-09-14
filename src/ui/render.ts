@@ -308,7 +308,15 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   card.appendChild(head);
 
   const art = el('div', 'card-art');
-  art.textContent = '（卡图占位）';
+  const artImg = document.createElement('img');
+  artImg.className = 'card-art-img';
+  artImg.src = `/cards/${a.id}.jpg`;
+  artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
+  artImg.addEventListener('error', () => {
+    art.classList.add('card-art--missing');
+    art.textContent = '（卡图占位）';
+  });
+  art.appendChild(artImg);
   card.appendChild(art);
 
   const text = ARTIFACT_TEXT[a.id];
