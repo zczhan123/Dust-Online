@@ -61,3 +61,37 @@ describe('continuous skills', () => {
     expect(effectiveSpeed(p)).toBe(7); // 4 + max(3,1)
   });
 });
+
+describe('dynamic continuous skill attributes (007-012)', () => {
+  it('008 战车 grants +1 will when active', () => {
+    const p = player(['001', '008', '003']);
+    expect(effectiveWill(p)).toBe(7);
+    p.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
+    expect(effectiveWill(p)).toBe(8); // 7 + max(0,1)
+  });
+  it('008 战车 will bonus takes max with will buffs', () => {
+    const p = player(['001', '008', '003']);
+    p.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
+    p.buffs.push({ attr: 'will', add: 3, duration: 'thisTurn' });
+    expect(effectiveWill(p)).toBe(10); // 7 + max(3,1)
+  });
+  it('012 梦醒时分 grants speed +X where X = meditation count (2 dice → +2)', () => {
+    const p = player(['001', '002', '012']);
+    expect(effectiveSpeed(p)).toBe(4);
+    p.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    p.areas.meditation.push({ id: 'm1', value: 3, kind: 'meditation' });
+    p.areas.meditation.push({ id: 'm2', value: 5, kind: 'meditation' });
+    expect(effectiveSpeed(p)).toBe(6); // 4 + min(3,2)
+  });
+  it('012 梦醒时分 caps speed bonus at +3 with 5 meditation dice', () => {
+    const p = player(['001', '002', '012']);
+    p.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    for (let i = 0; i < 5; i++) p.areas.meditation.push({ id: `m${i}`, value: 3, kind: 'meditation' });
+    expect(effectiveSpeed(p)).toBe(7); // 4 + min(3,5)
+  });
+  it('012 梦醒时分 also grants +1 will when active', () => {
+    const p = player(['001', '002', '012']);
+    p.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    expect(effectiveWill(p)).toBe(8); // baseWill 7 (from 001) + 1
+  });
+});

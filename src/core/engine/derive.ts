@@ -22,13 +22,27 @@ function maxBuff(p: PlayerState, attr: Buff['attr']): number {
   return adds.length ? Math.max(...adds) : 0;
 }
 
+/** 激活中的持续技能提供的属性加成（同类取最大，不叠加） */
+function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } {
+  let speed = 0;
+  let will = 0;
+  if (hasActiveSkill(p, 'youlong.wanxiang')) speed = Math.max(speed, 1);
+  if (hasActiveSkill(p, 'monv.awaken')) {
+    speed = Math.max(speed, Math.min(3, p.areas.meditation.length));
+    will = Math.max(will, 1);
+  }
+  if (hasActiveSkill(p, 'tiebi.chariot')) will = Math.max(will, 1);
+  return { speed, will };
+}
+
 export function effectiveSpeed(p: PlayerState): number {
-  const extra = hasActiveSkill(p, 'youlong.wanxiang') ? 1 : 0;
-  return baseSpeed(p) + Math.max(maxBuff(p, 'speed'), extra);
+  const bonus = skillAttributeBonuses(p).speed;
+  return baseSpeed(p) + Math.max(maxBuff(p, 'speed'), bonus);
 }
 
 export function effectiveWill(p: PlayerState): number {
-  return baseWill(p) + maxBuff(p, 'will');
+  const bonus = skillAttributeBonuses(p).will;
+  return baseWill(p) + Math.max(maxBuff(p, 'will'), bonus);
 }
 
 export function totalDice(p: PlayerState): number {

@@ -9,6 +9,33 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
   '004': { id: '004', name: '不祥', weapon: '双刀', column: 1, speed: 4, will: 8, skills: [{ side: 'left', kind: 'activate', key: 'buxiang.cuilian' }, { side: 'right', kind: 'continuous', key: 'buxiang.fengmang' }, { side: 'right', kind: 'trigger', key: 'buxiang.fengmang.trigger' }] },
   '005': { id: '005', name: '影掠', weapon: '飞刀', column: 2, distribution: { defense: [3], attack: [1, 2, 6], meditation: [4, 5] }, skills: [{ side: 'left', kind: 'activate', key: 'yingle.yingxi' }, { side: 'right', kind: 'activate', key: 'yingle.qianxing' }] },
   '006': { id: '006', name: '完杀', weapon: '戒指', column: 3, life: 50, chargeReq: 4, skills: [{ side: 'only', kind: 'charge', key: 'wansha.charge' }, { side: 'only', kind: 'ultimate', key: 'wansha.ultimate' }] },
+  '007': { id: '007', name: '主宰', weapon: '长戟', column: 1, speed: 4, will: 7, skills: [
+    { side: 'left', kind: 'activate', key: 'zhuzai.sweep' },
+    { side: 'right', kind: 'activate', key: 'zhuzai.smash' },
+  ] },
+  '008': { id: '008', name: '铁壁', weapon: '塔盾', column: 2, distribution: { defense: [1, 6], attack: [2, 5], meditation: [3, 4] }, skills: [
+    { side: 'left', kind: 'continuous', key: 'tiebi.chariot' },
+    { side: 'right', kind: 'activate', key: 'tiebi.fist' },
+  ] },
+  '009': { id: '009', name: '孤王', weapon: '王冠', column: 3, life: 50, chargeReq: 3, skills: [
+    { side: 'only', kind: 'charge', key: 'guwang.charge' },
+    { side: 'only', kind: 'trigger', key: 'guwang.trigger' },
+    { side: 'only', kind: 'ultimate', key: 'guwang.ultimate' },
+  ] },
+  '010': { id: '010', name: '深红', weapon: '刺剑', column: 1, speed: 4, will: 8, skills: [
+    { side: 'left', kind: 'continuous', key: 'shenhong.sword' },
+    { side: 'right', kind: 'trigger', key: 'shenhong.kill' },
+  ] },
+  '011': { id: '011', name: '顿悟', weapon: '法衣', column: 2, distribution: { defense: [1, 6], attack: [2, 4], meditation: [3, 5] }, skills: [
+    { side: 'left', kind: 'activate', key: 'dunwu.barrier.activate' },
+    { side: 'left', kind: 'trigger', key: 'dunwu.barrier.trigger' },
+    { side: 'right', kind: 'activate', key: 'dunwu.pulse.activate' },
+    { side: 'right', kind: 'trigger', key: 'dunwu.pulse.trigger' },
+  ] },
+  '012': { id: '012', name: '魔女', weapon: '时计', column: 3, life: 40, chargeReq: 1, skills: [
+    { side: 'only', kind: 'continuous', key: 'monv.awaken' },
+    { side: 'only', kind: 'ultimate', key: 'monv.ultimate' },
+  ] },
 };
 
 export function makeArtifact(id: string): Artifact {
