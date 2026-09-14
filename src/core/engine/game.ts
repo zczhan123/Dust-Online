@@ -75,6 +75,11 @@ export function advancePhase(g: GameState): void {
   }
 }
 
+/** 立即结束当前的主要阶段（供 009 必杀等使用） */
+export function endMainPhase(g: GameState): void {
+  if (g.phase === 'main') advancePhase(g);
+}
+
 export function createGame(opts: SetupOptions): GameState {
   const g = setupGame(opts);
   const second: PlayerId = g.firstPlayer === 'A' ? 'B' : 'A';
