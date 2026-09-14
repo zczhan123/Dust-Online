@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
-import { totalDice } from '../src/core/engine/derive';
+import { totalDice, effectiveWill } from '../src/core/engine/derive';
 import { virtualAttack } from '../src/core/engine/combat';
 import { applyTurnStartEffects } from '../src/core/engine/skills';
 
@@ -606,5 +606,87 @@ describe('008 铁壁', () => {
         params: { meditationDieIds: ['m1'], defenseDieIds: [] },
       }),
     ).toThrow();
+  });
+});
+
+describe('009 孤王', () => {
+  const setup009 = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
+    skipInitialReroll(g);
+    return g;
+  };
+
+  it('充能: charging 009 sets a guwangCharge pending with skip + one action per opponent attack die', () => {
+    const g = setup009();
+    g.players.B.areas.attack = [
+      { id: 'oa1', value: 5, kind: 'attack' },
+      { id: 'oa2', value: 3, kind: 'attack' },
+    ];
+    g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    expect(g.pending).toEqual({ kind: 'guwangCharge', player: 'A' });
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({ t: 'guwangCharge' });
+    expect(legal).toContainEqual({ t: 'guwangCharge', dieId: 'oa1' });
+    expect(legal).toContainEqual({ t: 'guwangCharge', dieId: 'oa2' });
+  });
+
+  it('充能: resolving with an opponent attack die id sets it to 1 and preserves its area', () => {
+    const g = setup009();
+    g.players.B.areas.attack = [
+      { id: 'oa1', value: 5, kind: 'attack' },
+      { id: 'oa2', value: 3, kind: 'attack' },
+    ];
+    g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'guwangCharge', dieId: 'oa1' });
+    expect(g.players.B.areas.attack).toEqual([
+      { id: 'oa1', value: 1, kind: 'attack' },
+      { id: 'oa2', value: 3, kind: 'attack' },
+    ]);
+    expect(g.players.B.areas.defense.some((d) => d.id === 'oa1')).toBe(false);
+    expect(g.pending).toBeNull();
+  });
+
+  it('充能: resolving without a die id leaves all dice unchanged', () => {
+    const g = setup009();
+    g.players.B.areas.attack = [{ id: 'oa1', value: 5, kind: 'attack' }];
+    g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'guwangCharge' });
+    expect(g.players.B.areas.attack).toEqual([{ id: 'oa1', value: 5, kind: 'attack' }]);
+    expect(g.pending).toBeNull();
+  });
+
+  it('充能: does not set a pending when the opponent has no attack dice', () => {
+    const g = setup009();
+    g.players.B.areas.attack = [];
+    g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    expect(g.pending).toBeNull();
+  });
+
+  it('必杀: discards all dice, gains random defense dice up to will, then ends the main phase', () => {
+    const g = setup009();
+    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    g.players.A.artifacts.find((x) => x.id === '009')!.activeMarkerSide = 'left'; // 充能完成后激活
+    g.players.A.areas = {
+      attack: [{ id: 'ga', value: 4, kind: 'attack' }],
+      defense: [{ id: 'gd', value: 6, kind: 'defense' }],
+      meditation: [{ id: 'gm', value: 2, kind: 'meditation' }],
+    };
+    const cap = effectiveWill(g.players.A);
+    applyAction(g, { t: 'skill', artifactId: '009', side: 'only' });
+    expect(g.players.A.areas.attack).toHaveLength(0);
+    expect(g.players.A.areas.meditation).toHaveLength(0);
+    expect(totalDice(g.players.A)).toBe(cap);
+    expect(g.players.A.areas.defense).toHaveLength(cap);
+    for (const d of g.players.A.areas.defense) {
+      expect(d.value).toBeGreaterThanOrEqual(1);
+      expect(d.value).toBeLessThanOrEqual(6);
+    }
+    expect(g.ultimatesUsed).toContain('guwang.ultimate');
+    expect(g.phase).not.toBe('main');
+    expect(g.activePlayer).toBe('B');
   });
 });

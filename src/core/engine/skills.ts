@@ -2,6 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
+import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
 
@@ -11,6 +12,8 @@ export interface SkillCtx {
   artifact: Artifact;
   rng: { rollDie(): number };
   params: Record<string, unknown>;
+  /** 立即结束当前主要阶段（009 必杀等使用），由 game.ts 提供 */
+  endMainPhase: () => void;
 }
 
 export interface SkillHandler {
@@ -263,6 +266,40 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           opponent,
         )} 的 ${wanted.length} 颗防御骰${gained ? `，并获得 ${x} 颗攻击骰` : ''}`,
       );
+    },
+  },
+  // 009 高塔铁幕·充能：对方有攻击骰时，进入待结算，由发动者选择将其中 1 颗点数改为 1（保留原区域）
+  'guwang.charge': {
+    run({ g, player }) {
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      if (g.players[opponent].areas.attack.length > 0) {
+        g.pending = { kind: 'guwangCharge', player };
+        logLine(g, `${pname(player)} 「高塔铁幕」充能效果：可选择将 ${pname(opponent)} 的 1 个攻击骰点数变更为 1`);
+      } else {
+        logLine(g, `${pname(player)} 「高塔铁幕」充能效果：对方没有攻击骰，无法变更点数`);
+      }
+    },
+  },
+  // 009 高塔铁幕·必杀：弃置自己全部能力骰 → 获得随机防御骰直至能力骰总数达到意志上限 → 立即结束主要阶段
+  'guwang.ultimate': {
+    run({ g, player, rng, endMainPhase }) {
+      const p = g.players[player];
+      const discarded = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
+      p.areas.attack = [];
+      p.areas.defense = [];
+      p.areas.meditation = [];
+      const cap = effectiveWill(p);
+      const gained: Die[] = [];
+      while (totalDice(p) < cap) {
+        const die = createDie(newDieId(`${player}-`), rng.rollDie(), 'defense');
+        p.areas.defense.push(die);
+        gained.push(die);
+      }
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「高塔铁幕」：弃置全部 ${discarded.length} 颗能力骰，获得 ${gained.length} 颗随机防御骰（能力骰总数达到意志上限 ${cap}），立即结束主要阶段`,
+      );
+      endMainPhase();
     },
   },
   // 007 战争横扫：各消耗 1 攻/防/冥 → 弃对方各 1 → floor(点数和/2) 真实伤害

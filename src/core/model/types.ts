@@ -25,6 +25,7 @@ export type Action =
   | { t: 'block'; dieId?: string }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
   | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
+  | { t: 'guwangCharge'; dieId?: string }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -38,7 +39,8 @@ export interface PendingAttack {
 
 export type Pending =
   | { kind: 'caiyuliu'; player: PlayerId; dieId: string; value: number }
-  | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number };
+  | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number }
+  | { kind: 'guwangCharge'; player: PlayerId };
 
 export interface Distribution {
   defense: number[];

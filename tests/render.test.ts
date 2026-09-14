@@ -553,4 +553,26 @@ describe('renderGame (interaction)', () => {
       params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1', 'd2'] },
     });
   });
+
+  it('renders the 009 高塔铁幕 charge prompt with one button per opponent attack die', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
+    skipInitialReroll(state);
+    state.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
+    state.players.B.areas.attack = [
+      { id: 'oa1', value: 5, kind: 'attack' },
+      { id: 'oa2', value: 3, kind: 'attack' },
+    ];
+    applyAction(state, { t: 'dustRise', artifactId: '009', meditationDieId: 'mm' });
+    expect(state.pending!.kind).toBe('guwangCharge');
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-phase')?.textContent).toContain('高塔铁幕');
+    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="guwangCharge"]');
+    expect(btns.length).toBe(3); // 2 颗对方攻击骰 + 不变更
+    const labels = Array.from(btns).map((b) => b.textContent);
+    expect(labels).toContain('不变更');
+    expect(labels).toContain('改为1（5点）');
+    expect(labels).toContain('改为1（3点）');
+    expect(state.pending!.kind).toBe('guwangCharge'); // 渲染不应改变状态
+  });
 });

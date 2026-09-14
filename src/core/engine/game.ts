@@ -5,6 +5,7 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage } from './combat';
+import { setDieValue } from './effects';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects } from './skills';
 import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
@@ -225,6 +226,8 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             },
           });
         }
+      } else if (s.key === 'guwang.ultimate') {
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side });
       }
     }
   }
@@ -241,6 +244,12 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'caiyuliu', to: 'defense' },
         { t: 'caiyuliu', to: 'meditation' },
       ];
+    }
+    if (g.pending.kind === 'guwangCharge') {
+      const opponent: PlayerId = g.pending.player === 'A' ? 'B' : 'A';
+      const acts: Action[] = [{ t: 'guwangCharge' }];
+      for (const d of g.players[opponent].areas.attack) acts.push({ t: 'guwangCharge', dieId: d.id });
+      return acts;
     }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
@@ -304,13 +313,15 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
   if (!a || a.column !== 3) return;
   const cs = a.skills.find((s) => s.kind === 'charge');
   if (cs && SKILL_HANDLERS[cs.key]) {
-    withRng(g, (rng) => SKILL_HANDLERS[cs.key].run({ g, player, artifact: a, rng, params: {} }));
+    withRng(g, (rng) =>
+      SKILL_HANDLERS[cs.key].run({ g, player, artifact: a, rng, params: {}, endMainPhase: () => endMainPhase(g) }),
+    );
   }
 }
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -421,6 +432,21 @@ export function applyAction(g: GameState, action: Action): GameState {
       g.pending = null;
       break;
     }
+    case 'guwangCharge': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'guwangCharge') throw new Error('no guwangCharge pending');
+      const opponent: PlayerId = pd.player === 'A' ? 'B' : 'A';
+      if (action.dieId) {
+        const die = g.players[opponent].areas.attack.find((d) => d.id === action.dieId);
+        if (!die) throw new Error('not an opponent attack die');
+        const old = setDieValue(g, opponent, action.dieId, 1);
+        logLine(g, `${pname(pd.player)} 「高塔铁幕」：将 ${pname(opponent)} 的 1 颗攻击骰由 ${old} 点变更为 1 点`);
+      } else {
+        logLine(g, `${pname(pd.player)} 「高塔铁幕」：不变更攻击骰`);
+      }
+      g.pending = null;
+      break;
+    }
     case 'skill': {
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
@@ -434,7 +460,16 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
-      withRng(g, (rng) => handler.run({ g, player: g.activePlayer, artifact: a, rng, params: action.params ?? {} }));
+      withRng(g, (rng) =>
+        handler.run({
+          g,
+          player: g.activePlayer,
+          artifact: a,
+          rng,
+          params: action.params ?? {},
+          endMainPhase: () => endMainPhase(g),
+        }),
+      );
       g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
       break;
