@@ -36,6 +36,41 @@ function choiceButton(
   return b;
 }
 
+function disabledChoice(role: string, value: string, label: string): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'choice choice--soon';
+  b.dataset.role = role;
+  b.dataset.value = value;
+  b.disabled = true;
+  b.title = '开发中';
+  b.textContent = label;
+  return b;
+}
+
+function placeholderRow(
+  label: string,
+  role: string,
+  defs: Array<[string, string, boolean]>,
+): HTMLElement {
+  const row = el('div', 'setup-row');
+  const lab = el('span', 'setup-label');
+  lab.textContent = label;
+  row.appendChild(lab);
+  const group = el('div', 'choice-group');
+  for (const [value, text, soon] of defs) {
+    if (soon) {
+      group.appendChild(disabledChoice(role, value, `${text}（开发中）`));
+    } else {
+      const b = choiceButton(role, value, text, () => {});
+      b.classList.add('selected');
+      group.appendChild(b);
+    }
+  }
+  row.appendChild(group);
+  return row;
+}
+
 export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
   root.innerHTML = '';
 
@@ -44,6 +79,25 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   const title = el('h1', 'setup-title');
   title.textContent = '尘起时刻 · 开始新对局';
   wrap.appendChild(title);
+
+  // 游戏模式（占位：仅“左右互搏”可用，其余开发中）
+  wrap.appendChild(
+    placeholderRow('游戏模式：', 'mode', [
+      ['hotseat', '左右互搏', false],
+      ['ai', 'AI 模式', true],
+      ['local', '本地联机', true],
+      ['online', '互联网联机', true],
+    ]),
+  );
+  // 选将模式（占位：仅“直接选英雄”可用，其余开发中）
+  wrap.appendChild(
+    placeholderRow('选将模式：', 'draft', [
+      ['hero', '直接选英雄', false],
+      ['draft', '轮选模式', true],
+      ['free', '自由模式', true],
+      ['random', '随机模式', true],
+    ]),
+  );
 
   let heroChoice: HeroChoice = 'random';
   let firstChoice: FirstChoice = 'random';

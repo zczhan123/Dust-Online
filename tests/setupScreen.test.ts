@@ -79,4 +79,24 @@ describe('renderSetup', () => {
     expect(isKong || isYing).toBe(true);
     expect(JSON.stringify(opts.heroB)).toBe(JSON.stringify(isKong ? YING : KONG));
   });
+
+  it('shows mode/draft placeholder options (disabled, marked 开发中)', () => {
+    renderSetup(root, () => {});
+    expect(root.querySelectorAll('[data-role="mode"]').length).toBe(4);
+    expect(root.querySelectorAll('[data-role="draft"]').length).toBe(4);
+    // 默认可用项被选中
+    expect(
+      root.querySelector('[data-role="mode"][data-value="hotseat"]')!.classList.contains('selected'),
+    ).toBe(true);
+    expect(
+      root.querySelector('[data-role="draft"][data-value="hero"]')!.classList.contains('selected'),
+    ).toBe(true);
+    // 占位项禁用并标注“开发中”
+    const soon = Array.from(root.querySelectorAll<HTMLButtonElement>('.choice--soon'));
+    expect(soon.length).toBe(6); // 3 个禁用模式 + 3 个禁用选将
+    for (const b of soon) {
+      expect(b.disabled).toBe(true);
+      expect(b.textContent).toContain('开发中');
+    }
+  });
 });

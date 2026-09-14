@@ -444,6 +444,15 @@ body {
   border-color: #23405c;
   color: #fff;
 }
+.choice--soon {
+  opacity: 0.45;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+.choice--soon:hover {
+  background: #f1efe9;
+  border-color: var(--line);
+}
 .setup-start {
   align-self: flex-start;
   font: inherit;
