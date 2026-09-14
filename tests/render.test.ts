@@ -2,16 +2,34 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
-import type { Action } from '../src/core/model/types';
+import type { Action, GameState } from '../src/core/model/types';
 
-const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null });
+const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null, pendingConfirm: null });
 
-const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => ({
-  onAction,
-  ui: freshUi(),
-  requestRender: () => {},
-  onRestart: () => {},
-});
+const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => {
+  const ui = freshUi();
+  return {
+    onAction,
+    ui,
+    propose: (action, label) => { ui.pendingConfirm = { action, label }; },
+    requestRender: () => {},
+    onRestart: () => {},
+  };
+};
+
+/** 带重绘的挂载：propose 会写入 pendingConfirm 并重绘，模拟 main.ts */
+const mount = (state: GameState, root: HTMLElement, onAction: (a: Action) => void = vi.fn()) => {
+  const ui = freshUi();
+  const hooks: RenderHooks = {
+    onAction,
+    ui,
+    propose: (action, label) => { ui.pendingConfirm = { action, label }; renderGame(state, root, hooks); },
+    requestRender: () => renderGame(state, root, hooks),
+    onRestart: () => {},
+  };
+  renderGame(state, root, hooks);
+  return { ui, hooks, onAction };
+};
 
 describe('renderGame (read-only snapshot)', () => {
   let root: HTMLElement;
@@ -92,10 +110,24 @@ describe('renderGame (read-only snapshot)', () => {
     expect(card.querySelectorAll('.skill--off').length).toBe(1);
   });
 
-  it('shows a dustfall counter and a roll/supply zone in the center', () => {
+  it('shows the dustfall counter in the center band and the log in the left sidebar', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
-    expect(root.querySelector('.dustfall')?.textContent).toContain('尘落');
-    expect(root.querySelector('.rollzone')).not.toBeNull();
+    const band = root.querySelector('.centerband');
+    expect(band).not.toBeNull();
+    expect(band!.querySelector('.dustfall')?.textContent).toContain('尘落');
+    expect(root.querySelector('.sidebar .log')).not.toBeNull();
+  });
+
+  it('renders weapon type in the artifact card title', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    expect(root.textContent ?? '').toContain('雨切（武士刀）');
+  });
+
+  it('colors the life span by player id', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    const life = root.querySelector('.player--self .player-life');
+    expect(life).not.toBeNull();
+    expect(life!.classList.contains('life-A')).toBe(true);
   });
 
   it('shows count and charge badges when present', () => {
@@ -107,6 +139,35 @@ describe('renderGame (read-only snapshot)', () => {
     expect(text).toContain('计数 2');
     expect(text).toContain('充能 2/4');
   });
+
+  it('marks a fully charged column-3 artifact and does not offer charging', () => {
+    const state = setupGame({ seed: 1, firstPlayer: 'A' });
+    state.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer = 4; // 明镜 满充能
+    renderGame(state, root, hooksFor());
+    expect(root.textContent ?? '').toContain('充能 4/4（已满）');
+    const card = root.querySelector('.player--self .card[data-artifact="003"]')!;
+    const badge = card.querySelector('.badge-charge');
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains('badge-charge--full')).toBe(true);
+    expect(card.querySelectorAll('.clickable').length).toBe(0);
+  });
+
+  it('does not offer 淬炼 once 不祥 count reaches 3', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
+    buxiang.activeMarkerSide = 'left';
+    buxiang.count = 3;
+    renderGame(state, root, hooksFor());
+    const text = root.textContent ?? '';
+    expect(text).not.toContain('启动技能：淬炼');
+    const box = root.querySelector<HTMLElement>('.player--self .card[data-artifact="004"] .skill--on');
+    expect(box).not.toBeNull();
+    expect(box!.classList.contains('skill--full')).toBe(true);
+    expect(box!.textContent).toContain('已满');
+    expect(box!.classList.contains('clickable')).toBe(false);
+  });
 });
 
 describe('renderGame (interaction)', () => {
@@ -116,14 +177,12 @@ describe('renderGame (interaction)', () => {
     root = document.getElementById('app')!;
   });
 
-  it('shows status text including the phase', () => {
+  it('renders a two-line hint: turn line and phase guidance', () => {
     renderGame(createGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
-    expect(root.querySelector('.status')?.textContent).toContain('阶段');
-  });
-
-  it('renders a non-empty phase hint', () => {
-    renderGame(createGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
-    expect((root.querySelector('.hint')?.textContent ?? '').length).toBeGreaterThan(0);
+    const hint = root.querySelector('.hint');
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent ?? '').toContain('轮到 玩家A 操作');
+    expect((hint!.textContent ?? '').length).toBeGreaterThan(0);
   });
 
   it('renders an operation list with buttons in the main phase', () => {
@@ -134,13 +193,22 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelectorAll('.actionlist .btn').length).toBeGreaterThan(0);
   });
 
-  it('clicking a legal attack die dispatches an attack action', () => {
+  it('puts the operation list and dustfall inside the center band', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    renderGame(state, root, hooksFor());
+    const band = root.querySelector('.centerband')!;
+    expect(band.querySelector('.centerband-left .actionlist')).not.toBeNull();
+    expect(band.querySelector('.centerband-right .dustfall')).not.toBeNull();
+  });
+
+  it('clicking a legal attack die proposes a confirm, and 确认 dispatches it', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     const die = state.players.A.areas.attack[0];
-    const onAction = vi.fn();
-    renderGame(state, root, hooksFor(onAction));
+    const { ui, onAction } = mount(state, root);
 
     const dieEl = root.querySelector<HTMLElement>(
       `.player--self .die[data-id="${die.id}"]`,
@@ -148,6 +216,13 @@ describe('renderGame (interaction)', () => {
     expect(dieEl).not.toBeNull();
     expect(dieEl!.classList.contains('clickable')).toBe(true);
     dieEl!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({ t: 'attack', dieId: die.id });
+
+    const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn!.click();
     expect(onAction).toHaveBeenCalledWith({ t: 'attack', dieId: die.id });
   });
 
@@ -161,10 +236,7 @@ describe('renderGame (interaction)', () => {
       { id: 'test-m1', value: 2, kind: 'meditation' },
     );
 
-    const ui = freshUi();
-    const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
-    renderGame(state, root, hooks);
+    const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
       '.player--self .card[data-artifact="001"] .skill.clickable',
@@ -184,10 +256,7 @@ describe('renderGame (interaction)', () => {
     buxiang.activeMarkerSide = 'left';
     state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
 
-    const ui = freshUi();
-    const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
-    renderGame(state, root, hooks);
+    const { ui } = mount(state, root);
 
     const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
       (b.textContent ?? '').includes('淬炼'),
@@ -198,7 +267,7 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelector('.selector')).not.toBeNull();
   });
 
-  it('completes the chooser and dispatches explicit dice params', () => {
+  it('completes the chooser, proposes the skill, and dispatches only after 确认', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -206,10 +275,7 @@ describe('renderGame (interaction)', () => {
     buxiang.activeMarkerSide = 'left';
     state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
 
-    const ui = freshUi();
-    const onAction = vi.fn();
-    const hooks: RenderHooks = { onAction, ui, requestRender: () => renderGame(state, root, hooks), onRestart: () => {} };
-    renderGame(state, root, hooks);
+    const { ui, onAction } = mount(state, root);
 
     const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
       (b.textContent ?? '').includes('淬炼'),
@@ -227,12 +293,41 @@ describe('renderGame (interaction)', () => {
     expect(okBtn!.disabled).toBe(false);
     okBtn!.click();
 
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '004',
+      side: 'left',
+      params: { attackDieId: 'atk-test' },
+    });
+
+    const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn!.click();
     expect(onAction).toHaveBeenCalledWith({
       t: 'skill',
       artifactId: '004',
       side: 'left',
       params: { attackDieId: 'atk-test' },
     });
+  });
+
+  it('cancels a pending confirm without dispatching', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const die = state.players.A.areas.attack[0];
+    const { ui, onAction } = mount(state, root);
+
+    root.querySelector<HTMLElement>(`.player--self .die[data-id="${die.id}"]`)!.click();
+    expect(ui.pendingConfirm).not.toBeNull();
+
+    const cancelBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-cancel');
+    expect(cancelBtn).not.toBeNull();
+    cancelBtn!.click();
+    expect(ui.pendingConfirm).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it('shows the log newest-first', () => {
@@ -293,15 +388,7 @@ describe('renderGame (interaction)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
     state.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
-    const ui = freshUi();
-    const onAction = vi.fn();
-    const hooks: RenderHooks = {
-      onAction,
-      ui,
-      requestRender: () => renderGame(state, root, hooks),
-      onRestart: () => {},
-    };
-    renderGame(state, root, hooks);
+    const { ui, onAction } = mount(state, root);
     const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.btn')).find(
       (b) => b.dataset.act === 'dustRise',
     );

@@ -17,14 +17,55 @@ body {
   color: var(--ink);
 }
 
-/* 上下布局：敌人 / 中央 / 自己 */
-.board {
+/* 两栏布局：左战报栏 + 右主战场 */
+.app {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  gap: 10px;
   padding: 8px 12px;
   max-width: 1320px;
   margin: 0 auto;
+  align-items: flex-start;
+}
+.sidebar {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: calc(100vh - 16px);
+  position: sticky;
+  top: 8px;
+}
+.log-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.centerband {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.centerband-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.centerband-right {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
 }
 
 .player {
@@ -44,7 +85,9 @@ body {
   margin: 4px 0;
 }
 .player-title { font-size: 16px; }
-.player-life { font-size: 15px; color: #b23a3a; }
+.player-life { font-size: 15px; }
+.life-A { color: #2563eb; }
+.life-B { color: #dc2626; }
 
 /* 玩家配色：A 蓝 / B 红 */
 .dot {
@@ -100,8 +143,10 @@ body {
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
 .badge-active { background: #d7e6fb; color: #1b4f9c; }
 .badge-charge { background: #fbe8c8; color: #8a5a05; }
+.badge-charge--full { background: #d9f0e1; color: #1d6b43; }
 .badge-count { background: #fadfd0; color: #a33a12; }
 .badge-seal { background: #e6dcf7; color: #5b3fa0; }
+.badge-full { background: #f0d7d7; color: #8a2b2b; }
 
 .skills { display: flex; flex-direction: column; gap: 4px; }
 .skill {
@@ -114,6 +159,8 @@ body {
 .skill--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
 .skill--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
 .skill--used .skill-name { text-decoration: line-through; }
+.skill--full { background: #f3ecec; border-left-color: #b75b5b; }
+.skill--full .skill-name { color: #8a2b2b; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
 .skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
@@ -130,14 +177,24 @@ body {
 .areas { display: flex; gap: 8px; margin: 6px 0; }
 .area {
   flex: 1;
+  min-width: 0;
   background: #fbf9f4;
   border: 1px dashed #cfc8ba;
   border-radius: 8px;
   padding: 6px 8px;
   min-height: 58px;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
 }
-.area-label { font-size: 12px; color: var(--muted); margin-bottom: 5px; }
-.dice { display: flex; gap: 5px; flex-wrap: wrap; }
+.area-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 5px;
+}
+.dice { flex: 1; display: flex; gap: 5px; flex-wrap: wrap; }
 .die {
   display: inline-flex;
   width: 26px;
@@ -153,8 +210,7 @@ body {
 .die-A { background: #2563eb; }
 .die-B { background: #dc2626; }
 
-/* 中央：尘落 + 投掷区 / 供应堆 */
-.center { display: flex; gap: 10px; align-items: stretch; }
+/* 尘落计数器 */
 .dustfall {
   flex: 0 0 auto;
   background: #f3e7cd;
@@ -165,50 +221,11 @@ body {
   font-weight: 700;
   display: flex;
   align-items: center;
-  color: #7a5a1e;
-}
-.rollzone {
-  flex: 1;
-  background: #fbf9f4;
-  border: 2px dashed #cfc8ba;
-  border-radius: 10px;
-  padding: 6px 12px;
-  min-height: 34px;
-  display: flex;
-  align-items: center;
   justify-content: center;
-  color: #9a927f;
-  font-size: 13px;
-}
-
-/* 状态栏 */
-.status {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-  background: #fffdf8;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-weight: 700;
-}
-.status-item {
-  font-size: 14px;
-  color: var(--ink);
-}
-.status-winner {
-  color: #b23a3a;
+  color: #7a5a1e;
 }
 
 /* 操作栏与按钮 */
-.actionbar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding: 4px 2px;
-}
 .btn {
   font: inherit;
   font-size: 13px;
@@ -283,14 +300,33 @@ body {
 
 /* 阶段提示 */
 .hint {
-  flex: 1 1 100%;
+  flex: 0 0 auto;
   font-weight: 400;
   font-size: 13px;
   color: #7a5a1e;
   background: #fdf6e6;
   border: 1px solid #e7d3a2;
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 6px 10px;
+  line-height: 1.6;
+}
+.hint-line { white-space: pre-wrap; }
+.hint-turn { font-weight: 700; }
+
+/* 操作确认条 */
+.confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff6e5;
+  border: 1px solid #e0c07a;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.confirm-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #7a5a1e;
 }
 
 /* 操作列表 */
@@ -388,6 +424,10 @@ body {
 }
 .log-line {
   white-space: pre-wrap;
+}
+.sidebar .log {
+  flex: 1;
+  max-height: none;
 }
 
 /* 开始新对局设置页（浅色主题） */

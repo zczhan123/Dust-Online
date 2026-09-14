@@ -61,6 +61,7 @@ export interface SkillDef {
 export interface Artifact {
   id: string;      // '001'
   name: string;    // '雨切'
+  weapon?: string; // '武士刀'（武器类型，用于显示）
   column: Column;
   speed?: number;
   will?: number;

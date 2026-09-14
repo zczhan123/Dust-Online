@@ -45,10 +45,13 @@ export interface UiState {
     currentSel: Set<string>;
     numbers: number[];
   };
+  pendingConfirm: null | { action: Action; label: string };
 }
 
 export interface RenderHooks {
   onAction: (a: Action) => void;
+  /** 提出一个待确认操作；由宿主写入 ui.pendingConfirm 后重绘 */
+  propose: (action: Action, label: string) => void;
   ui: UiState;
   requestRender: () => void;
   onRestart: () => void;
@@ -80,7 +83,7 @@ function button(label: string, action: Action, hooks: RenderHooks, cls = ''): HT
   b.className = `btn ${cls}`.trim();
   b.dataset.act = action.t;
   b.textContent = label;
-  b.addEventListener('click', () => hooks.onAction(action));
+  b.addEventListener('click', () => hooks.propose(action, label));
   return b;
 }
 
@@ -93,6 +96,14 @@ function findDie(state: GameState, id: string): Die | undefined {
     }
   }
   return undefined;
+}
+
+function dieValue(state: GameState, id: unknown): number | undefined {
+  return typeof id === 'string' ? findDie(state, id)?.value : undefined;
+}
+
+function diceListLabel(state: GameState, ids: string[]): string {
+  return ids.map((id) => dieValue(state, id) ?? '?').join('/');
 }
 
 function kindFromType(type: string): SkillDef['kind'] | undefined {
@@ -144,6 +155,64 @@ function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
   return label;
 }
 
+function dustRiseActionLabel(ctx: Ctx, act: DustRiseAction): string {
+  const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === act.artifactId);
+  const base = art ? dustRiseLabel(art, act) : '尘起';
+  const v = dieValue(ctx.state, act.meditationDieId);
+  if (!act.useSeal && v !== undefined) return `${base}：消耗 1 颗冥想骰（${v}点）`;
+  return base;
+}
+
+function skillName(state: GameState, a: SkillAction): string {
+  const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+  const skill = art?.skills.find(
+    (s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'),
+  );
+  return skillLabel(art, a.side, skill?.kind) ?? skill?.key ?? '技能';
+}
+
+function skillActionLabel(ctx: Ctx, a: SkillAction): string {
+  const name = skillName(ctx.state, a);
+  const params = a.params ?? {};
+  const parts: string[] = [];
+
+  if (typeof params.attackDieId === 'string') {
+    const v = dieValue(ctx.state, params.attackDieId);
+    parts.push(v !== undefined ? `消耗 1 颗攻击骰（${v}点）` : '消耗 1 颗攻击骰');
+  }
+  if (Array.isArray(params.attackDieIds) && params.attackDieIds.length) {
+    parts.push(
+      `消耗 ${params.attackDieIds.length} 颗攻击骰（${diceListLabel(ctx.state, params.attackDieIds as string[])}点）`,
+    );
+  }
+  if (Array.isArray(params.meditationDieIds) && params.meditationDieIds.length) {
+    parts.push(
+      `消耗 ${params.meditationDieIds.length} 颗冥想骰（${diceListLabel(ctx.state, params.meditationDieIds as string[])}点）`,
+    );
+  }
+  if (typeof params.dieId === 'string') {
+    const v = dieValue(ctx.state, params.dieId);
+    const x = typeof params.x === 'number' ? `，X=${params.x}` : '';
+    parts.push(v !== undefined ? `降低 1 颗骰（${v}点）${x}` : '降低骰子点数');
+  }
+  if (Array.isArray(params.opponentDefenseDieIds) && params.opponentDefenseDieIds.length) {
+    parts.push(`弃置对方 ${params.opponentDefenseDieIds.length} 颗防御骰`);
+  }
+  if (params.opponentDiceByKind && typeof params.opponentDiceByKind === 'object') {
+    const map = params.opponentDiceByKind as Record<string, unknown>;
+    const names: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+    const sub: string[] = [];
+    for (const k of ['attack', 'defense', 'meditation']) {
+      if (Array.isArray(map[k]) && (map[k] as string[]).length) {
+        sub.push(`${names[k]}骰 ${(map[k] as string[]).length} 颗`);
+      }
+    }
+    if (sub.length) parts.push(`弃置对方 ${sub.join('、')}`);
+  }
+
+  return parts.length ? `发动「${name}」：${parts.join('，')}` : `发动「${name}」`;
+}
+
 function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
   return (
     (ctx.state.phase === 'reroll' || ctx.state.phase === 'initialReroll') &&
@@ -159,7 +228,13 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
     const steps = spec.steps({ state: ctx.state, player, chosenDice: [] });
     if (steps.length === 0) {
       const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], numbers: [] });
-      ctx.hooks.onAction({ t: 'skill', artifactId: action.artifactId, side: action.side, params });
+      const built: SkillAction = {
+        t: 'skill',
+        artifactId: action.artifactId,
+        side: action.side,
+        params,
+      };
+      ctx.hooks.propose(built, skillActionLabel(ctx, built));
       return;
     }
   }
@@ -194,7 +269,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
 
   const head = el('div', 'card-head');
   const name = el('span', 'card-name');
-  name.textContent = a.name;
+  name.textContent = a.weapon ? `${a.name}（${a.weapon}）` : a.name;
   head.appendChild(name);
 
   const subs: string[] = [`第${a.column}列`];
@@ -218,7 +293,11 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   }
   if (a.chargeReq !== undefined) {
     const charge = el('span', 'badge badge-charge');
-    charge.textContent = `充能 ${a.chargeLayer}/${a.chargeReq}`;
+    const full = a.chargeLayer >= a.chargeReq;
+    charge.textContent = full
+      ? `充能 ${a.chargeLayer}/${a.chargeReq}（已满）`
+      : `充能 ${a.chargeLayer}/${a.chargeReq}`;
+    if (full) charge.classList.add('badge-charge--full');
     head.appendChild(charge);
   }
   if (a.count > 0) {
@@ -246,6 +325,9 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
       if (isUsedUltimate) box.classList.add('skill--used');
 
+      const isFull = key === 'buxiang.cuilian' && a.count >= 3;
+      if (isFull) box.classList.add('skill--full');
+
       const sHead = el('div', 'skill-head');
       const badge = el('span', 'skill-type');
       badge.textContent = s.type;
@@ -258,6 +340,11 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         used.textContent = '已使用';
         sHead.appendChild(used);
       }
+      if (isFull) {
+        const full = el('span', 'badge badge-full');
+        full.textContent = '已满';
+        sHead.appendChild(full);
+      }
       box.appendChild(sHead);
       const body = el('div', 'skill-text');
       body.textContent = s.text;
@@ -267,7 +354,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         (x): x is SkillAction =>
           x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
       );
-      if (skillAction && isActivatableType(s.type) && !isUsedUltimate) {
+      if (skillAction && isActivatableType(s.type) && !isUsedUltimate && !isFull) {
         box.classList.add('clickable');
         box.dataset.act = 'skill';
         box.title = '点击启动技能';
@@ -276,7 +363,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
           if (skillKey && SKILL_SELECTION[skillKey]) {
             startSkillSelection(ctx, skillAction, skillKey);
           } else {
-            ctx.hooks.onAction(skillAction);
+            ctx.hooks.propose(skillAction, `启动技能：${skillName(ctx.state, skillAction)}`);
           }
         });
       }
@@ -358,12 +445,16 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
         die.classList.add('clickable');
         die.dataset.act = 'attack';
         die.title = '点击发起攻击';
-        die.addEventListener('click', () => ctx.hooks.onAction(attackAction));
+        die.addEventListener('click', () =>
+          ctx.hooks.propose(attackAction, `攻击：用 ${d.value} 点攻击骰`),
+        );
       } else if (blockAction) {
         die.classList.add('clickable');
         die.dataset.act = 'block';
         die.title = '点击抵挡';
-        die.addEventListener('click', () => ctx.hooks.onAction(blockAction));
+        die.addEventListener('click', () =>
+          ctx.hooks.propose(blockAction, `抵挡：用 ${d.value} 点防御骰`),
+        );
       } else if (canSelectForReroll(player, ctx)) {
         die.classList.add('clickable');
         die.dataset.act = 'select';
@@ -400,7 +491,7 @@ function playerPanel(
   const title = el('span', 'player-title');
   title.textContent = `玩家${player.id}`;
   header.appendChild(title);
-  const life = el('span', 'player-life');
+  const life = el('span', `player-life life-${player.id}`);
   life.textContent = `生命 ${player.life}/${player.lifeMax}`;
   header.appendChild(life);
   if (player.hasDustSeal) {
@@ -423,20 +514,6 @@ function playerPanel(
   return panel;
 }
 
-function centerBar(state: GameState): HTMLElement {
-  const center = el('div', 'center');
-
-  const dustfall = el('div', 'dustfall');
-  dustfall.textContent = `尘落 ${state.dustfall} / 10`;
-  center.appendChild(dustfall);
-
-  const rollzone = el('div', 'rollzone');
-  rollzone.textContent = '投掷区 / 供应堆';
-  center.appendChild(rollzone);
-
-  return center;
-}
-
 function phaseHint(ctx: Ctx): string {
   const { state } = ctx;
   const pd = state.pending;
@@ -451,7 +528,7 @@ function phaseHint(ctx: Ctx): string {
     case 'dustRise':
       return '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。';
     case 'main':
-      return '主要阶段：用下方操作列表攻击/启动技能，完成后结束回合。';
+      return '主要阶段：可启动技能、发动攻击（顺序不限）；完成后「结束回合」。';
     case 'gameOver':
       return `游戏结束，胜者：${state.winner ?? '—'}。`;
     default:
@@ -459,41 +536,46 @@ function phaseHint(ctx: Ctx): string {
   }
 }
 
-function statusBar(ctx: Ctx): HTMLElement {
-  const { state } = ctx;
-  const bar = el('div', 'status');
-
-  const turn = el('span', 'status-item');
-  turn.textContent = `当前回合：玩家${state.activePlayer}`;
-  bar.appendChild(turn);
-
-  const phase = el('span', 'status-item');
-  phase.textContent = `阶段：${PHASE_LABEL[state.phase]}`;
-  bar.appendChild(phase);
-
-  const dust = el('span', 'status-item');
-  dust.textContent = `尘落 ${state.dustfall}/10`;
-  bar.appendChild(dust);
-
-  if (state.phase === 'gameOver') {
-    const winner = el('span', 'status-item status-winner');
-    winner.textContent = `胜者：${state.winner ?? '—'}`;
-    bar.appendChild(winner);
-  }
-
-  const restart = document.createElement('button');
-  restart.type = 'button';
-  restart.className = 'btn btn-restart';
-  restart.dataset.act = 'restart';
-  restart.textContent = '重开';
-  restart.addEventListener('click', () => ctx.hooks.onRestart());
-  bar.appendChild(restart);
-
+function hintBox(ctx: Ctx): HTMLElement {
   const hint = el('div', 'hint');
-  hint.textContent = phaseHint(ctx);
-  bar.appendChild(hint);
+  const turn = el('div', 'hint-line hint-turn');
+  turn.textContent = `轮到 玩家${ctx.state.activePlayer} 操作`;
+  const phase = el('div', 'hint-line hint-phase');
+  phase.textContent = phaseHint(ctx);
+  hint.appendChild(turn);
+  hint.appendChild(phase);
+  return hint;
+}
 
-  return bar;
+function confirmRow(ctx: Ctx): HTMLElement | null {
+  const pc = ctx.hooks.ui.pendingConfirm;
+  if (!pc) return null;
+  const row = el('div', 'confirm-row');
+
+  const label = el('span', 'confirm-label');
+  label.textContent = `${pc.label}？`;
+  row.appendChild(label);
+
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'btn btn-confirm';
+  ok.dataset.act = 'confirm';
+  ok.textContent = '确认';
+  ok.addEventListener('click', () => ctx.hooks.onAction(pc.action));
+  row.appendChild(ok);
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.dataset.act = 'cancel';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    ctx.hooks.ui.pendingConfirm = null;
+    ctx.hooks.requestRender();
+  });
+  row.appendChild(cancel);
+
+  return row;
 }
 
 function advanceLabel(phase: Phase): string {
@@ -509,27 +591,6 @@ function advanceLabel(phase: Phase): string {
     default:
       return '跳过';
   }
-}
-
-function actionBar(ctx: Ctx): HTMLElement {
-  const bar = el('div', 'actionbar');
-  const reroll = ctx.legal.find((x): x is Extract<Action, { t: 'reroll' }> => x.t === 'reroll');
-  if (!reroll) return bar;
-
-  const count = ctx.hooks.ui.rerollSelected.size;
-  const rb = document.createElement('button');
-  rb.type = 'button';
-  rb.className = 'btn btn-reroll';
-  rb.dataset.act = 'reroll';
-  rb.textContent = `重掷选中(${count})`;
-  rb.disabled = count === 0;
-  rb.addEventListener('click', () => {
-    if (ctx.hooks.ui.rerollSelected.size === 0) return;
-    ctx.hooks.onAction({ t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] });
-  });
-  bar.appendChild(rb);
-
-  return bar;
 }
 
 function actionLabel(ctx: Ctx, a: Action): string | null {
@@ -568,12 +629,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
 
 function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
   const { state, hooks } = ctx;
-  const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
-  const skill = art?.skills.find(
-    (s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'),
-  );
-  const key = skill?.key;
-  const name = skillLabel(art, a.side, skill?.kind) ?? key ?? '技能';
+  const key = a.t === 'skill'
+    ? state.players[state.activePlayer].artifacts
+        .find((x) => x.id === a.artifactId)
+        ?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'))
+        ?.key
+    : undefined;
+  const name = skillName(state, a);
   if (key && SKILL_SELECTION[key]) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -586,8 +648,33 @@ function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
   return button(`启动技能：${name}`, a, hooks, 'btn-skill');
 }
 
+function rerollButton(ctx: Ctx): HTMLButtonElement | null {
+  const reroll = ctx.legal.find((x): x is Extract<Action, { t: 'reroll' }> => x.t === 'reroll');
+  if (!reroll) return null;
+  const count = ctx.hooks.ui.rerollSelected.size;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn btn-reroll';
+  b.dataset.act = 'reroll';
+  b.textContent = `重掷选中(${count})`;
+  b.disabled = count === 0;
+  b.addEventListener('click', () => {
+    const n = ctx.hooks.ui.rerollSelected.size;
+    if (n === 0) return;
+    ctx.hooks.propose(
+      { t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] },
+      `重掷 ${n} 颗`,
+    );
+  });
+  return b;
+}
+
 function operationList(ctx: Ctx): HTMLElement {
   const box = el('div', 'actionlist');
+
+  const rb = rerollButton(ctx);
+  if (rb) box.appendChild(rb);
+
   const seenSkill = new Set<string>();
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
@@ -716,13 +803,14 @@ function confirmSelection(ctx: Ctx): void {
   if (sel.stepIndex >= nextSteps.length) {
     if (sel.key === '@dustRise') {
       const medId = sel.chosenDice.flat()[0];
-      hooks.ui.selection = null;
-      hooks.onAction({
+      const built: DustRiseAction = {
         t: 'dustRise',
         artifactId: sel.artifactId,
         side: sel.side === 'only' ? undefined : sel.side,
         meditationDieId: medId,
-      });
+      };
+      hooks.ui.selection = null;
+      hooks.propose(built, dustRiseActionLabel(ctx, built));
       hooks.requestRender();
       return;
     }
@@ -731,16 +819,16 @@ function confirmSelection(ctx: Ctx): void {
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
     const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, numbers });
-    const action: Action = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
+    const action: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
     hooks.ui.selection = null;
-    hooks.onAction(action);
+    hooks.propose(action, skillActionLabel(ctx, action));
   }
   hooks.requestRender();
 }
 
 function logPanel(ctx: Ctx): HTMLElement {
   const box = el('div', 'log');
-  const recent = ctx.state.log.slice(-20).reverse();
+  const recent = ctx.state.log.slice(-30).reverse();
   if (recent.length === 0) {
     box.textContent = '（暂无记录）';
   } else {
@@ -808,22 +896,54 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const ctx: Ctx = { state, legal, hooks, maxReroll, selectionStep, selectionOwner };
 
   root.innerHTML = '';
-  const board = el('div', 'board');
-  board.appendChild(statusBar(ctx));
-  board.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
-  board.appendChild(centerBar(state));
-  board.appendChild(playerPanel(state.players[selfId], 'self', false, ctx));
+  const app = el('div', 'app');
 
-  if (hooks.ui.selection) {
+  // 左栏：战报
+  const sidebar = el('div', 'sidebar');
+  const logTitle = el('div', 'log-title');
+  logTitle.textContent = '战报';
+  sidebar.appendChild(logTitle);
+  sidebar.appendChild(logPanel(ctx));
+  app.appendChild(sidebar);
+
+  // 主栏：敌方 / 中央操作区 / 自己
+  const main = el('div', 'main');
+  main.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
+
+  const centerband = el('div', 'centerband');
+  const left = el('div', 'centerband-left');
+  left.appendChild(hintBox(ctx));
+
+  const confirm = confirmRow(ctx);
+  if (confirm) {
+    left.appendChild(confirm);
+  } else if (hooks.ui.selection) {
     const chooser = chooserPanel(ctx);
-    if (chooser) board.appendChild(chooser);
+    if (chooser) left.appendChild(chooser);
   } else {
-    board.appendChild(actionBar(ctx));
-    board.appendChild(operationList(ctx));
+    left.appendChild(operationList(ctx));
   }
+  centerband.appendChild(left);
 
-  board.appendChild(logPanel(ctx));
-  root.appendChild(board);
+  const right = el('div', 'centerband-right');
+  const dustfall = el('div', 'dustfall');
+  dustfall.textContent = `尘落 ${state.dustfall} / 10`;
+  right.appendChild(dustfall);
+
+  const restart = document.createElement('button');
+  restart.type = 'button';
+  restart.className = 'btn btn-restart';
+  restart.dataset.act = 'restart';
+  restart.textContent = '重开';
+  restart.addEventListener('click', () => hooks.onRestart());
+  right.appendChild(restart);
+  centerband.appendChild(right);
+
+  main.appendChild(centerband);
+  main.appendChild(playerPanel(state.players[selfId], 'self', false, ctx));
+  app.appendChild(main);
+
+  root.appendChild(app);
 
   if (state.phase === 'gameOver') {
     root.appendChild(gameOverModal(ctx));

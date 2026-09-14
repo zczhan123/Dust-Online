@@ -8,7 +8,7 @@ const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
 
 let state: GameState | null = null;
-const ui: UiState = { rerollSelected: new Set(), selection: null };
+const ui: UiState = { rerollSelected: new Set(), selection: null, pendingConfirm: null };
 let lastError = '';
 
 const render = () => {
@@ -16,10 +16,17 @@ const render = () => {
   renderGame(state, root, {
     ui,
     requestRender: render,
+    propose: (action, label) => { ui.pendingConfirm = { action, label }; render(); },
     onRestart: () => { state = null; showSetup(); },
     onAction: (a) => {
       if (!state) return;
-      try { applyAction(state, a); lastError = ''; ui.rerollSelected.clear(); ui.selection = null; }
+      try {
+        applyAction(state, a);
+        lastError = '';
+        ui.rerollSelected.clear();
+        ui.selection = null;
+        ui.pendingConfirm = null;
+      }
       catch (e) { lastError = e instanceof Error ? e.message : String(e); }
       if (lastError) state.log.push({ turn: state.turnIndex, phase: state.phase, text: `非法操作：${lastError}` });
       render();
@@ -32,6 +39,7 @@ const showSetup = () => {
     state = createGame({ seed: 20240913, firstPlayer: opts.firstPlayer, heroA: opts.heroA, heroB: opts.heroB });
     ui.rerollSelected.clear();
     ui.selection = null;
+    ui.pendingConfirm = null;
     render();
   });
 };

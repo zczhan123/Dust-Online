@@ -140,6 +140,7 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) continue;
       if (g.skillsUsedThisTurn.includes(s.key)) continue;
       if (s.key === 'buxiang.cuilian') {
+        if (a.count >= 3) continue;
         for (const d of p.areas.attack) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: d.id } });
       } else if (s.key === 'youlong.tengwan') {
         if (p.areas.meditation.length >= 3) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) } });
