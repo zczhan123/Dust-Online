@@ -161,6 +161,14 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       opponentDiscardIds: chosenDice[2] ?? [],
     }),
   },
+  // 008 王家之拳：消耗 2 颗冥想骰 → 弃置自己的 0–2 颗防御骰（不足可少弃，代价为真实伤害）
+  'tiebi.fist': {
+    steps: () => [
+      { kind: 'dice', label: '选择消耗的冥想骰（恰好 2 颗）', owner: 'self', areas: ['meditation'], min: 2, max: 2 },
+      { kind: 'dice', label: '选择弃置的防御骰（0–2 颗，不足可少弃）', owner: 'self', areas: ['defense'], min: 0, max: 2 },
+    ],
+    buildParams: ({ chosenDice }) => ({ meditationDieIds: chosenDice[0] ?? [], defenseDieIds: chosenDice[1] ?? [] }),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [

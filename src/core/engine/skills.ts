@@ -27,6 +27,19 @@ export function consumeDice(p: PlayerState, kind: DiceKind, ids: string[]): void
   }
 }
 
+/**
+ * 回合开始时的触发式持续效果（在重置回合标记之后、补充能力骰之前调用）。
+ * FAQ 8.1.1：008「战车」在此时间点检查防御骰，获得的攻击骰计入能力骰总数，
+ * 因此可能减少随后的正常补充数量。
+ */
+export function applyTurnStartEffects(g: GameState, player: PlayerId): void {
+  // 008 战车：回合开始时若拥有 >=1 防御骰，获得 1 个 5 点攻击骰
+  if (hasActiveSkill(g.players[player], 'tiebi.chariot') && g.players[player].areas.defense.length >= 1) {
+    g.players[player].areas.attack.push({ id: newDieId(`${player}-`), value: 5, kind: 'attack' });
+    logLine(g, `${pname(player)} 「战车」：回合开始，获得 1 个 5 点攻击骰`);
+  }
+}
+
 export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 淬炼：消耗 1 攻击骰 → 本神器计数 +1（上限 3）
   'buxiang.cuilian': {
@@ -301,6 +314,26 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg);
       logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kind}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰，造成 ${dmg} 点真实伤害`);
+    },
+  },
+  // 008 王家之拳：消耗 2 冥想 → 弃置自己的 2 防御；不足 2 个时每少弃 1 个受 2 真实伤害 → 获得 4 随机防御骰；本回合攻击伤害 +1
+  'tiebi.fist': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const medIds = (params.meditationDieIds as string[]) ?? [];
+      if (medIds.length !== 2) throw new Error('need exactly 2 meditation dice');
+      if (new Set(medIds).size !== 2) throw new Error('duplicate die id');
+      for (const id of medIds) if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+      consumeDice(p, 'meditation', medIds);
+      const defIds = (params.defenseDieIds as string[]) ?? [];
+      if (new Set(defIds).size !== defIds.length) throw new Error('duplicate die id');
+      const validDef = defIds.filter((id) => p.areas.defense.some((d) => d.id === id)).slice(0, 2);
+      consumeDice(p, 'defense', validDef);
+      const missing = 2 - validDef.length;
+      if (missing > 0) dealTrueDamage(g, player, missing * 2);
+      for (let i = 0; i < 4; i++) p.areas.defense.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'defense' });
+      p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn' });
+      logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰，本回合攻击伤害 +1`);
     },
   },
 };

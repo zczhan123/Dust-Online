@@ -5,7 +5,7 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage } from './combat';
-import { SKILL_HANDLERS, skillActive, consumeDice } from './skills';
+import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects } from './skills';
 import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
 
@@ -28,6 +28,8 @@ export function beginTurn(g: GameState): void {
   g.rerollUsed = 0;
   g.skillsUsedThisTurn = [];
   const p = g.activePlayer;
+  // 回合开始触发（补充之前，故获得的骰计入意志上限）：008 战车
+  applyTurnStartEffects(g, p);
   if (g.firstRound[p]) {
     g.phase = 'dustRise'; // 第一回合跳过补充与重掷
   } else {
@@ -208,6 +210,18 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
               kind,
               consumedIds: p.areas[kind].slice(0, 4).map((d) => d.id),
               opponentDiscardIds: g.players[opp].areas[kind].slice(0, 4).map((d) => d.id),
+            },
+          });
+        }
+      } else if (s.key === 'tiebi.fist') {
+        if (p.areas.meditation.length >= 2) {
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: {
+              meditationDieIds: p.areas.meditation.slice(0, 2).map((d) => d.id),
+              defenseDieIds: p.areas.defense.slice(0, 2).map((d) => d.id),
             },
           });
         }

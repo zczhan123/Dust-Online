@@ -494,4 +494,63 @@ describe('renderGame (interaction)', () => {
       },
     });
   });
+
+  it('opens the 008 王家之拳 chooser and proposes explicit meditation/defense params', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    state.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'right';
+    state.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+      ],
+      meditation: [
+        { id: 'm1', value: 3, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="008"] .skill[data-side="right"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('tiebi.fist');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    // step 1: pick exactly 2 meditation dice
+    for (const id of ['m1', 'm2']) {
+      root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
+    }
+    let ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    // step 2: pick the 2 defense dice to discard
+    for (const id of ['d1', 'd2']) {
+      root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
+    }
+    ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '008',
+      side: 'right',
+      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1', 'd2'] },
+    });
+  });
 });

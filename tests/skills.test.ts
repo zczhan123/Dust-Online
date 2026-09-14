@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
+import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
 import { totalDice } from '../src/core/engine/derive';
 import { virtualAttack } from '../src/core/engine/combat';
+import { applyTurnStartEffects } from '../src/core/engine/skills';
 
 describe('basic activate skills', () => {
   it('淬炼 consumes an attack die and increments 不祥 count (cap 3)', () => {
@@ -464,6 +465,145 @@ describe('007 主宰', () => {
         artifactId: '007',
         side: 'right',
         params: { kind: 'attack', consumedIds: ['c1', 'c2', 'c3', 'o1'] },
+      }),
+    ).toThrow();
+  });
+});
+
+describe('008 铁壁', () => {
+  const setup008 = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'right';
+    return g;
+  };
+
+  it('战车: at turn start, grants 1 attack die of value 5 when holding >=1 defense die', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
+    g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
+    g.players.A.areas = { attack: [], defense: [{ id: 'd1', value: 1, kind: 'defense' }], meditation: [] };
+    applyTurnStartEffects(g, 'A');
+    expect(g.players.A.areas.attack).toHaveLength(1);
+    expect(g.players.A.areas.attack[0]).toMatchObject({ value: 5, kind: 'attack' });
+  });
+
+  it('战车: does nothing when the player has no defense die', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
+    g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    applyTurnStartEffects(g, 'A');
+    expect(g.players.A.areas.attack).toHaveLength(0);
+  });
+
+  it('战车 FAQ 8.1.1: the gained die counts toward the will cap and reduces the refill', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
+    // 008 持续使意志 7+1=8；现有 6 颗（含 1 个以上防御骰）
+    g.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 2, kind: 'attack' },
+        { id: 'a3', value: 2, kind: 'attack' },
+      ],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 1, kind: 'defense' },
+      ],
+      meditation: [{ id: 'm1', value: 3, kind: 'meditation' }],
+    };
+    g.firstRound.A = false;
+    beginTurn(g);
+    // 6 + 战车 1 = 7 → 补充 room = 8-7 = 1（若无战车则会补 2）
+    expect(totalDice(g.players.A)).toBe(8);
+    const refillLog = g.log.map((l) => l.text).find((t) => t.includes('补充'));
+    expect(refillLog).toContain('补充 1 颗');
+  });
+
+  it('王家之拳: consumes 2 meditation, discards 2 defense, gains 4 defense and +1 thisTurn attack damage', () => {
+    const g = setup008();
+    g.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+      ],
+      meditation: [
+        { id: 'm1', value: 3, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ],
+    };
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '008',
+      side: 'right',
+      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1', 'd2'] },
+    });
+    expect(g.players.A.areas.meditation).toHaveLength(0);
+    expect(g.players.A.areas.defense).toHaveLength(4); // 弃 2 → 获得 4
+    expect(
+      g.players.A.buffs.some((b) => b.attr === 'attackDamage' && b.add === 1 && b.duration === 'thisTurn'),
+    ).toBe(true);
+  });
+
+  it('王家之拳 FAQ 8.2.1: with <2 defense it still activates, takes (2-discarded)*2 true damage, gains 4 defense', () => {
+    const g = setup008();
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 3, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ],
+    };
+    const lifeBefore = g.players.A.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '008',
+      side: 'right',
+      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: [] },
+    });
+    expect(g.players.A.life).toBe(lifeBefore - 4); // 少弃 2 → 4 点真实伤害
+    expect(g.players.A.areas.defense).toHaveLength(4);
+    expect(g.players.A.buffs.some((b) => b.attr === 'attackDamage' && b.add === 1)).toBe(true);
+  });
+
+  it('王家之拳: with exactly 1 defense, discards it and takes 2 true damage', () => {
+    const g = setup008();
+    g.players.A.areas = {
+      attack: [],
+      defense: [{ id: 'd1', value: 1, kind: 'defense' }],
+      meditation: [
+        { id: 'm1', value: 3, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ],
+    };
+    const lifeBefore = g.players.A.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '008',
+      side: 'right',
+      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1'] },
+    });
+    expect(g.players.A.life).toBe(lifeBefore - 2); // 少弃 1 → 2 点真实伤害
+    expect(g.players.A.areas.defense).toHaveLength(4); // 弃 1 → 获得 4
+  });
+
+  it('王家之拳: rejects activation without exactly 2 meditation dice', () => {
+    const g = setup008();
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [{ id: 'm1', value: 3, kind: 'meditation' }],
+    };
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '008',
+        side: 'right',
+        params: { meditationDieIds: ['m1'], defenseDieIds: [] },
       }),
     ).toThrow();
   });
