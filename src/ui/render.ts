@@ -536,13 +536,24 @@ function phaseHint(ctx: Ctx): string {
   }
 }
 
+function actorOf(state: GameState): PlayerId {
+  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
+  if (state.pending) return state.pending.player;
+  return state.activePlayer;
+}
+
 function hintBox(ctx: Ctx): HTMLElement {
   const hint = el('div', 'hint');
-  const turn = el('div', 'hint-line hint-turn');
-  turn.textContent = `轮到 玩家${ctx.state.activePlayer} 操作`;
-  const phase = el('div', 'hint-line hint-phase');
-  phase.textContent = phaseHint(ctx);
+  const actor = actorOf(ctx.state);
+  const turn = el('span', 'hint-turn');
+  turn.appendChild(document.createTextNode('轮到 '));
+  const who = el('span', `hint-player player-${actor}`);
+  who.textContent = `玩家${actor}`;
+  turn.appendChild(who);
+  turn.appendChild(document.createTextNode(' 操作'));
   hint.appendChild(turn);
+  const phase = el('span', 'hint-phase');
+  phase.textContent = phaseHint(ctx);
   hint.appendChild(phase);
   return hint;
 }

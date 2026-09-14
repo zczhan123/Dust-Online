@@ -399,4 +399,17 @@ describe('renderGame (interaction)', () => {
     expect(ui.selection!.key).toBe('@dustRise');
     expect(root.querySelector('.selector')).not.toBeNull();
   });
+
+  it('shows the defender as the acting player while an attack is pending (colored)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    state.players.A.areas.attack.push({ id: 'atk', value: 5, kind: 'attack' });
+    applyAction(state, { t: 'attack', dieId: 'atk' });
+    renderGame(state, root, hooksFor());
+    const turn = root.querySelector('.hint-turn')!;
+    expect(turn.textContent).toContain('玩家B'); // 轮到防御方
+    expect(turn.querySelector('.player-B')).not.toBeNull(); // 玩家名按颜色类标出
+    expect(root.querySelector('.hint .hint-phase')).not.toBeNull(); // 提示在同一行
+  });
 });
