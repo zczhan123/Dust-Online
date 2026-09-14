@@ -339,3 +339,132 @@ describe('必杀', () => {
     expect(g.players.B.areas.attack.length).toBe(0);
   });
 });
+
+describe('007 主宰', () => {
+  const setup007 = (side: 'left' | 'right') => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = side;
+    return g;
+  };
+
+  it('战争横扫: consumes one of each, discards the chosen opponent dice, deals floor(sum/2) true damage', () => {
+    const g = setup007('left');
+    g.players.A.areas.attack = [{ id: 'sa', value: 5, kind: 'attack' }];
+    g.players.A.areas.defense = [{ id: 'sd', value: 3, kind: 'defense' }];
+    g.players.A.areas.meditation = [{ id: 'sm', value: 4, kind: 'meditation' }];
+    g.players.B.areas.attack = [{ id: 'oa', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'od', value: 2, kind: 'defense' }];
+    g.players.B.areas.meditation = [{ id: 'om', value: 2, kind: 'meditation' }];
+    const lifeBefore = g.players.B.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '007',
+      side: 'left',
+      params: {
+        consumed: { attack: 'sa', defense: 'sd', meditation: 'sm' },
+        discard: { attack: 'oa', defense: 'od', meditation: 'om' },
+      },
+    });
+    // sum = 5+3+4 = 12 -> 6 true damage
+    expect(g.players.B.life).toBe(lifeBefore - 6);
+    expect(g.players.A.areas.attack).toHaveLength(0);
+    expect(g.players.A.areas.defense).toHaveLength(0);
+    expect(g.players.A.areas.meditation).toHaveLength(0);
+    expect(g.players.B.areas.attack).toHaveLength(0);
+    expect(g.players.B.areas.defense).toHaveLength(0);
+    expect(g.players.B.areas.meditation).toHaveLength(0);
+  });
+
+  it('战争横扫 FAQ 7.1.1: still activates when the opponent is missing a die type', () => {
+    const g = setup007('left');
+    g.players.A.areas.attack = [{ id: 'sa', value: 3, kind: 'attack' }];
+    g.players.A.areas.defense = [{ id: 'sd', value: 3, kind: 'defense' }];
+    g.players.A.areas.meditation = [{ id: 'sm', value: 4, kind: 'meditation' }];
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [{ id: 'od', value: 2, kind: 'defense' }];
+    g.players.B.areas.meditation = [];
+    const lifeBefore = g.players.B.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '007',
+      side: 'left',
+      params: {
+        consumed: { attack: 'sa', defense: 'sd', meditation: 'sm' },
+        discard: { defense: 'od' },
+      },
+    });
+    // sum = 3+3+4 = 10 -> 5 true damage; opponent has no attack/meditation dice to discard
+    expect(g.players.B.life).toBe(lifeBefore - 5);
+    expect(g.players.B.areas.defense).toHaveLength(0);
+    expect(g.players.A.areas.attack).toHaveLength(0);
+    expect(g.players.A.areas.defense).toHaveLength(0);
+    expect(g.players.A.areas.meditation).toHaveLength(0);
+  });
+
+  it('震荡斩击: consumes 4 same-type dice, discards up to 4 opponent same-type, deals floor(sum/2)', () => {
+    const g = setup007('right');
+    g.players.A.areas.attack = [
+      { id: 'c1', value: 2, kind: 'attack' },
+      { id: 'c2', value: 3, kind: 'attack' },
+      { id: 'c3', value: 4, kind: 'attack' },
+      { id: 'c4', value: 5, kind: 'attack' },
+      { id: 'c5', value: 6, kind: 'attack' },
+    ];
+    g.players.B.areas.attack = [
+      { id: 'o1', value: 1, kind: 'attack' },
+      { id: 'o2', value: 1, kind: 'attack' },
+      { id: 'o3', value: 1, kind: 'attack' },
+      { id: 'o4', value: 1, kind: 'attack' },
+      { id: 'o5', value: 1, kind: 'attack' },
+    ];
+    const lifeBefore = g.players.B.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '007',
+      side: 'right',
+      params: {
+        kind: 'attack',
+        consumedIds: ['c1', 'c2', 'c3', 'c4'],
+        opponentDiscardIds: ['o1', 'o2', 'o3'],
+      },
+    });
+    // sum = 2+3+4+5 = 14 -> 7 true damage; c5 remains; o4/o5 remain
+    expect(g.players.B.life).toBe(lifeBefore - 7);
+    expect(g.players.A.areas.attack.map((d) => d.id)).toEqual(['c5']);
+    expect(g.players.B.areas.attack.map((d) => d.id)).toEqual(['o4', 'o5']);
+  });
+
+  it('震荡斩击: rejects fewer than 4 dice and dice not owned by the player', () => {
+    const base = () => {
+      const g = setup007('right');
+      g.players.A.areas.attack = [
+        { id: 'c1', value: 2, kind: 'attack' },
+        { id: 'c2', value: 3, kind: 'attack' },
+        { id: 'c3', value: 4, kind: 'attack' },
+        { id: 'c4', value: 5, kind: 'attack' },
+      ];
+      g.players.B.areas.attack = [{ id: 'o1', value: 1, kind: 'attack' }];
+      return g;
+    };
+    const g1 = base();
+    expect(() =>
+      applyAction(g1, {
+        t: 'skill',
+        artifactId: '007',
+        side: 'right',
+        params: { kind: 'attack', consumedIds: ['c1', 'c2', 'c3'] },
+      }),
+    ).toThrow();
+    const g2 = base();
+    expect(() =>
+      applyAction(g2, {
+        t: 'skill',
+        artifactId: '007',
+        side: 'right',
+        params: { kind: 'attack', consumedIds: ['c1', 'c2', 'c3', 'o1'] },
+      }),
+    ).toThrow();
+  });
+});

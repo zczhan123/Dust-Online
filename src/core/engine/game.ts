@@ -173,6 +173,44 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
           const oppDef = g.players[opp].areas.defense.slice(0, atk.value).map((d) => d.id);
           acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: atk.id, opponentDefenseDieIds: oppDef } });
         }
+      } else if (s.key === 'zhuzai.sweep') {
+        if (p.areas.attack.length >= 1 && p.areas.defense.length >= 1 && p.areas.meditation.length >= 1) {
+          const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
+          const o = g.players[opp];
+          const discard: Record<string, string> = {};
+          if (o.areas.attack[0]) discard.attack = o.areas.attack[0].id;
+          if (o.areas.defense[0]) discard.defense = o.areas.defense[0].id;
+          if (o.areas.meditation[0]) discard.meditation = o.areas.meditation[0].id;
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: {
+              consumed: {
+                attack: p.areas.attack[0].id,
+                defense: p.areas.defense[0].id,
+                meditation: p.areas.meditation[0].id,
+              },
+              discard,
+            },
+          });
+        }
+      } else if (s.key === 'zhuzai.smash') {
+        const kinds = ['attack', 'defense', 'meditation'] as const;
+        const kind = kinds.find((k) => p.areas[k].length >= 4);
+        if (kind) {
+          const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: {
+              kind,
+              consumedIds: p.areas[kind].slice(0, 4).map((d) => d.id),
+              opponentDiscardIds: g.players[opp].areas[kind].slice(0, 4).map((d) => d.id),
+            },
+          });
+        }
       }
     }
   }

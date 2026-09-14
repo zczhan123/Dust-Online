@@ -2,17 +2,22 @@ import type { DiceKind, GameState, PlayerId } from '../core/model/types';
 
 export type SelectStep =
   | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number; filter?: (d: { value: number }) => boolean }
+  | { kind: 'option'; label: string; options: { value: string; label: string }[] }
   | { kind: 'number'; label: string; min: number; max: number };
 
-export interface SelectionArgs {
+export interface StepArgs {
   state: GameState;
   player: PlayerId;
   chosenDice: string[][];
+  options: string[];
+}
+
+export interface SelectionArgs extends StepArgs {
   numbers: number[];
 }
 
 export interface SkillSelection {
-  steps: (args: { state: GameState; player: PlayerId; chosenDice: string[][] }) => SelectStep[];
+  steps: (args: StepArgs) => SelectStep[];
   buildParams: (args: SelectionArgs) => Record<string, unknown>;
 }
 
@@ -104,6 +109,57 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       }
       return { opponentDiceByKind: map };
     },
+  },
+  // 007 战争横扫：各消耗 1 攻/防/冥（显式）；各弃对方 0–1 攻/防/冥（显式）
+  'zhuzai.sweep': {
+    steps: () => [
+      { kind: 'dice', label: '选择消耗的 1 个攻击骰', owner: 'self', areas: ['attack'], min: 1, max: 1 },
+      { kind: 'dice', label: '选择消耗的 1 个防御骰', owner: 'self', areas: ['defense'], min: 1, max: 1 },
+      { kind: 'dice', label: '选择消耗的 1 个冥想骰', owner: 'self', areas: ['meditation'], min: 1, max: 1 },
+      { kind: 'dice', label: '选择弃置对方的攻击骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['attack'], min: 0, max: 1 },
+      { kind: 'dice', label: '选择弃置对方的防御骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['defense'], min: 0, max: 1 },
+      { kind: 'dice', label: '选择弃置对方的冥想骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['meditation'], min: 0, max: 1 },
+    ],
+    buildParams: ({ chosenDice }) => ({
+      consumed: {
+        attack: chosenDice[0]?.[0],
+        defense: chosenDice[1]?.[0],
+        meditation: chosenDice[2]?.[0],
+      },
+      discard: {
+        attack: chosenDice[3]?.[0],
+        defense: chosenDice[4]?.[0],
+        meditation: chosenDice[5]?.[0],
+      },
+    }),
+  },
+  // 007 震荡斩击：选类型 → 消耗 4 颗同类型（显式）→ 弃对方 0–4 颗同类型（显式）
+  'zhuzai.smash': {
+    steps: ({ options }) => {
+      const kind = options[0];
+      const name = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
+      const steps: SelectStep[] = [
+        {
+          kind: 'option',
+          label: '选择消耗的能力骰类型',
+          options: [
+            { value: 'attack', label: '攻击' },
+            { value: 'defense', label: '防御' },
+            { value: 'meditation', label: '冥想' },
+          ],
+        },
+      ];
+      if (kind === 'attack' || kind === 'defense' || kind === 'meditation') {
+        steps.push({ kind: 'dice', label: `选择消耗的 4 个${name}骰`, owner: 'self', areas: [kind], min: 4, max: 4 });
+        steps.push({ kind: 'dice', label: `选择弃置对方的${name}骰（0–4 颗，不足可跳过）`, owner: 'opponent', areas: [kind], min: 0, max: 4 });
+      }
+      return steps;
+    },
+    buildParams: ({ chosenDice, options }) => ({
+      kind: options[0],
+      consumedIds: chosenDice[1] ?? [],
+      opponentDiscardIds: chosenDice[2] ?? [],
+    }),
   },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {

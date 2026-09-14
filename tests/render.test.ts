@@ -421,4 +421,77 @@ describe('renderGame (interaction)', () => {
     expect(srcs).toContain('/cards/001.jpg');
     expect(srcs).toContain('/cards/006.jpg');
   });
+
+  it('opens the 007 chooser with an option step and completes 震荡斩击 with explicit params', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    state.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = 'right';
+    state.players.A.areas.attack = [
+      { id: 'c1', value: 2, kind: 'attack' },
+      { id: 'c2', value: 3, kind: 'attack' },
+      { id: 'c3', value: 4, kind: 'attack' },
+      { id: 'c4', value: 5, kind: 'attack' },
+    ];
+    state.players.B.areas.attack = [
+      { id: 'o1', value: 1, kind: 'attack' },
+      { id: 'o2', value: 1, kind: 'attack' },
+    ];
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="007"] .skill[data-side="right"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('zhuzai.smash');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    // step 1: option
+    const optBtn = root.querySelector<HTMLButtonElement>('.option-btn[data-option="attack"]');
+    expect(optBtn).not.toBeNull();
+    optBtn!.click();
+    const ok1 = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok1.disabled).toBe(false);
+    ok1.click();
+
+    // step 2: pick 4 own attack dice
+    for (const id of ['c1', 'c2', 'c3', 'c4']) {
+      const d = root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!;
+      expect(d).not.toBeNull();
+      d.click();
+    }
+    const ok2 = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok2.disabled).toBe(false);
+    ok2.click();
+
+    // step 3: pick opponent attack dice (0-4); choose one
+    const od = root.querySelector<HTMLElement>('.player--enemy .die[data-id="o1"]')!;
+    expect(od).not.toBeNull();
+    od.click();
+    const ok3 = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    ok3.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '007',
+      side: 'right',
+      params: {
+        kind: 'attack',
+        consumedIds: ['c1', 'c2', 'c3', 'c4'],
+        opponentDiscardIds: ['o1'],
+      },
+    });
+  });
 });

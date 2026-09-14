@@ -252,4 +252,55 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
     },
   },
+  // 007 战争横扫：各消耗 1 攻/防/冥 → 弃对方各 1 → floor(点数和/2) 真实伤害
+  'zhuzai.sweep': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const consumed = (params.consumed ?? {}) as { attack?: string; defense?: string; meditation?: string };
+      const discard = (params.discard ?? {}) as { attack?: string; defense?: string; meditation?: string };
+      let sum = 0;
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        const id = consumed[k];
+        if (!id) throw new Error(`missing consumed ${k} die`);
+        const die = p.areas[k].find((d) => d.id === id);
+        if (!die) throw new Error(`not your ${k} die: ${id}`);
+        sum += die.value;
+      }
+      for (const k of ['attack', 'defense', 'meditation'] as const) consumeDice(p, k, [consumed[k]!]);
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        const id = discard[k];
+        if (id && g.players[opp].areas[k].some((d) => d.id === id)) consumeDice(g.players[opp], k, [id]);
+      }
+      const dmg = Math.floor(sum / 2);
+      dealTrueDamage(g, opp, dmg);
+      logLine(g, `${pname(player)} 发动「战争横扫」：消耗 攻/防/冥 各 1（点数和 ${sum}），造成 ${dmg} 点真实伤害`);
+    },
+  },
+  // 007 震荡斩击：消耗 4 颗同类型 → 弃对方 4 颗同类型 → floor(点数和/2) 真实伤害
+  'zhuzai.smash': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const kind = params.kind as DiceKind;
+      if (kind !== 'attack' && kind !== 'defense' && kind !== 'meditation') throw new Error('invalid kind');
+      const consumedIds = (params.consumedIds as string[]) ?? [];
+      if (consumedIds.length !== 4) throw new Error('need exactly 4 dice');
+      if (new Set(consumedIds).size !== 4) throw new Error('duplicate die id');
+      let sum = 0;
+      for (const id of consumedIds) {
+        const die = p.areas[kind].find((d) => d.id === id);
+        if (!die) throw new Error(`not your ${kind} die: ${id}`);
+        sum += die.value;
+      }
+      consumeDice(p, kind, consumedIds);
+      const oppIds = ((params.opponentDiscardIds as string[]) ?? [])
+        .filter((id) => g.players[opp].areas[kind].some((d) => d.id === id))
+        .slice(0, 4);
+      if (oppIds.length) consumeDice(g.players[opp], kind, oppIds);
+      const dmg = Math.floor(sum / 2);
+      dealTrueDamage(g, opp, dmg);
+      logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kind}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰，造成 ${dmg} 点真实伤害`);
+    },
+  },
 };

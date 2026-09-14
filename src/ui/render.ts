@@ -42,6 +42,7 @@ export interface UiState {
     side: 'left' | 'right' | 'only';
     stepIndex: number;
     chosenDice: string[][];
+    options: string[];
     currentSel: Set<string>;
     numbers: number[];
   };
@@ -225,9 +226,9 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   const spec = SKILL_SELECTION[key];
   if (spec) {
     const player = ctx.state.activePlayer;
-    const steps = spec.steps({ state: ctx.state, player, chosenDice: [] });
+    const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [] });
     if (steps.length === 0) {
-      const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], numbers: [] });
+      const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], options: [], numbers: [] });
       const built: SkillAction = {
         t: 'skill',
         artifactId: action.artifactId,
@@ -244,6 +245,7 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
     side: action.side,
     stepIndex: 0,
     chosenDice: [],
+    options: [],
     currentSel: new Set<string>(),
     numbers: [],
   };
@@ -257,6 +259,7 @@ function startDustRiseSelection(ctx: Ctx, act: DustRiseAction): void {
     side: act.side ?? 'left',
     stepIndex: 0,
     chosenDice: [],
+    options: [],
     currentSel: new Set<string>(),
     numbers: [],
   };
@@ -733,7 +736,7 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const spec = SKILL_SELECTION[sel.key];
   if (!spec) return null;
   const { state, hooks } = ctx;
-  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice });
+  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options });
   const step = steps[sel.stepIndex];
   const panel = el('div', 'selector');
   if (!step) return panel;
@@ -746,6 +749,22 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
     const info = el('div', 'selector-info');
     info.textContent = `已选 ${sel.currentSel.size}（需 ${step.min}–${step.max} 颗）`;
     panel.appendChild(info);
+  } else if (step.kind === 'option') {
+    const row = el('div', 'option-row');
+    for (const o of step.options) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn option-btn';
+      b.dataset.option = o.value;
+      if (sel.options[sel.stepIndex] === o.value) b.classList.add('option-btn--on');
+      b.textContent = o.label;
+      b.addEventListener('click', () => {
+        sel.options[sel.stepIndex] = o.value;
+        hooks.requestRender();
+      });
+      row.appendChild(b);
+    }
+    panel.appendChild(row);
   } else {
     const nums = el('div', 'number-row');
     for (let n = step.min; n <= step.max; n++) {
@@ -776,10 +795,14 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   actions.appendChild(cancel);
 
   const chosenNum = sel.numbers[sel.stepIndex];
-  const satisfied =
-    step.kind === 'dice'
-      ? sel.currentSel.size >= step.min && sel.currentSel.size <= step.max
-      : Number.isInteger(chosenNum) && chosenNum >= step.min && chosenNum <= step.max;
+  let satisfied: boolean;
+  if (step.kind === 'dice') {
+    satisfied = sel.currentSel.size >= step.min && sel.currentSel.size <= step.max;
+  } else if (step.kind === 'option') {
+    satisfied = step.options.some((o) => o.value === sel.options[sel.stepIndex]);
+  } else {
+    satisfied = Number.isInteger(chosenNum) && chosenNum >= step.min && chosenNum <= step.max;
+  }
 
   const ok = document.createElement('button');
   ok.type = 'button';
@@ -804,7 +827,7 @@ function confirmSelection(ctx: Ctx): void {
   }
   const { state, hooks } = ctx;
   const player = state.activePlayer;
-  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice });
+  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options });
   const step = steps[sel.stepIndex];
   if (!step) {
     hooks.ui.selection = null;
@@ -815,10 +838,16 @@ function confirmSelection(ctx: Ctx): void {
   if (step.kind === 'dice') {
     sel.chosenDice.push([...sel.currentSel]);
     sel.currentSel = new Set<string>();
+  } else if (step.kind === 'option') {
+    if (!step.options.some((o) => o.value === sel.options[sel.stepIndex])) {
+      hooks.requestRender();
+      return;
+    }
+    sel.chosenDice.push([]);
   }
   sel.stepIndex += 1;
 
-  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice });
+  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options });
   if (sel.stepIndex >= nextSteps.length) {
     if (sel.key === '@dustRise') {
       const medId = sel.chosenDice.flat()[0];
@@ -837,7 +866,7 @@ function confirmSelection(ctx: Ctx): void {
       .map((s, i) => (s.kind === 'number' ? i : -1))
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
-    const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, numbers });
+    const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers });
     const action: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
     hooks.ui.selection = null;
     hooks.propose(action, skillActionLabel(ctx, action));
@@ -904,6 +933,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       state,
       player: state.activePlayer,
       chosenDice: sel.chosenDice,
+      options: sel.options,
     });
     const step = steps[sel.stepIndex];
     if (step && step.kind === 'dice') {
