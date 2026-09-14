@@ -532,6 +532,7 @@ function phaseHint(ctx: Ctx): string {
   if (pd && pd.kind === 'fengmang') return '锋芒：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。';
   if (pd && pd.kind === 'guwangCharge') return '孤王·高塔铁幕：可将对方 1 个攻击骰点数改为 1。';
   if (pd && pd.kind === 'guwangCancel') return `孤王·高塔铁幕：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。`;
+  if (pd && pd.kind === 'shenhongKill') return '深红·杀意：本回合补充≤3，可造成 3 点真实伤害并回复 2 点生命。';
   if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
   switch (state.phase) {
     case 'initialReroll':
@@ -659,6 +660,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       const v = state.players[defender].areas.defense.find((d) => d.id === a.defenseDieId)?.value ?? '?';
       return `取消（消耗 防御${v}）`;
     }
+    case 'shenhongKill':
+      return a.accept ? '发动杀意（3 真伤 + 回2）' : '不发动';
     case 'reroll':
     case 'skill':
       return null;

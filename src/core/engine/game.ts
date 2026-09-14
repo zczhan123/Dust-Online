@@ -5,8 +5,8 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage, applyDeferredTrueDamage } from './combat';
-import { setDieValue } from './effects';
-import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects } from './skills';
+import { setDieValue, heal } from './effects';
+import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
 
@@ -34,8 +34,15 @@ export function beginTurn(g: GameState): void {
   if (g.firstRound[p]) {
     g.phase = 'dustRise'; // 第一回合跳过补充与重掷
   } else {
-    withRng(g, (rng) => refillPhase(g, p, rng));
+    let refilled = 0;
+    withRng(g, (rng) => {
+      refilled = refillPhase(g, p, rng);
+    });
     g.phase = 'reroll';
+    // 010 深红·杀意：补充阶段实际补充数量 ≤ 3 时，可造成 3 点真实伤害并回复 2 点生命
+    if (hasActiveSkill(g.players[p], 'shenhong.kill') && refilled <= 3) {
+      g.pending = { kind: 'shenhongKill', player: p };
+    }
   }
 }
 
@@ -257,6 +264,12 @@ export function getLegalActions(g: GameState): Action[] {
       for (const d of p.areas.defense) acts.push({ t: 'guwangCancel', cancel: true, defenseDieId: d.id });
       return acts;
     }
+    if (g.pending.kind === 'shenhongKill') {
+      return [
+        { t: 'shenhongKill', accept: true },
+        { t: 'shenhongKill', accept: false },
+      ];
+    }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
     if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
@@ -327,7 +340,7 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -469,6 +482,21 @@ export function applyAction(g: GameState, action: Action): GameState {
         applyDeferredTrueDamage(g, pd.player, pd.amount);
       }
       g.pending = null;
+      break;
+    }
+    case 'shenhongKill': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'shenhongKill') throw new Error('no shenhongKill pending');
+      if (action.accept) {
+        const opponent: PlayerId = pd.player === 'A' ? 'B' : 'A';
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 发动「杀意」：造成 3 点真实伤害，然后回复 2 点生命`);
+        dealTrueDamage(g, opponent, 3);
+        heal(g, pd.player, 2);
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃杀意`);
+        g.pending = null;
+      }
       break;
     }
     case 'skill': {

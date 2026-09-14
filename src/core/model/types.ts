@@ -27,6 +27,7 @@ export type Action =
   | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
   | { t: 'guwangCharge'; dieId?: string }
   | { t: 'guwangCancel'; cancel: boolean; defenseDieId?: string }
+  | { t: 'shenhongKill'; accept: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -42,7 +43,8 @@ export type Pending =
   | { kind: 'caiyuliu'; player: PlayerId; dieId: string; value: number }
   | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number }
   | { kind: 'guwangCharge'; player: PlayerId }
-  | { kind: 'guwangCancel'; player: PlayerId; amount: number };
+  | { kind: 'guwangCancel'; player: PlayerId; amount: number }
+  | { kind: 'shenhongKill'; player: PlayerId };
 
 export interface Distribution {
   defense: number[];

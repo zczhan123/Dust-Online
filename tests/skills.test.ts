@@ -690,3 +690,91 @@ describe('009 孤王', () => {
     expect(g.activePlayer).toBe('B');
   });
 });
+
+describe('010 深红', () => {
+  const setup010 = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(g);
+    g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'right';
+    return g;
+  };
+
+  // 现有 6 颗；意志 8、速度 4 → 补充 room = 2，仅补 2 颗（≤3）
+  const sixDice = () => ({
+    attack: [
+      { id: 'a1', value: 2, kind: 'attack' as const },
+      { id: 'a2', value: 3, kind: 'attack' as const },
+      { id: 'a3', value: 4, kind: 'attack' as const },
+    ],
+    defense: [
+      { id: 'd1', value: 1, kind: 'defense' as const },
+      { id: 'd2', value: 6, kind: 'defense' as const },
+    ],
+    meditation: [{ id: 'm1', value: 5, kind: 'meditation' as const }],
+  });
+
+  it('杀意 FAQ 10.2.1: refill ≤3 sets a pending; accepting deals 3 true damage and heals 2 (clamped at max)', () => {
+    const g = setup010();
+    g.players.A.areas = sixDice();
+    g.players.A.life = g.players.A.lifeMax - 1;
+    g.firstRound.A = false;
+    const bBefore = g.players.B.life;
+    beginTurn(g);
+    expect(g.pending).toEqual({ kind: 'shenhongKill', player: 'A' });
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({ t: 'shenhongKill', accept: true });
+    expect(legal).toContainEqual({ t: 'shenhongKill', accept: false });
+    const refillLog = g.log.map((l) => l.text).find((t) => t.includes('补充'));
+    expect(refillLog).toContain('补充 2 颗');
+
+    applyAction(g, { t: 'shenhongKill', accept: true });
+    expect(g.pending).toBeNull();
+    expect(g.players.B.life).toBe(bBefore - 3);
+    expect(g.players.A.life).toBe(g.players.A.lifeMax);
+  });
+
+  it('杀意: declining clears the pending without damage or healing', () => {
+    const g = setup010();
+    g.players.A.areas = sixDice();
+    g.firstRound.A = false;
+    const aBefore = g.players.A.life;
+    const bBefore = g.players.B.life;
+    beginTurn(g);
+    expect(g.pending!.kind).toBe('shenhongKill');
+    applyAction(g, { t: 'shenhongKill', accept: false });
+    expect(g.pending).toBeNull();
+    expect(g.players.A.life).toBe(aBefore);
+    expect(g.players.B.life).toBe(bBefore);
+  });
+
+  it('杀意: refill >3 does not set a pending', () => {
+    const g = setup010();
+    g.players.A.areas = {
+      attack: [{ id: 'a1', value: 2, kind: 'attack' as const }],
+      defense: [{ id: 'd1', value: 1, kind: 'defense' as const }],
+      meditation: [],
+    };
+    g.firstRound.A = false;
+    beginTurn(g);
+    // 意志 8 − 现有 2 = 6，速度 4 → 补 4 颗（>3）
+    expect(g.pending).toBeNull();
+    const refillLog = g.log.map((l) => l.text).find((t) => t.includes('补充'));
+    expect(refillLog).toContain('补充 4 颗');
+  });
+
+  it('杀意: first turn (refill skipped) does not set a pending', () => {
+    const g = setup010();
+    beginTurn(g); // firstRound.A 仍为 true → 跳过补充
+    expect(g.pending).toBeNull();
+    expect(g.phase).toBe('dustRise');
+  });
+
+  it('杀意: requires the right side to be active', () => {
+    const g = setup010();
+    g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    g.players.A.areas = sixDice();
+    g.firstRound.A = false;
+    beginTurn(g);
+    expect(g.pending).toBeNull();
+  });
+});

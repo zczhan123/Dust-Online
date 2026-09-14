@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
-import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
+import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
@@ -594,5 +594,35 @@ describe('renderGame (interaction)', () => {
     expect(labels).toContain('承受伤害');
     expect(labels).toContain('取消（消耗 防御4）');
     expect(state.pending!.kind).toBe('guwangCancel'); // 渲染不应改变状态
+  });
+
+  it('renders the 010 深红 杀意 prompt with accept / decline buttons', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'right';
+    state.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 3, kind: 'attack' },
+        { id: 'a3', value: 4, kind: 'attack' },
+      ],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+      ],
+      meditation: [{ id: 'm1', value: 5, kind: 'meditation' }],
+    };
+    state.firstRound.A = false;
+    beginTurn(state);
+    expect(state.pending!.kind).toBe('shenhongKill');
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-phase')?.textContent).toContain('杀意');
+    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="shenhongKill"]');
+    expect(btns.length).toBe(2);
+    const labels = Array.from(btns).map((b) => b.textContent);
+    expect(labels).toContain('发动杀意（3 真伤 + 回2）');
+    expect(labels).toContain('不发动');
+    expect(state.pending!.kind).toBe('shenhongKill'); // 渲染不应改变状态
   });
 });
