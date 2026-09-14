@@ -169,6 +169,20 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ chosenDice }) => ({ meditationDieIds: chosenDice[0] ?? [], defenseDieIds: chosenDice[1] ?? [] }),
   },
+  // 011 灵能屏障·启动：消耗最多 3 颗防御骰 → 获得 2 倍冥想骰
+  'dunwu.barrier.activate': {
+    steps: ({ state, player }) => [
+      { kind: 'dice', label: '选择消耗的防御骰（1–3 颗）', owner: 'self', areas: ['defense'], min: 1, max: Math.min(3, state.players[player].areas.defense.length) },
+    ],
+    buildParams: ({ chosenDice }) => ({ defenseDieIds: chosenDice[0] ?? [] }),
+  },
+  // 011 灵能脉冲·启动：消耗最多 3 颗攻击骰 → 获得 2 倍冥想骰
+  'dunwu.pulse.activate': {
+    steps: ({ state, player }) => [
+      { kind: 'dice', label: '选择消耗的攻击骰（1–3 颗）', owner: 'self', areas: ['attack'], min: 1, max: Math.min(3, state.players[player].areas.attack.length) },
+    ],
+    buildParams: ({ chosenDice }) => ({ attackDieIds: chosenDice[0] ?? [] }),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [

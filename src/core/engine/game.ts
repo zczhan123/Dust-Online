@@ -235,6 +235,14 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         }
       } else if (s.key === 'guwang.ultimate') {
         acts.push({ t: 'skill', artifactId: a.id, side: s.side });
+      } else if (s.key === 'dunwu.barrier.activate') {
+        if (p.areas.defense.length >= 1) {
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { defenseDieIds: p.areas.defense.slice(0, 3).map((d) => d.id) } });
+        }
+      } else if (s.key === 'dunwu.pulse.activate') {
+        if (p.areas.attack.length >= 1) {
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 3).map((d) => d.id) } });
+        }
       }
     }
   }

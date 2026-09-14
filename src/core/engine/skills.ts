@@ -373,4 +373,30 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰，本回合攻击伤害 +1`);
     },
   },
+  // 011 灵能屏障·启动：消耗最多 3 个防御骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
+  'dunwu.barrier.activate': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const ids = (params.defenseDieIds as string[]) ?? [];
+      if (ids.length < 1 || ids.length > 3) throw new Error('defenseDieIds must be 1..3');
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      for (const id of ids) if (!p.areas.defense.some((d) => d.id === id)) throw new Error(`not your defense die: ${id}`);
+      consumeDice(p, 'defense', ids);
+      for (let i = 0; i < ids.length * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${ids.length} 防御骰，获得 ${ids.length * 2} 冥想骰`);
+    },
+  },
+  // 011 灵能脉冲·启动：消耗最多 3 个攻击骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
+  'dunwu.pulse.activate': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const ids = (params.attackDieIds as string[]) ?? [];
+      if (ids.length < 1 || ids.length > 3) throw new Error('attackDieIds must be 1..3');
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      for (const id of ids) if (!p.areas.attack.some((d) => d.id === id)) throw new Error(`not your attack die: ${id}`);
+      consumeDice(p, 'attack', ids);
+      for (let i = 0; i < ids.length * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${ids.length} 攻击骰，获得 ${ids.length * 2} 冥想骰`);
+    },
+  },
 };

@@ -778,3 +778,183 @@ describe('010 深红', () => {
     expect(g.pending).toBeNull();
   });
 });
+
+describe('011 顿悟', () => {
+  const setup011 = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    return g;
+  };
+
+  it('灵能屏障·启动: consumes N defense dice and gains 2N random meditation dice', () => {
+    const g = setup011();
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+        { id: 'd3', value: 1, kind: 'defense' },
+      ],
+      meditation: [],
+    };
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['d1', 'd2'] } });
+    expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['d3']);
+    expect(g.players.A.areas.meditation).toHaveLength(4);
+    for (const d of g.players.A.areas.meditation) {
+      expect(d.kind).toBe('meditation');
+      expect(d.value).toBeGreaterThanOrEqual(1);
+      expect(d.value).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('灵能屏障·启动: consuming 3 defense dice gains 6 meditation dice', () => {
+    const g = setup011();
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+        { id: 'd3', value: 1, kind: 'defense' },
+      ],
+      meditation: [],
+    };
+    const medBefore = g.players.A.areas.meditation.length;
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['d1', 'd2', 'd3'] } });
+    expect(g.players.A.areas.defense).toHaveLength(0);
+    expect(g.players.A.areas.meditation).toHaveLength(medBefore + 6);
+  });
+
+  it('灵能屏障·启动: rejects fewer than 1, more than 3, and foreign dice', () => {
+    const zero = setup011();
+    zero.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    zero.players.A.areas.defense = [{ id: 'd1', value: 1, kind: 'defense' }];
+    expect(() =>
+      applyAction(zero, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: [] } }),
+    ).toThrow();
+
+    const many = setup011();
+    many.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    many.players.A.areas.defense = ['d1', 'd2', 'd3', 'd4'].map((id) => ({ id, value: 1, kind: 'defense' as const }));
+    expect(() =>
+      applyAction(many, {
+        t: 'skill',
+        artifactId: '011',
+        side: 'left',
+        params: { defenseDieIds: ['d1', 'd2', 'd3', 'd4'] },
+      }),
+    ).toThrow();
+
+    const foreign = setup011();
+    foreign.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    foreign.players.A.areas.defense = [{ id: 'd1', value: 1, kind: 'defense' }];
+    expect(() =>
+      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['nope'] } }),
+    ).toThrow();
+  });
+
+  it('灵能脉冲·启动: consumes N attack dice and gains 2N random meditation dice', () => {
+    const g = setup011();
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    g.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 4, kind: 'attack' },
+        { id: 'a3', value: 2, kind: 'attack' },
+      ],
+      defense: [],
+      meditation: [],
+    };
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1'] } });
+    expect(g.players.A.areas.attack.map((d) => d.id)).toEqual(['a2', 'a3']);
+    expect(g.players.A.areas.meditation).toHaveLength(2);
+    for (const d of g.players.A.areas.meditation) {
+      expect(d.kind).toBe('meditation');
+      expect(d.value).toBeGreaterThanOrEqual(1);
+      expect(d.value).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('灵能脉冲·启动: consumes 3 attack dice and gains 6 meditation dice', () => {
+    const g = setup011();
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    g.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 4, kind: 'attack' },
+        { id: 'a3', value: 2, kind: 'attack' },
+      ],
+      defense: [],
+      meditation: [{ id: 'm0', value: 3, kind: 'meditation' }],
+    };
+    const medBefore = g.players.A.areas.meditation.length;
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1', 'a2', 'a3'] } });
+    expect(g.players.A.areas.attack).toHaveLength(0);
+    expect(g.players.A.areas.meditation).toHaveLength(medBefore + 6);
+  });
+
+  it('灵能脉冲·启动: rejects fewer than 1, more than 3, and foreign dice', () => {
+    const zero = setup011();
+    zero.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    zero.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    expect(() =>
+      applyAction(zero, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: [] } }),
+    ).toThrow();
+
+    const many = setup011();
+    many.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    many.players.A.areas.attack = ['a1', 'a2', 'a3', 'a4'].map((id) => ({ id, value: 2, kind: 'attack' as const }));
+    expect(() =>
+      applyAction(many, {
+        t: 'skill',
+        artifactId: '011',
+        side: 'right',
+        params: { attackDieIds: ['a1', 'a2', 'a3', 'a4'] },
+      }),
+    ).toThrow();
+
+    const foreign = setup011();
+    foreign.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    foreign.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    expect(() =>
+      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['nope'] } }),
+    ).toThrow();
+  });
+
+  it('candidates: offers barrier with up to 3 defense dice and pulse with up to 3 attack dice', () => {
+    const g = setup011();
+    const art = g.players.A.artifacts.find((a) => a.id === '011')!;
+    art.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 4, kind: 'attack' },
+        { id: 'a3', value: 2, kind: 'attack' },
+        { id: 'a4', value: 4, kind: 'attack' },
+      ],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+      ],
+      meditation: [],
+    };
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'left',
+      params: { defenseDieIds: ['d1', 'd2'] },
+    });
+    art.activeMarkerSide = 'right';
+    const legal2 = getLegalActions(g);
+    expect(legal2).toContainEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'right',
+      params: { attackDieIds: ['a1', 'a2', 'a3'] },
+    });
+  });
+});
+

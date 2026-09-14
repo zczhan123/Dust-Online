@@ -625,4 +625,96 @@ describe('renderGame (interaction)', () => {
     expect(labels).toContain('不发动');
     expect(state.pending!.kind).toBe('shenhongKill'); // 渲染不应改变状态
   });
+
+  it('opens the 011 灵能屏障 chooser and proposes explicit defense dice params', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    state.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'd1', value: 1, kind: 'defense' },
+        { id: 'd2', value: 6, kind: 'defense' },
+        { id: 'd3', value: 1, kind: 'defense' },
+      ],
+      meditation: [],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="011"] .skill[data-side="left"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('dunwu.barrier.activate');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    for (const id of ['d1', 'd2']) {
+      root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
+    }
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'left',
+      params: { defenseDieIds: ['d1', 'd2'] },
+    });
+  });
+
+  it('opens the 011 灵能脉冲 chooser and proposes explicit attack dice params', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    state.players.A.areas = {
+      attack: [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 4, kind: 'attack' },
+        { id: 'a3', value: 2, kind: 'attack' },
+      ],
+      defense: [],
+      meditation: [],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="011"] .skill[data-side="right"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('dunwu.pulse.activate');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    for (const id of ['a1', 'a2', 'a3']) {
+      root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
+    }
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'right',
+      params: { attackDieIds: ['a1', 'a2', 'a3'] },
+    });
+  });
 });
