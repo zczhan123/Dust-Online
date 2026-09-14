@@ -103,10 +103,28 @@ export function resolveBlock(g: GameState, blockDieId?: string): void {
   }
 }
 
-/** 真实伤害：不可被防御骰抵挡，直接扣血 */
+/** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消） */
 export function dealTrueDamage(g: GameState, target: PlayerId, amount: number): void {
-  const before = g.players[target].life;
-  g.players[target].life -= amount;
-  logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${g.players[target].life}）`);
+  const p = g.players[target];
+  // 009 高塔铁幕触发：受到真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
+  if (
+    g.pending === null &&
+    g.phase !== 'gameOver' &&
+    hasActiveSkill(p, 'guwang.trigger') &&
+    p.areas.defense.length >= 1
+  ) {
+    g.pending = { kind: 'guwangCancel', player: target, amount };
+    return; // 伤害延后到决策解决时结算
+  }
+  p.life -= amount;
+  checkLifeEnd(g);
+}
+
+/** 结算被延后的真实伤害（由 guwangCancel 决策在放弃取消时调用） */
+export function applyDeferredTrueDamage(g: GameState, target: PlayerId, amount: number): void {
+  const p = g.players[target];
+  const before = p.life;
+  p.life -= amount;
+  logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${p.life}）`);
   checkLifeEnd(g);
 }

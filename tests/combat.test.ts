@@ -95,3 +95,77 @@ describe('锋芒 continuous', () => {
     expect(attackDamageBuff(g, 'B')).toBe(5);
   });
 });
+
+import { applyAction, getLegalActions } from '../src/core/engine/game';
+
+describe('009 高塔铁幕 触发 (true damage cancel)', () => {
+  function guwangGame() {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', heroB: ['009', '002', '003'] });
+    const gw = g.players.B.artifacts.find((a) => a.id === '009')!;
+    gw.activeMarkerSide = 'left';
+    return g;
+  }
+
+  it('with the trigger active and a defense die, deals no damage until resolved', () => {
+    const g = guwangGame();
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 5 });
+    expect(g.players.B.life).toBe(before);
+
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({ t: 'guwangCancel', cancel: false });
+    expect(legal).toContainEqual({ t: 'guwangCancel', cancel: true, defenseDieId: 'd1' });
+  });
+
+  it('resolving with cancel=true consumes the defense die and prevents the damage', () => {
+    const g = guwangGame();
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    applyAction(g, { t: 'guwangCancel', cancel: true, defenseDieId: 'd1' });
+    expect(g.players.B.areas.defense.some((d) => d.id === 'd1')).toBe(false);
+    expect(g.players.B.life).toBe(before);
+    expect(g.pending).toBeNull();
+  });
+
+  it('resolving with cancel=false applies the deferred damage', () => {
+    const g = guwangGame();
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    applyAction(g, { t: 'guwangCancel', cancel: false });
+    expect(g.players.B.life).toBe(before - 5);
+    expect(g.players.B.areas.defense.length).toBe(1);
+    expect(g.pending).toBeNull();
+  });
+
+  it('applies damage immediately without a defense die', () => {
+    const g = guwangGame();
+    g.players.B.areas.defense = [];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    expect(g.pending).toBeNull();
+    expect(g.players.B.life).toBe(before - 5);
+  });
+
+  it('applies damage immediately when the skill is not active', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', heroB: ['009', '002', '003'] });
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    expect(g.pending).toBeNull();
+    expect(g.players.B.life).toBe(before - 5);
+  });
+
+  it('applies damage immediately (no overwrite) when another pending exists', () => {
+    const g = guwangGame();
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    g.pending = { kind: 'caiyuliu', player: 'A', dieId: 'x', value: 3 };
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5);
+    expect(g.pending.kind).toBe('caiyuliu');
+    expect(g.players.B.life).toBe(before - 5);
+  });
+});

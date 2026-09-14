@@ -4,7 +4,7 @@ import { refillPhase, rerollPhase, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage } from './combat';
+import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage, applyDeferredTrueDamage } from './combat';
 import { setDieValue } from './effects';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects } from './skills';
 import { logLine, pname } from './log';
@@ -251,6 +251,12 @@ export function getLegalActions(g: GameState): Action[] {
       for (const d of g.players[opponent].areas.attack) acts.push({ t: 'guwangCharge', dieId: d.id });
       return acts;
     }
+    if (g.pending.kind === 'guwangCancel') {
+      const p = g.players[g.pending.player];
+      const acts: Action[] = [{ t: 'guwangCancel', cancel: false }];
+      for (const d of p.areas.defense) acts.push({ t: 'guwangCancel', cancel: true, defenseDieId: d.id });
+      return acts;
+    }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
     if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
@@ -321,7 +327,7 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -443,6 +449,24 @@ export function applyAction(g: GameState, action: Action): GameState {
         logLine(g, `${pname(pd.player)} 「高塔铁幕」：将 ${pname(opponent)} 的 1 颗攻击骰由 ${old} 点变更为 1 点`);
       } else {
         logLine(g, `${pname(pd.player)} 「高塔铁幕」：不变更攻击骰`);
+      }
+      g.pending = null;
+      break;
+    }
+    case 'guwangCancel': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'guwangCancel') throw new Error('no guwangCancel pending');
+      const p = g.players[pd.player];
+      const dieId = action.defenseDieId;
+      if (action.cancel && dieId && p.areas.defense.some((d) => d.id === dieId)) {
+        const value = p.areas.defense.find((d) => d.id === dieId)!.value;
+        consumeDice(p, 'defense', [dieId]);
+        logLine(
+          g,
+          `${pname(pd.player)} 「高塔铁幕」：消耗 1 个防御骰（${value}点），取消 ${pd.amount} 点真实伤害`,
+        );
+      } else {
+        applyDeferredTrueDamage(g, pd.player, pd.amount);
       }
       g.pending = null;
       break;

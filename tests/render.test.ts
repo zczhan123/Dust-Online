@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
+import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
 
 const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null, pendingConfirm: null });
@@ -574,5 +575,24 @@ describe('renderGame (interaction)', () => {
     expect(labels).toContain('改为1（5点）');
     expect(labels).toContain('改为1（3点）');
     expect(state.pending!.kind).toBe('guwangCharge'); // 渲染不应改变状态
+  });
+
+  it('renders the 009 高塔铁幕 trigger prompt with cancel / take-damage buttons', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
+    skipInitialReroll(state);
+    const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
+    gw.activeMarkerSide = 'left';
+    state.players.A.areas.defense = [{ id: 'gd1', value: 4, kind: 'defense' }];
+    dealTrueDamage(state, 'A', 6);
+    expect(state.pending!.kind).toBe('guwangCancel');
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-phase')?.textContent).toContain('高塔铁幕');
+    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="guwangCancel"]');
+    expect(btns.length).toBe(2); // 承受伤害 + 取消
+    const labels = Array.from(btns).map((b) => b.textContent);
+    expect(labels).toContain('承受伤害');
+    expect(labels).toContain('取消（消耗 防御4）');
+    expect(state.pending!.kind).toBe('guwangCancel'); // 渲染不应改变状态
   });
 });

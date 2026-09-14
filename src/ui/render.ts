@@ -531,6 +531,7 @@ function phaseHint(ctx: Ctx): string {
   if (pd && pd.kind === 'caiyuliu') return '裁雨流：选择该骰去向。';
   if (pd && pd.kind === 'fengmang') return '锋芒：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。';
   if (pd && pd.kind === 'guwangCharge') return '孤王·高塔铁幕：可将对方 1 个攻击骰点数改为 1。';
+  if (pd && pd.kind === 'guwangCancel') return `孤王·高塔铁幕：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。`;
   if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
   switch (state.phase) {
     case 'initialReroll':
@@ -650,6 +651,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       const opp: PlayerId = pd && pd.kind === 'guwangCharge' ? (pd.player === 'A' ? 'B' : 'A') : state.activePlayer;
       const v = state.players[opp].areas.attack.find((d) => d.id === a.dieId)?.value ?? '?';
       return `改为1（${v}点）`;
+    }
+    case 'guwangCancel': {
+      if (!a.cancel || !a.defenseDieId) return '承受伤害';
+      const pd = state.pending;
+      const defender: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
+      const v = state.players[defender].areas.defense.find((d) => d.id === a.defenseDieId)?.value ?? '?';
+      return `取消（消耗 防御${v}）`;
     }
     case 'reroll':
     case 'skill':
