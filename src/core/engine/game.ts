@@ -287,6 +287,13 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'shenhongKill', accept: false },
       ];
     }
+    if (g.pending.kind === 'dunwuHalve') {
+      const p = g.players[g.pending.player];
+      return [
+        { t: 'dunwuHalve', accept: false },
+        ...p.areas.meditation.map((d) => ({ t: 'dunwuHalve' as const, accept: true, meditationDieId: d.id })),
+      ];
+    }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
     if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
@@ -357,7 +364,7 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -514,6 +521,21 @@ export function applyAction(g: GameState, action: Action): GameState {
         logLine(g, `${pname(pd.player)} 放弃杀意`);
         g.pending = null;
       }
+      break;
+    }
+    case 'dunwuHalve': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'dunwuHalve') throw new Error('no dunwuHalve pending');
+      const p = g.players[pd.player];
+      const dieId = action.meditationDieId;
+      if (action.accept && dieId && p.areas.meditation.some((d) => d.id === dieId)) {
+        consumeDice(p, 'meditation', [dieId]);
+        if (g.pendingAttack) g.pendingAttack.value = Math.floor(g.pendingAttack.value / 2);
+        logLine(g, `${pname(pd.player)} 「灵能屏障」：消耗 1 个冥想骰，伤害减半为 ${g.pendingAttack?.value ?? 0}`);
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃灵能屏障`);
+      }
+      g.pending = null;
       break;
     }
     case 'skill': {

@@ -958,6 +958,84 @@ describe('011 顿悟', () => {
   });
 });
 
+describe('011 灵能屏障·触发', () => {
+  const setupDefender = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // A -> main
+    return g;
+  };
+
+  it('当防御方 011 激活且有冥想骰时，攻击后挂起 dunwuHalve（攻击仍待结算）', () => {
+    const g = setupDefender();
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    expect(g.pending).toEqual({ kind: 'dunwuHalve', player: 'B' });
+    expect(g.pendingAttack).not.toBeNull();
+    expect(g.pendingAttack!.value).toBe(5);
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({ t: 'dunwuHalve', accept: false });
+    expect(legal).toContainEqual({ t: 'dunwuHalve', accept: true, meditationDieId: 'm1' });
+  });
+
+  it('接受：消耗冥想骰并将伤害向下取整减半', () => {
+    const g = setupDefender();
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'dunwuHalve', accept: true, meditationDieId: 'm1' });
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack!.value).toBe(2); // floor(5/2)
+    expect(g.players.B.areas.meditation).toHaveLength(0);
+  });
+
+  it('1 点伤害减半为 0', () => {
+    const g = setupDefender();
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 1, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'dunwuHalve', accept: true, meditationDieId: 'm1' });
+    expect(g.pendingAttack!.value).toBe(0); // floor(1/2)
+  });
+
+  it('放弃：伤害不变且不消耗冥想骰', () => {
+    const g = setupDefender();
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'dunwuHalve', accept: false });
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack!.value).toBe(5);
+    expect(g.players.B.areas.meditation).toHaveLength(1);
+  });
+
+  it('防御方无冥想骰时不挂起', () => {
+    const g = setupDefender();
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    g.players.B.areas.meditation = [];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack!.value).toBe(5);
+  });
+
+  it('技能未激活时不挂起', () => {
+    const g = setupDefender();
+    const art = g.players.B.artifacts.find((a) => a.id === '011')!;
+    art.activeMarkerSide = 'right'; // 仅激活脉冲侧
+    g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', dieId: 'atk' });
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack!.value).toBe(5);
+  });
+});
+
 describe('012 魔女', () => {
   const setup012 = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });

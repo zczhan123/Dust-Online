@@ -718,6 +718,26 @@ describe('renderGame (interaction)', () => {
     });
   });
 
+  it('renders the 011 灵能屏障 触发 prompt with halve / decline buttons', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // A -> main
+    state.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    state.players.B.areas.meditation = [{ id: 'bm1', value: 3, kind: 'meditation' }];
+    state.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(state, { t: 'attack', dieId: 'atk' });
+    expect(state.pending!.kind).toBe('dunwuHalve');
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-phase')?.textContent).toContain('灵能屏障');
+    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="dunwuHalve"]');
+    expect(btns.length).toBe(2); // 不减半 + 消耗冥想骰
+    const labels = Array.from(btns).map((b) => b.textContent);
+    expect(labels).toContain('不减半');
+    expect(labels).toContain('伤害减半（消耗 冥想3）');
+    expect(state.pending!.kind).toBe('dunwuHalve'); // 渲染不应改变状态
+  });
+
   it('opens the 012 梦醒时分 chooser and proposes explicit destination + meditation dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });
     skipInitialReroll(state);

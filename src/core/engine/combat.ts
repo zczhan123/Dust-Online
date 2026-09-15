@@ -56,6 +56,14 @@ export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${die.value + buff} 点）` : '';
   logLine(g, `${pname(player)} 使用 ${die.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  // 011 顿悟·灵能屏障 触发：当对方使用 1 个攻击骰后，可消耗 1 个冥想骰使伤害减半
+  if (
+    g.pending === null &&
+    hasActiveSkill(g.players[defender], 'dunwu.barrier.trigger') &&
+    g.players[defender].areas.meditation.length >= 1
+  ) {
+    g.pending = { kind: 'dunwuHalve', player: defender };
+  }
 }
 
 /** 技能发起的“虚拟”攻击（非实体攻击骰） */
