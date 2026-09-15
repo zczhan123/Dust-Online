@@ -54,7 +54,7 @@ export function heal(g: GameState, player: PlayerId, amount: number): number {
   return p.life - before;
 }
 
-/** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(折算,值5)。
+/** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(置换,值5)。
  *  移除所有真骰(返还供应堆)；返回各格“有效骰”；reportConsumed 按“格数”上报。 */
 export function paySlots(
   g: GameState,

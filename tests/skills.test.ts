@@ -1373,8 +1373,8 @@ describe('012 魔女', () => {
   });
 });
 
-describe('010 真实之剑 折算骰位', () => {
-  it('攻击折算：已激活 010 左（真实之剑）时，2 颗骰折算为 5 点有效攻击（含加成）', () => {
+describe('010 真实之剑 置换骰位', () => {
+  it('攻击置换：已激活 010 左（真实之剑）时，2 颗骰置换为 5 点有效攻击（含加成）', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
@@ -1387,7 +1387,7 @@ describe('010 真实之剑 折算骰位', () => {
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['ca1', 'ca2'] }] });
     expect(g.pendingAttack).toMatchObject({
       attacker: 'A',
-      value: 6, // 折算有效值 5 + 加成 1
+      value: 6, // 置换有效值 5 + 加成 1
       physical: true,
       sourceValue: 5,
       sourceDieId: 'ca1',
@@ -1395,7 +1395,7 @@ describe('010 真实之剑 折算骰位', () => {
     expect(g.players.A.areas.attack).toHaveLength(0);
   });
 
-  it('攻击折算：未激活 010（真实之剑）时抛错', () => {
+  it('攻击置换：未激活 010（真实之剑）时抛错', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // -> main
@@ -1406,7 +1406,7 @@ describe('010 真实之剑 折算骰位', () => {
     expect(() => applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['ca1', 'ca2'] }] })).toThrow();
   });
 
-  it('抵挡折算：防御方已激活 010 时，2 颗骰折算抵挡并无伤消耗', () => {
+  it('抵挡置换：防御方已激活 010 时，2 颗骰置换抵挡并无伤消耗', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['010', '002', '003'] });
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // A -> main
@@ -1424,7 +1424,7 @@ describe('010 真实之剑 折算骰位', () => {
     expect(g.pendingAttack).toBeNull();
   });
 
-  it('抵挡折算：未激活 010 时抛错且不消耗骰子', () => {
+  it('抵挡置换：未激活 010 时抛错且不消耗骰子', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['004', '002', '003'] });
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' }); // A -> main

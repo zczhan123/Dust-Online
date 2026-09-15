@@ -26,14 +26,14 @@ export interface SkillSelection {
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
-/** 每颗选中的骰作为一个“真骰”骰位（未启用折算时的回退映射） */
+/** 每颗选中的骰作为一个“真骰”骰位（未启用置换时的回退映射） */
 const realSlots = (ids: string[] | undefined): { dieIds: string[] }[] => (ids ?? []).map((id) => ({ dieIds: [id] }));
-/** 已填骰位（长度 1=真骰，2=折算）→ 引擎 costSlots */
+/** 已填骰位（长度 1=真骰，2=置换）→ 引擎 costSlots */
 const slotsParam = (slots: string[][]): { dieIds: string[] }[] => slots.map((ids) => ({ dieIds: [...ids] }));
-/** 该玩家是否已激活 010「真实之剑」：激活后技能代价可用 2 颗顶 1 颗折算 */
+/** 该玩家是否已激活 010「真实之剑」：激活后技能代价可用 2 颗顶 1 颗置换 */
 const hasSword = (state: GameState, player: PlayerId): boolean =>
   hasActiveSkill(state.players[player], 'shenhong.sword');
-const SLOTS_LABEL = '支付代价（可折算 2 颗顶 1 颗）';
+const SLOTS_LABEL = '支付代价（可用「真实之剑」置换能力骰）';
 const repeatKind = (kind: DiceKind, n: number): DiceKind[] => Array.from({ length: n }, () => kind);
 
 function ownDieValue(state: GameState, player: PlayerId, id: string | undefined): number | undefined {

@@ -182,15 +182,17 @@ body {
 .skill:has(.skill-part--full) .skill-name { color: #8a2b2b; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
-.skill-part-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.skill-part-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .skill-type {
+  flex: 0 0 auto;
   font-size: 11px;
   background: #e3e7ee;
   color: #3a4658;
   border-radius: 4px;
   padding: 0 6px;
 }
-.skill-text { font-size: 12px; color: #4b5563; line-height: 1.55; }
+.skill-part-head .badge { flex: 0 0 auto; }
+.skill-text { flex: 1 1 auto; min-width: 0; font-size: 12px; color: #4b5563; line-height: 1.55; }
 
 .areas { display: flex; gap: 8px; margin: 6px 0; }
 .area {
@@ -384,6 +386,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.selector-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.selector-head .selector-title,
+.selector-head .selector-info,
+.selector-head .option-row,
+.selector-head .number-row {
+  flex: 0 0 auto;
 }
 .selector-title {
   font-size: 14px;
@@ -596,7 +610,7 @@ body {
 .gameover-reason { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 .gameover-restart { font-size: 16px; }
 
-/* 折算支付面板（真实之剑 2 换 1） */
+/* 置换支付面板（真实之剑 2 换 1） */
 .paypanel {
   background: #f2f7fd;
   border: 1px solid #9dc0e0;
@@ -605,6 +619,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.paypanel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.paypanel-head .paypanel-title {
+  flex: 0 0 auto;
+}
+.paypanel-head .slot-row {
+  flex: 1 1 240px;
 }
 .paypanel-title {
   font-size: 14px;
@@ -682,11 +708,53 @@ body {
   display: flex;
   gap: 8px;
 }
+/* 尘起流程面板：标题/提示与按钮同排，压缩纵向空间 */
+.dustflow {
+  background: #fdf6e6;
+  border: 1px solid #e7d3a2;
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dustflow--side,
+.dustflow--pay {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dustflow-side,
+.dustflow-pay,
+.dustflow-section,
+.dustflow-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dustflow-title { font-size: 13px; font-weight: 700; color: #7a5a1e; }
+.dustflow-sep { color: #b0862f; }
+.dustflow-hint,
+.dustflow-label { font-size: 13px; color: #7a5a1e; }
+.dustflow-empty { font-size: 12px; color: var(--muted); }
+
+/* 置换按钮：真实之剑相关（攻击/抵挡/技能代价/尘起）统一青色 */
 .btn-convert {
-  background: #f3e7fd;
-  border-color: #b79bdc;
-  color: #5b3fa0;
+  background: #ccfbf1;
+  border-color: #5eead4;
+  color: #0d9488;
 }
 .btn-convert:hover:not(:disabled) {
-  background: #e8d9fa;
+  background: #b2f5ea;
+}
+/* 尘印标记按钮：紫色 */
+.btn-seal {
+  background: #ede9fe;
+  border-color: #c4b5fd;
+  color: #6d28d9;
+}
+.btn-seal:hover:not(:disabled) {
+  background: #ddd6fe;
 }

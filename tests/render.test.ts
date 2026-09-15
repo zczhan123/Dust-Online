@@ -826,7 +826,7 @@ describe('renderGame (interaction)', () => {
     });
   });
 
-  it('offers 折算攻击 when 真实之剑 is active and dispatches the 2-die slot', () => {
+  it('offers 置换攻击 when 真实之剑 is active and dispatches the 2-die slot', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -840,7 +840,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
-      (b) => (b.textContent ?? '').includes('折算攻击'),
+      (b) => (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
     );
     expect(openBtn).toBeTruthy();
     openBtn!.click();
@@ -861,7 +861,7 @@ describe('renderGame (interaction)', () => {
     });
   });
 
-  it('does not offer 折算攻击 when 真实之剑 is not active', () => {
+  it('does not offer 置换攻击 when 真实之剑 is not active', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -873,12 +873,12 @@ describe('renderGame (interaction)', () => {
 
     renderGame(state, root, hooksFor());
     const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
-      (b) => (b.textContent ?? '').includes('折算攻击'),
+      (b) => (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
     );
     expect(btn).toBeUndefined();
   });
 
-  it('cancels the 折算支付 panel without dispatching', () => {
+  it('cancels the 置换支付 panel without dispatching', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -892,7 +892,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
-      (b) => (b.textContent ?? '').includes('折算攻击'),
+      (b) => (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
     )!;
     openBtn.click();
     expect(ui.payPanel).not.toBeNull();
@@ -902,7 +902,7 @@ describe('renderGame (interaction)', () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it('pays a skill cost with 折算 via the slots step when 真实之剑 is active', () => {
+  it('pays a skill cost with 置换 via the slots step when 真实之剑 is active', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -932,7 +932,7 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelector('.selector .paypanel--slots')).not.toBeNull();
     expect(root.querySelectorAll('.selector .slot-row').length).toBe(1);
 
-    // 切换到折算模式，用 2 颗任意骰填满该格
+    // 切换到置换模式，用 2 颗任意骰填满该格
     root.querySelector<HTMLButtonElement>('.selector .slot-btn[data-mode="convert"]')!.click();
     root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa1"]')!.click();
     root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa2"]')!.click();

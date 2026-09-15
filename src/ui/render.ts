@@ -46,7 +46,7 @@ export interface UiState {
     options: string[];
     currentSel: Set<string>;
     numbers: number[];
-    /** 「slots」步骤的已填骰位（每格长度 1=真骰，2=折算） */
+    /** 「slots」步骤的已填骰位（每格长度 1=真骰，2=置换） */
     slots: string[][];
     /** 「slots」步骤每格的填充模式 */
     slotModes: ('real' | 'convert')[];
@@ -92,7 +92,7 @@ interface Ctx {
   maxReroll: number;
   selectionStep: SelectStep | null;
   selectionOwner: PlayerId | null;
-  /** 折算支付面板开启时禁用区域骰点击，避免歧义 */
+  /** 置换支付面板开启时禁用区域骰点击，避免歧义 */
   payPanelOpen: boolean;
   /** 技能选择器处于「slots」步骤时，区域骰由选择器内部处理，禁用区域骰点击 */
   slotsStepOpen: boolean;
@@ -231,7 +231,7 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
     const kindName =
       COST_KIND_LABEL[sk?.key ?? ''] ?? (typeof params.kind === 'string' ? KIND_NAMES[params.kind] : undefined);
     const detail = realIds.length ? `（${diceListLabel(ctx.state, realIds)}点）` : '';
-    const suffix = converted > 0 ? `，其中 ${converted} 格折算` : '';
+    const suffix = converted > 0 ? `，其中 ${converted} 格用「真实之剑」置换` : '';
     parts.push(`消耗 ${fills.length} 颗${kindName ?? ''}骰${detail}${suffix}`);
   }
   if (typeof params.attackDieId === 'string') {
@@ -422,10 +422,10 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
           full.textContent = '已满';
           pHead.appendChild(full);
         }
-        part.appendChild(pHead);
         const body = el('div', 'skill-text');
         body.textContent = s.text;
-        part.appendChild(body);
+        pHead.appendChild(body);
+        part.appendChild(pHead);
 
         const skillAction = ctx.legal.find(
           (x): x is SkillAction =>
@@ -480,7 +480,7 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.textContent = String(d.value);
 
     if (ctx.payPanelOpen || ctx.slotsStepOpen || ctx.dustFlowOpen) {
-      // 折算支付面板 / 技能代价骰位面板 / 尘起流程开启时，区域骰不可点击
+      // 置换支付面板 / 技能代价骰位面板 / 尘起流程开启时，区域骰不可点击
     } else if (diceStep) {
       const step = diceStep;
       const selectable = !step.filter || step.filter(d);
@@ -799,7 +799,7 @@ function operationList(ctx: Ctx): HTMLElement {
     const payer = state.activePlayer;
     if (convertAvailable(state, payer)) {
       box.appendChild(
-        convertButton('折算攻击（2 颗顶 1 颗）', () =>
+        convertButton('使用「真实之剑」置换进行攻击', () =>
           openPayPanel(ctx, {
             label: '攻击',
             payer,
@@ -816,7 +816,7 @@ function operationList(ctx: Ctx): HTMLElement {
     const defender: PlayerId = state.pendingAttack.attacker === 'A' ? 'B' : 'A';
     if (convertAvailable(state, defender)) {
       box.appendChild(
-        convertButton('折算抵挡（2 颗顶 1 颗）', () =>
+        convertButton('使用「真实之剑」置换进行抵挡', () =>
           openPayPanel(ctx, {
             label: '抵挡',
             payer: defender,
@@ -860,7 +860,7 @@ function operationList(ctx: Ctx): HTMLElement {
   return box;
 }
 
-/** 技能代价「slots」步骤：复用分格支付面板的呈现（每格 真骰/折算） */
+/** 技能代价「slots」步骤：复用分格支付面板的呈现（每格 真骰/置换） */
 function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLElement {
   const { state, hooks } = ctx;
   if (sel.slots.length !== step.kinds.length) {
@@ -881,7 +881,7 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
 
     const modeDefs: { mode: 'real' | 'convert'; text: string }[] = [
       { mode: 'real', text: `用 1 颗${kindName}` },
-      { mode: 'convert', text: '折算 2 颗任意' },
+      { mode: 'convert', text: '置换：2 颗任意骰' },
     ];
     for (const m of modeDefs) {
       const b = document.createElement('button');
@@ -950,14 +950,15 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const panel = el('div', 'selector');
   if (!step) return panel;
 
+  const head = el('div', 'selector-head');
   const title = el('div', 'selector-title');
   title.textContent = `步骤 ${sel.stepIndex + 1}/${steps.length} · ${step.label}`;
-  panel.appendChild(title);
+  head.appendChild(title);
 
   if (step.kind === 'dice') {
     const info = el('div', 'selector-info');
     info.textContent = `已选 ${sel.currentSel.size}（需 ${step.min}–${step.max} 颗）`;
-    panel.appendChild(info);
+    head.appendChild(info);
   } else if (step.kind === 'option') {
     const row = el('div', 'option-row');
     for (const o of step.options) {
@@ -973,10 +974,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
       });
       row.appendChild(b);
     }
-    panel.appendChild(row);
-  } else if (step.kind === 'slots') {
-    panel.appendChild(slotsStepView(ctx, sel, step));
-  } else {
+    head.appendChild(row);
+  } else if (step.kind === 'number') {
     const nums = el('div', 'number-row');
     for (let n = step.min; n <= step.max; n++) {
       const b = document.createElement('button');
@@ -990,7 +989,12 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
       });
       nums.appendChild(b);
     }
-    panel.appendChild(nums);
+    head.appendChild(nums);
+  }
+  panel.appendChild(head);
+
+  if (step.kind === 'slots') {
+    panel.appendChild(slotsStepView(ctx, sel, step));
   }
 
   const actions = el('div', 'selector-actions');
@@ -1165,7 +1169,7 @@ function slotSummary(
   }
   const parts = dice.map((d) => `${KIND_SHORT[d.kind]}${d.value}`);
   const arrow = dice.length >= 2 ? ` → 视为${kindShort}5` : '';
-  return `折算：${parts.join('+')}${arrow}`;
+  return `置换：${parts.join('+')}${arrow}`;
 }
 
 type SlotsStep = Extract<SelectStep, { kind: 'slots' }>;
@@ -1210,9 +1214,10 @@ function payPanelView(ctx: Ctx): HTMLElement {
   const panel = ctx.hooks.ui.payPanel as PayPanel;
   const box = el('div', 'paypanel');
 
+  const headWrap = el('div', 'paypanel-head');
   const title = el('div', 'paypanel-title');
-  title.textContent = `折算支付：${panel.label}`;
-  box.appendChild(title);
+  title.textContent = `置换支付：${panel.label}`;
+  headWrap.appendChild(title);
 
   for (let i = 0; i < panel.kinds.length; i++) {
     const row = el('div', 'slot-row');
@@ -1226,7 +1231,7 @@ function payPanelView(ctx: Ctx): HTMLElement {
 
     const modeDefs: { mode: 'real' | 'convert'; text: string }[] = [
       { mode: 'real', text: `用 1 颗${kindName}` },
-      { mode: 'convert', text: '折算 2 颗任意' },
+      { mode: 'convert', text: '置换：2 颗任意骰' },
     ];
     for (const m of modeDefs) {
       const b = document.createElement('button');
@@ -1248,8 +1253,9 @@ function payPanelView(ctx: Ctx): HTMLElement {
     head.appendChild(summary);
 
     row.appendChild(head);
-    box.appendChild(row);
+    headWrap.appendChild(row);
   }
+  box.appendChild(headWrap);
 
   const payer = ctx.state.players[panel.payer];
   const current = firstUnfilledSlot(panel);
@@ -1371,7 +1377,13 @@ function dustCancelButton(ctx: Ctx): HTMLButtonElement {
 function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
   const flow = ctx.hooks.ui.dustFlow as DustFlow;
   const wrap = el('div', 'dustflow-side');
-  const hint = el('div', 'dustflow-hint');
+  const title = el('span', 'dustflow-title');
+  title.textContent = `${DUST_KIND_LABEL[flow.kind]}「${art.name}」`;
+  wrap.appendChild(title);
+  const sep = el('span', 'dustflow-sep');
+  sep.textContent = '·';
+  wrap.appendChild(sep);
+  const hint = el('span', 'dustflow-hint');
   hint.textContent = '选择启动的一侧：';
   wrap.appendChild(hint);
   for (const side of ['left', 'right'] as const) {
@@ -1456,7 +1468,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
   if (payer.hasDustSeal && hasDustVariant(ctx, flow.artifactId, 'seal')) {
     const seal = document.createElement('button');
     seal.type = 'button';
-    seal.className = 'btn btn-dust-seal';
+    seal.className = 'btn btn-seal';
     seal.dataset.act = 'dustSeal';
     seal.textContent = '使用尘印标记';
     seal.addEventListener('click', () => dispatchDustSeal(ctx));
@@ -1469,7 +1481,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
   ) {
     const conv = document.createElement('button');
     conv.type = 'button';
-    conv.className = 'btn btn-dust-convert';
+    conv.className = 'btn btn-convert';
     conv.dataset.act = 'dustConvert';
     conv.textContent = '使用「真实之剑」置换能力骰';
     conv.addEventListener('click', () => {
@@ -1491,13 +1503,18 @@ function dustFlowView(ctx: Ctx): HTMLElement {
     box.appendChild(dustCancelButton(ctx));
     return box;
   }
+  if (flow.step === 'side') {
+    box.classList.add('dustflow--side');
+    box.appendChild(dustSideStep(ctx, art));
+    box.appendChild(dustCancelButton(ctx));
+    return box;
+  }
+
+  box.classList.add('dustflow--pay');
   const title = el('div', 'dustflow-title');
   title.textContent = `${DUST_KIND_LABEL[flow.kind]}「${art.name}」`;
   box.appendChild(title);
-
-  if (flow.step === 'side') box.appendChild(dustSideStep(ctx, art));
-  else box.appendChild(dustPayStep(ctx, payer));
-
+  box.appendChild(dustPayStep(ctx, payer));
   box.appendChild(dustCancelButton(ctx));
   return box;
 }

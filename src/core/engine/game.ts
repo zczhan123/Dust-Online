@@ -16,7 +16,7 @@ function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
   g.rngState = rng.state();
 }
 
-/** 若骰位中出现“折算”（2 颗真骰）填法，则要求该玩家已激活 010 深红的「真实之剑」 */
+/** 若骰位中出现“置换”（2 颗真骰）填法，则要求该玩家已激活 010 深红的「真实之剑」 */
 function assertConversionAllowed(g: GameState, player: PlayerId, fills?: SlotFill[]): void {
   const usesConversion = (fills ?? []).some((f) => f.dieIds.length === 2);
   if (usesConversion && !hasActiveSkill(g.players[player], 'shenhong.sword')) {
