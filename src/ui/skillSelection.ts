@@ -23,6 +23,8 @@ export interface SkillSelection {
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
+/** 每颗选中的骰作为一个“真骰”骰位（UI 暂不提供折算） */
+const realSlots = (ids: string[] | undefined): { dieIds: string[] }[] => (ids ?? []).map((id) => ({ dieIds: [id] }));
 
 export const SKILL_SELECTION: Record<string, SkillSelection> = {
   'yuqie.breakthrough': {
@@ -36,19 +38,19 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
-    buildParams: ({ chosenDice }) => ({ meditationDieIds: chosenDice[0] ?? [], opponentDefenseDieIds: chosenDice[1] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]), opponentDefenseDieIds: chosenDice[1] ?? [] }),
   },
   'youlong.tengwan': {
     steps: () => [{ kind: 'dice', label: '选择消耗的冥想骰（恰好 3 颗）', owner: 'self', areas: ['meditation'], min: 3, max: 3 }],
-    buildParams: ({ chosenDice }) => ({ meditationDieIds: chosenDice[0] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
   },
   'yingle.qianxing': {
     steps: () => [{ kind: 'dice', label: '选择消耗的攻击骰（恰好 2 颗）', owner: 'self', areas: ['attack'], min: 2, max: 2 }],
-    buildParams: ({ chosenDice }) => ({ attackDieIds: chosenDice[0] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
   },
   'buxiang.cuilian': {
     steps: () => [{ kind: 'dice', label: '选择消耗的攻击骰（恰好 1 颗）', owner: 'self', areas: ['attack'], min: 1, max: 1 }],
-    buildParams: ({ chosenDice }) => ({ attackDieId: chosenDice[0]?.[0] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
   },
   'yingle.yingxi': {
     steps: ({ state, player, chosenDice }) => {
@@ -76,7 +78,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
-    buildParams: ({ chosenDice }) => ({ attackDieId: chosenDice[0]?.[0], opponentDefenseDieIds: chosenDice[1] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]), opponentDefenseDieIds: chosenDice[1] ?? [] }),
   },
   'mingjing.ultimate': {
     steps: ({ state, player, chosenDice }) => {
@@ -121,11 +123,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       { kind: 'dice', label: '选择弃置对方的冥想骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['meditation'], min: 0, max: 1 },
     ],
     buildParams: ({ chosenDice }) => ({
-      consumed: {
-        attack: chosenDice[0]?.[0],
-        defense: chosenDice[1]?.[0],
-        meditation: chosenDice[2]?.[0],
-      },
+      costSlots: [...realSlots(chosenDice[0]), ...realSlots(chosenDice[1]), ...realSlots(chosenDice[2])],
       discard: {
         attack: chosenDice[3]?.[0],
         defense: chosenDice[4]?.[0],
@@ -157,7 +155,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     },
     buildParams: ({ chosenDice, options }) => ({
       kind: options[0],
-      consumedIds: chosenDice[1] ?? [],
+      costSlots: realSlots(chosenDice[1]),
       opponentDiscardIds: chosenDice[2] ?? [],
     }),
   },
@@ -167,21 +165,21 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       { kind: 'dice', label: '选择消耗的冥想骰（恰好 2 颗）', owner: 'self', areas: ['meditation'], min: 2, max: 2 },
       { kind: 'dice', label: '选择弃置的防御骰（0–2 颗，不足可少弃）', owner: 'self', areas: ['defense'], min: 0, max: 2 },
     ],
-    buildParams: ({ chosenDice }) => ({ meditationDieIds: chosenDice[0] ?? [], defenseDieIds: chosenDice[1] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]), defenseDieIds: chosenDice[1] ?? [] }),
   },
   // 011 灵能屏障·启动：消耗最多 3 颗防御骰 → 获得 2 倍冥想骰
   'dunwu.barrier.activate': {
     steps: ({ state, player }) => [
       { kind: 'dice', label: '选择消耗的防御骰（1–3 颗）', owner: 'self', areas: ['defense'], min: 1, max: Math.min(3, state.players[player].areas.defense.length) },
     ],
-    buildParams: ({ chosenDice }) => ({ defenseDieIds: chosenDice[0] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
   },
   // 011 灵能脉冲·启动：消耗最多 3 颗攻击骰 → 获得 2 倍冥想骰
   'dunwu.pulse.activate': {
     steps: ({ state, player }) => [
       { kind: 'dice', label: '选择消耗的攻击骰（1–3 颗）', owner: 'self', areas: ['attack'], min: 1, max: Math.min(3, state.players[player].areas.attack.length) },
     ],
-    buildParams: ({ chosenDice }) => ({ attackDieIds: chosenDice[0] ?? [] }),
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
   },
   // 012 魔女·必杀 梦醒时分：选择目标区域 → 选择 1–3 颗冥想骰移动（保留点数）
   'monv.ultimate': {

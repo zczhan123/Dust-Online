@@ -12,7 +12,7 @@ describe('basic activate skills', () => {
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     g.players.A.areas.attack.push({ id: 'x', value: 3, kind: 'attack' });
-    applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { attackDieId: 'x' } });
+    applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { costSlots: [{ dieIds: ['x'] }] } });
     expect(buxiang.count).toBe(1);
     expect(g.players.A.areas.attack.some((d) => d.id === 'x')).toBe(false);
   });
@@ -29,7 +29,7 @@ describe('basic activate skills', () => {
     const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
     const before = totalDice(g.players.A);
     const atkBefore = g.players.A.areas.attack.length;
-    applyAction(g, { t: 'skill', artifactId: '002', side: 'right', params: { meditationDieIds: medIds } });
+    applyAction(g, { t: 'skill', artifactId: '002', side: 'right', params: { costSlots: medIds.map((id) => ({ dieIds: [id] })) } });
     expect(totalDice(g.players.A)).toBe(before - 3 + 4);
     expect(g.players.A.areas.attack.length).toBe(atkBefore + 2);
     expect(g.players.A.buffs.some((b) => b.attr === 'attackDamage' && b.add === 1)).toBe(true);
@@ -44,7 +44,7 @@ describe('basic activate skills', () => {
     g.players.B.areas.attack.push({ id: 'p1', value: 3, kind: 'attack' }, { id: 'p2', value: 4, kind: 'attack' });
     const defBefore = g.players.B.areas.defense.length;
     const medBefore = g.players.B.areas.meditation.length;
-    applyAction(g, { t: 'skill', artifactId: '005', side: 'right', params: { attackDieIds: ['p1', 'p2'] } });
+    applyAction(g, { t: 'skill', artifactId: '005', side: 'right', params: { costSlots: [{ dieIds: ['p1'] }, { dieIds: ['p2'] }] } });
     expect(g.players.B.areas.defense.length).toBe(defBefore + 2);
     expect(g.players.B.areas.meditation.length).toBe(medBefore + 1);
   });
@@ -54,7 +54,7 @@ describe('basic activate skills', () => {
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     g.players.A.areas.attack.push({ id: 'x', value: 3, kind: 'attack' });
-    expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { attackDieId: 'x' } })).toThrow();
+    expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { costSlots: [{ dieIds: ['x'] }] } })).toThrow();
   });
 
   it('rejects using the same activate skill twice in one turn', () => {
@@ -64,8 +64,8 @@ describe('basic activate skills', () => {
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     g.players.A.areas.attack.push({ id: 'x1', value: 3, kind: 'attack' }, { id: 'x2', value: 4, kind: 'attack' });
-    applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { attackDieId: 'x1' } });
-    expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { attackDieId: 'x2' } })).toThrow();
+    applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { costSlots: [{ dieIds: ['x1'] }] } });
+    expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { costSlots: [{ dieIds: ['x2'] }] } })).toThrow();
   });
 });
 
@@ -125,7 +125,7 @@ describe('中央突破', () => {
     const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
     const bDefBefore = g.players.B.areas.defense.length;
     const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
-    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDef } });
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { costSlots: medIds.map((id) => ({ dieIds: [id] })), opponentDefenseDieIds: oppDef } });
     expect(g.unblockableThisTurn).toBe(true);
     expect(g.players.B.areas.defense.length).toBe(bDefBefore - 3);
   });
@@ -143,7 +143,7 @@ describe('中央突破', () => {
     }
     const oppDef = g.players.B.areas.defense.slice(0, 3).map((d) => d.id);
     const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
-    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDef } });
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { costSlots: medIds.map((id) => ({ dieIds: [id] })), opponentDefenseDieIds: oppDef } });
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
     applyAction(g, { t: 'attack', dieId: 'a1' });
     expect(g.pendingAttack!.unblockable).toBe(true);
@@ -165,7 +165,7 @@ describe('中央突破', () => {
       { id: 'm4', value: 2, kind: 'meditation' },
     ];
     g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }];
-    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { meditationDieIds: ['m2', 'm3'], opponentDefenseDieIds: ['bd1'] } });
+    applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { costSlots: [{ dieIds: ['m2'] }, { dieIds: ['m3'] }], opponentDefenseDieIds: ['bd1'] } });
     // m2, m3 consumed; m1, m4 remain
     expect(g.players.A.areas.meditation.map((d) => d.id).sort()).toEqual(['m1', 'm4']);
     expect(g.players.B.areas.defense.length).toBe(0);
@@ -322,7 +322,7 @@ describe('必杀', () => {
       { id: 'x4', value: 4, kind: 'defense' },
       { id: 'x5', value: 5, kind: 'defense' },
     ];
-    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { attackDieId: 'k1' } });
+    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { costSlots: [{ dieIds: ['k1'] }] } });
     expect(g.players.A.areas.defense.length).toBe(2); // 3 discarded
     expect(g.players.B.areas.attack.length).toBe(3); // gained 3
     expect(g.ultimatesUsed).toContain('wansha.ultimate');
@@ -335,9 +335,25 @@ describe('必杀', () => {
     g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
     g.players.B.areas.attack = [{ id: 'k1', value: 3, kind: 'attack' }];
     g.players.A.areas.defense = [{ id: 'x1', value: 1, kind: 'defense' }];
-    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { attackDieId: 'k1' } });
+    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { costSlots: [{ dieIds: ['k1'] }] } });
     expect(g.players.A.areas.defense.length).toBe(0);
     expect(g.players.B.areas.attack.length).toBe(0);
+  });
+
+  it('零时枭首: a converted (2-dice) slot yields X=5', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' }); // B has 006 完杀
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack = [
+      { id: 'k1', value: 3, kind: 'attack' },
+      { id: 'k2', value: 1, kind: 'attack' },
+    ];
+    g.players.A.areas.defense = Array.from({ length: 6 }, (_, i) => ({ id: `x${i}`, value: 1, kind: 'defense' as const }));
+    applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { costSlots: [{ dieIds: ['k1', 'k2'] }] } });
+    // 2 real dice consumed as one converted slot → X = 5
+    expect(g.players.B.areas.attack).toHaveLength(5); // gained X=5
+    expect(g.players.A.areas.defense).toHaveLength(1); // 5 discarded
   });
 });
 
@@ -364,7 +380,7 @@ describe('007 主宰', () => {
       artifactId: '007',
       side: 'left',
       params: {
-        consumed: { attack: 'sa', defense: 'sd', meditation: 'sm' },
+        costSlots: [{ dieIds: ['sa'] }, { dieIds: ['sd'] }, { dieIds: ['sm'] }],
         discard: { attack: 'oa', defense: 'od', meditation: 'om' },
       },
     });
@@ -392,7 +408,7 @@ describe('007 主宰', () => {
       artifactId: '007',
       side: 'left',
       params: {
-        consumed: { attack: 'sa', defense: 'sd', meditation: 'sm' },
+        costSlots: [{ dieIds: ['sa'] }, { dieIds: ['sd'] }, { dieIds: ['sm'] }],
         discard: { defense: 'od' },
       },
     });
@@ -427,7 +443,7 @@ describe('007 主宰', () => {
       side: 'right',
       params: {
         kind: 'attack',
-        consumedIds: ['c1', 'c2', 'c3', 'c4'],
+        costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['c4'] }],
         opponentDiscardIds: ['o1', 'o2', 'o3'],
       },
     });
@@ -455,7 +471,7 @@ describe('007 主宰', () => {
         t: 'skill',
         artifactId: '007',
         side: 'right',
-        params: { kind: 'attack', consumedIds: ['c1', 'c2', 'c3'] },
+        params: { kind: 'attack', costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }] },
       }),
     ).toThrow();
     const g2 = base();
@@ -464,7 +480,7 @@ describe('007 主宰', () => {
         t: 'skill',
         artifactId: '007',
         side: 'right',
-        params: { kind: 'attack', consumedIds: ['c1', 'c2', 'c3', 'o1'] },
+        params: { kind: 'attack', costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['o1'] }] },
       }),
     ).toThrow();
   });
@@ -539,7 +555,7 @@ describe('008 铁壁', () => {
       t: 'skill',
       artifactId: '008',
       side: 'right',
-      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1', 'd2'] },
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }], defenseDieIds: ['d1', 'd2'] },
     });
     expect(g.players.A.areas.meditation).toHaveLength(0);
     expect(g.players.A.areas.defense).toHaveLength(4); // 弃 2 → 获得 4
@@ -563,7 +579,7 @@ describe('008 铁壁', () => {
       t: 'skill',
       artifactId: '008',
       side: 'right',
-      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: [] },
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }], defenseDieIds: [] },
     });
     expect(g.players.A.life).toBe(lifeBefore - 4); // 少弃 2 → 4 点真实伤害
     expect(g.players.A.areas.defense).toHaveLength(4);
@@ -585,7 +601,7 @@ describe('008 铁壁', () => {
       t: 'skill',
       artifactId: '008',
       side: 'right',
-      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1'] },
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }], defenseDieIds: ['d1'] },
     });
     expect(g.players.A.life).toBe(lifeBefore - 2); // 少弃 1 → 2 点真实伤害
     expect(g.players.A.areas.defense).toHaveLength(4); // 弃 1 → 获得 4
@@ -603,7 +619,7 @@ describe('008 铁壁', () => {
         t: 'skill',
         artifactId: '008',
         side: 'right',
-        params: { meditationDieIds: ['m1'], defenseDieIds: [] },
+        params: { costSlots: [{ dieIds: ['m1'] }], defenseDieIds: [] },
       }),
     ).toThrow();
   });
@@ -799,7 +815,7 @@ describe('011 顿悟', () => {
       ],
       meditation: [],
     };
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['d1', 'd2'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { costSlots: [{ dieIds: ['d1'] }, { dieIds: ['d2'] }] } });
     expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['d3']);
     expect(g.players.A.areas.meditation).toHaveLength(4);
     for (const d of g.players.A.areas.meditation) {
@@ -822,7 +838,7 @@ describe('011 顿悟', () => {
       meditation: [],
     };
     const medBefore = g.players.A.areas.meditation.length;
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['d1', 'd2', 'd3'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'left', params: { costSlots: [{ dieIds: ['d1'] }, { dieIds: ['d2'] }, { dieIds: ['d3'] }] } });
     expect(g.players.A.areas.defense).toHaveLength(0);
     expect(g.players.A.areas.meditation).toHaveLength(medBefore + 6);
   });
@@ -832,7 +848,7 @@ describe('011 顿悟', () => {
     zero.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     zero.players.A.areas.defense = [{ id: 'd1', value: 1, kind: 'defense' }];
     expect(() =>
-      applyAction(zero, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: [] } }),
+      applyAction(zero, { t: 'skill', artifactId: '011', side: 'left', params: { costSlots: [] } }),
     ).toThrow();
 
     const many = setup011();
@@ -843,7 +859,7 @@ describe('011 顿悟', () => {
         t: 'skill',
         artifactId: '011',
         side: 'left',
-        params: { defenseDieIds: ['d1', 'd2', 'd3', 'd4'] },
+        params: { costSlots: [{ dieIds: ['d1'] }, { dieIds: ['d2'] }, { dieIds: ['d3'] }, { dieIds: ['d4'] }] },
       }),
     ).toThrow();
 
@@ -851,7 +867,7 @@ describe('011 顿悟', () => {
     foreign.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     foreign.players.A.areas.defense = [{ id: 'd1', value: 1, kind: 'defense' }];
     expect(() =>
-      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'left', params: { defenseDieIds: ['nope'] } }),
+      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'left', params: { costSlots: [{ dieIds: ['nope'] }] } }),
     ).toThrow();
   });
 
@@ -867,7 +883,7 @@ describe('011 顿悟', () => {
       defense: [],
       meditation: [],
     };
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }] } });
     expect(g.players.A.areas.attack.map((d) => d.id)).toEqual(['a2', 'a3']);
     expect(g.players.A.areas.meditation).toHaveLength(2);
     for (const d of g.players.A.areas.meditation) {
@@ -890,7 +906,7 @@ describe('011 顿悟', () => {
       meditation: [{ id: 'm0', value: 3, kind: 'meditation' }],
     };
     const medBefore = g.players.A.areas.meditation.length;
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1', 'a2', 'a3'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }, { dieIds: ['a3'] }] } });
     expect(g.players.A.areas.attack).toHaveLength(0);
     expect(g.players.A.areas.meditation).toHaveLength(medBefore + 6);
   });
@@ -900,7 +916,7 @@ describe('011 顿悟', () => {
     zero.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
     zero.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
     expect(() =>
-      applyAction(zero, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: [] } }),
+      applyAction(zero, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [] } }),
     ).toThrow();
 
     const many = setup011();
@@ -911,7 +927,7 @@ describe('011 顿悟', () => {
         t: 'skill',
         artifactId: '011',
         side: 'right',
-        params: { attackDieIds: ['a1', 'a2', 'a3', 'a4'] },
+        params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }, { dieIds: ['a3'] }, { dieIds: ['a4'] }] },
       }),
     ).toThrow();
 
@@ -919,7 +935,7 @@ describe('011 顿悟', () => {
     foreign.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
     foreign.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
     expect(() =>
-      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['nope'] } }),
+      applyAction(foreign, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['nope'] }] } }),
     ).toThrow();
   });
 
@@ -945,7 +961,7 @@ describe('011 顿悟', () => {
       t: 'skill',
       artifactId: '011',
       side: 'left',
-      params: { defenseDieIds: ['d1', 'd2'] },
+      params: { costSlots: [{ dieIds: ['d1'] }, { dieIds: ['d2'] }] },
     });
     art.activeMarkerSide = 'right';
     const legal2 = getLegalActions(g);
@@ -953,7 +969,7 @@ describe('011 顿悟', () => {
       t: 'skill',
       artifactId: '011',
       side: 'right',
-      params: { attackDieIds: ['a1', 'a2', 'a3'] },
+      params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }, { dieIds: ['a3'] }] },
     });
   });
 });
@@ -1064,7 +1080,7 @@ describe('011 灵能脉冲·触发', () => {
       t: 'skill',
       artifactId: '001',
       side: 'left',
-      params: { meditationDieIds: ['m1', 'm2'], opponentDefenseDieIds: ['bd1', 'bd2'] },
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }], opponentDefenseDieIds: ['bd1', 'bd2'] },
     });
 
   it('通过技能消耗 2 颗能力骰后挂起 dunwuPulse（数量=消耗骰数）', () => {
@@ -1097,7 +1113,7 @@ describe('011 灵能脉冲·触发', () => {
       { id: 'a1', value: 2, kind: 'attack' },
       { id: 'a2', value: 3, kind: 'attack' },
     ];
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1', 'a2'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }] } });
     expect(g.skillConsumedThisAction).toBe(2);
     expect(g.pending).toBeNull();
   });
@@ -1109,7 +1125,7 @@ describe('011 灵能脉冲·触发', () => {
     expect(g.pending).toBeNull();
     expect(g.dunwuPulseUsedThisTurn).toBe(false);
     g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
-    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1'] } });
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }] } });
     expect(g.pending).toEqual({ kind: 'dunwuPulse', player: 'A', amount: 1 });
   });
 
@@ -1150,7 +1166,7 @@ describe('011 灵能脉冲·触发', () => {
       artifactId: '007',
       side: 'left',
       params: {
-        consumed: { attack: 'a1', defense: 'd1', meditation: 'm1' },
+        costSlots: [{ dieIds: ['a1'] }, { dieIds: ['d1'] }, { dieIds: ['m1'] }],
         discard: { attack: 'ba1', defense: 'bd1', meditation: 'bm1' },
       },
     });

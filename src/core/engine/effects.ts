@@ -44,6 +44,62 @@ export function heal(g: GameState, player: PlayerId, amount: number): number {
   return p.life - before;
 }
 
+export interface SlotSpec {
+  kind: DiceKind;
+}
+
+export interface SlotFill {
+  dieIds: string[];
+}
+
+export interface EffectiveDie {
+  kind: DiceKind;
+  value: number;
+  source: 'real' | 'converted';
+  realIds: string[];
+}
+
+/** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(折算,值5)。
+ *  移除所有真骰(返还供应堆)；返回各格“有效骰”；reportConsumed 按“格数”上报。 */
+export function paySlots(
+  g: GameState,
+  player: PlayerId,
+  spec: SlotSpec[],
+  fills: SlotFill[],
+  reportConsumed?: (n: number) => void,
+): EffectiveDie[] {
+  if (fills.length !== spec.length) throw new Error(`expect ${spec.length} slot fills, got ${fills.length}`);
+  const used = new Set<string>();
+  const effective: EffectiveDie[] = [];
+  const toRemove: string[] = [];
+  for (let i = 0; i < spec.length; i++) {
+    const { kind } = spec[i];
+    const ids = fills[i]?.dieIds ?? [];
+    if (ids.length !== 1 && ids.length !== 2) throw new Error('each slot needs 1 (real) or 2 (converted) dice');
+    for (const id of ids) {
+      if (used.has(id)) throw new Error(`duplicate die id: ${id}`);
+      used.add(id);
+      if (!findDieOf(g, player, id)) throw new Error(`not your die: ${id}`);
+    }
+    if (ids.length === 1) {
+      const found = findDieOf(g, player, ids[0])!;
+      if (found.kind !== kind) throw new Error(`slot needs a ${kind} die, got ${found.kind}`);
+      effective.push({ kind, value: found.die.value, source: 'real', realIds: [ids[0]] });
+    } else {
+      effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
+    }
+    toRemove.push(...ids);
+  }
+  // 移除并返还供应堆（按当前所在区域移除）
+  for (const id of toRemove) {
+    for (const k of KINDS) {
+      g.players[player].areas[k] = g.players[player].areas[k].filter((d) => d.id !== id);
+    }
+  }
+  reportConsumed?.(spec.length);
+  return effective;
+}
+
 /** 随机获得 count 颗指定类型的能力骰（点数为随机）；返回新骰 */
 export function gainRandomDice(
   g: GameState,

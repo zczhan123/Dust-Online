@@ -107,6 +107,20 @@ function diceListLabel(state: GameState, ids: string[]): string {
   return ids.map((id) => dieValue(state, id) ?? '?').join('/');
 }
 
+const KIND_NAMES: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+
+/** 各技能代价所需骰类型（用于确认条文案；引擎按同样规则构造槽位） */
+const COST_KIND_LABEL: Record<string, string> = {
+  'buxiang.cuilian': '攻击',
+  'yingle.qianxing': '攻击',
+  'youlong.tengwan': '冥想',
+  'yuqie.breakthrough': '冥想',
+  'wansha.ultimate': '攻击',
+  'tiebi.fist': '冥想',
+  'dunwu.barrier.activate': '防御',
+  'dunwu.pulse.activate': '攻击',
+};
+
 function kindFromType(type: string): SkillDef['kind'] | undefined {
   if (type.includes('启动')) return 'activate';
   if (type.includes('必杀')) return 'ultimate';
@@ -177,6 +191,18 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
   const params = a.params ?? {};
   const parts: string[] = [];
 
+  if (Array.isArray(params.costSlots) && params.costSlots.length) {
+    const fills = params.costSlots as { dieIds?: string[] }[];
+    const realIds = fills.flatMap((f) => f.dieIds ?? []);
+    const converted = fills.filter((f) => (f.dieIds ?? []).length > 1).length;
+    const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+    const sk = art?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'));
+    const kindName =
+      COST_KIND_LABEL[sk?.key ?? ''] ?? (typeof params.kind === 'string' ? KIND_NAMES[params.kind] : undefined);
+    const detail = realIds.length ? `（${diceListLabel(ctx.state, realIds)}点）` : '';
+    const suffix = converted > 0 ? `，其中 ${converted} 格折算` : '';
+    parts.push(`消耗 ${fills.length} 颗${kindName ?? ''}骰${detail}${suffix}`);
+  }
   if (typeof params.attackDieId === 'string') {
     const v = dieValue(ctx.state, params.attackDieId);
     parts.push(v !== undefined ? `消耗 1 颗攻击骰（${v}点）` : '消耗 1 颗攻击骰');

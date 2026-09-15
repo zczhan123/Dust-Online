@@ -300,7 +300,7 @@ describe('renderGame (interaction)', () => {
       t: 'skill',
       artifactId: '004',
       side: 'left',
-      params: { attackDieId: 'atk-test' },
+      params: { costSlots: [{ dieIds: ['atk-test'] }] },
     });
 
     const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
@@ -310,7 +310,7 @@ describe('renderGame (interaction)', () => {
       t: 'skill',
       artifactId: '004',
       side: 'left',
-      params: { attackDieId: 'atk-test' },
+      params: { costSlots: [{ dieIds: ['atk-test'] }] },
     });
   });
 
@@ -490,7 +490,7 @@ describe('renderGame (interaction)', () => {
       side: 'right',
       params: {
         kind: 'attack',
-        consumedIds: ['c1', 'c2', 'c3', 'c4'],
+        costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['c4'] }],
         opponentDiscardIds: ['o1'],
       },
     });
@@ -551,7 +551,7 @@ describe('renderGame (interaction)', () => {
       t: 'skill',
       artifactId: '008',
       side: 'right',
-      params: { meditationDieIds: ['m1', 'm2'], defenseDieIds: ['d1', 'd2'] },
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }], defenseDieIds: ['d1', 'd2'] },
     });
   });
 
@@ -668,7 +668,7 @@ describe('renderGame (interaction)', () => {
       t: 'skill',
       artifactId: '011',
       side: 'left',
-      params: { defenseDieIds: ['d1', 'd2'] },
+      params: { costSlots: [{ dieIds: ['d1'] }, { dieIds: ['d2'] }] },
     });
   });
 
@@ -714,7 +714,7 @@ describe('renderGame (interaction)', () => {
       t: 'skill',
       artifactId: '011',
       side: 'right',
-      params: { attackDieIds: ['a1', 'a2', 'a3'] },
+      params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }, { dieIds: ['a3'] }] },
     });
   });
 

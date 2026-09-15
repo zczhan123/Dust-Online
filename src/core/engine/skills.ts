@@ -2,7 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
-import { moveDice } from './effects';
+import { moveDice, paySlots, type SlotFill, type SlotSpec } from './effects';
 import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
@@ -50,13 +50,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 淬炼：消耗 1 攻击骰 → 本神器计数 +1（上限 3）
   'buxiang.cuilian': {
     run({ player, artifact, params, g, reportConsumed }) {
-      const p = g.players[player];
-      const id = params.attackDieId as string;
-      if (!id) throw new Error('missing attackDieId');
-      const spot = p.areas.attack.find((d) => d.id === id)?.value ?? 0;
+      const effective = paySlots(
+        g,
+        player,
+        [{ kind: 'attack' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
+      const spot = effective[0]?.value ?? 0;
       const before = artifact.count;
-      consumeDice(p, 'attack', [id]);
-      reportConsumed(1);
       artifact.count = Math.min(3, artifact.count + 1);
       logLine(
         g,
@@ -68,13 +70,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'youlong.tengwan': {
     run({ player, rng, params, g, reportConsumed }) {
       const p = g.players[player];
-      const ids = params.meditationDieIds as string[];
-      if (!ids || ids.length !== 3) throw new Error('need exactly 3 meditation dice');
-      const consumed = ids
-        .map((id) => p.areas.meditation.find((d) => d.id === id))
-        .filter((d): d is Die => d !== undefined);
-      consumeDice(p, 'meditation', ids);
-      reportConsumed(ids.length);
+      const effective = paySlots(
+        g,
+        player,
+        [{ kind: 'meditation' }, { kind: 'meditation' }, { kind: 'meditation' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
       const dice: Die[] = Array.from({ length: 4 }, () => createDie(newDieId(`${player}-`), rng.rollDie()));
       const sorted = [...dice].sort((a, b) => a.value - b.value);
       const min = sorted[0];
@@ -91,7 +93,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn' });
       logLine(
         g,
-        `${pname(player)} 发动「龙腾万丈」：消耗 3 颗冥想骰（${vals(consumed)}），获得 4 颗能力骰（${vals(
+        `${pname(player)} 发动「龙腾万丈」：消耗 3 颗冥想骰（${vals(effective)}），获得 4 颗能力骰（${vals(
           dice,
         )}），2 颗移入攻击骰区、2 颗移入防御骰区，本回合攻击伤害 +1`,
       );
@@ -101,13 +103,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'yingle.qianxing': {
     run({ player, rng, params, g, reportConsumed }) {
       const p = g.players[player];
-      const ids = params.attackDieIds as string[];
-      if (!ids || ids.length !== 2) throw new Error('need exactly 2 attack dice');
-      const consumed = ids
-        .map((id) => p.areas.attack.find((d) => d.id === id))
-        .filter((d): d is Die => d !== undefined);
-      consumeDice(p, 'attack', ids);
-      reportConsumed(ids.length);
+      const effective = paySlots(
+        g,
+        player,
+        [{ kind: 'attack' }, { kind: 'attack' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
       const def: Die[] = [];
       for (let i = 0; i < 2; i++) {
         const d = createDie(newDieId(`${player}-`), rng.rollDie(), 'defense');
@@ -118,7 +120,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       p.areas.meditation.push(med);
       logLine(
         g,
-        `${pname(player)} 发动「潜行」：消耗 2 颗攻击骰（${vals(consumed)}），获得 2 颗防御骰（${vals(
+        `${pname(player)} 发动「潜行」：消耗 2 颗攻击骰（${vals(effective)}），获得 2 颗防御骰（${vals(
           def,
         )}）与 1 颗冥想骰（${med.value}点）`,
       );
@@ -141,21 +143,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 中央突破：消耗最多 3 个冥想骰 → 弃置对方等量防御骰；恰好 3 个则本回合攻击不可抵挡
   'yuqie.breakthrough': {
     run({ g, player, params, reportConsumed }) {
-      const p = g.players[player];
-      const medIds = (params.meditationDieIds as string[] | undefined) ?? [];
-      if (medIds.length < 1 || medIds.length > 3) throw new Error('meditationDieIds must contain 1..3 dice');
-      if (new Set(medIds).size !== medIds.length) throw new Error('duplicate meditation die id');
-      for (const id of medIds) {
-        if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
-      }
-      const med = medIds
-        .map((id) => p.areas.meditation.find((d) => d.id === id))
-        .filter((d): d is Die => d !== undefined);
-      consumeDice(p, 'meditation', medIds);
-      reportConsumed(medIds.length);
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must contain 1..3 slots');
+      const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
+      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const count = effective.length;
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       const oppDef = g.players[opponent].areas.defense;
-      const required = Math.min(medIds.length, oppDef.length);
+      const required = Math.min(count, oppDef.length);
       const defIds = (params.opponentDefenseDieIds as string[] | undefined) ?? [];
       if (new Set(defIds).size !== defIds.length) throw new Error('duplicate defense die id');
       for (const id of defIds) {
@@ -166,13 +161,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         .map((id) => oppDef.find((d) => d.id === id))
         .filter((d): d is Die => d !== undefined);
       consumeDice(g.players[opponent], 'defense', defIds);
-      if (medIds.length === 3) g.unblockableThisTurn = true;
+      if (count === 3) g.unblockableThisTurn = true;
       logLine(
         g,
-        `${pname(player)} 发动「中央突破」：消耗 ${medIds.length} 颗冥想骰（${vals(med)}），弃置 ${pname(
+        `${pname(player)} 发动「中央突破」：消耗 ${count} 颗冥想骰（${vals(effective)}），弃置 ${pname(
           opponent,
         )} 的 ${defIds.length} 颗防御骰（${vals(def)}）${
-          medIds.length === 3 ? '，本回合攻击不可抵挡' : ''
+          count === 3 ? '，本回合攻击不可抵挡' : ''
         }`,
       );
     },
@@ -248,12 +243,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const p = g.players[player];
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       const o = g.players[opponent];
-      const dieId = params.attackDieId as string;
-      const die = p.areas.attack.find((d) => d.id === dieId);
-      if (!die) throw new Error('need an attack die');
-      const x = die.value;
-      consumeDice(p, 'attack', [dieId]);
-      reportConsumed(1);
+      const effective = paySlots(
+        g,
+        player,
+        [{ kind: 'attack' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
+      const x = effective[0]?.value ?? 0;
       const wanted = ((params.opponentDefenseDieIds as string[]) ?? [])
         .filter((id) => o.areas.defense.some((d) => d.id === id))
         .slice(0, x);
@@ -313,20 +310,17 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 007 战争横扫：各消耗 1 攻/防/冥 → 弃对方各 1 → floor(点数和/2) 真实伤害
   'zhuzai.sweep': {
     run({ g, player, params, reportConsumed }) {
-      const p = g.players[player];
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
-      const consumed = (params.consumed ?? {}) as { attack?: string; defense?: string; meditation?: string };
+      const effective = paySlots(
+        g,
+        player,
+        [{ kind: 'attack' }, { kind: 'defense' }, { kind: 'meditation' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
       const discard = (params.discard ?? {}) as { attack?: string; defense?: string; meditation?: string };
       let sum = 0;
-      for (const k of ['attack', 'defense', 'meditation'] as const) {
-        const id = consumed[k];
-        if (!id) throw new Error(`missing consumed ${k} die`);
-        const die = p.areas[k].find((d) => d.id === id);
-        if (!die) throw new Error(`not your ${k} die: ${id}`);
-        sum += die.value;
-      }
-      for (const k of ['attack', 'defense', 'meditation'] as const) consumeDice(p, k, [consumed[k]!]);
-      reportConsumed(3);
+      for (const e of effective) sum += e.value;
       for (const k of ['attack', 'defense', 'meditation'] as const) {
         const id = discard[k];
         if (id && g.players[opp].areas[k].some((d) => d.id === id)) consumeDice(g.players[opp], k, [id]);
@@ -339,21 +333,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 007 震荡斩击：消耗 4 颗同类型 → 弃对方 4 颗同类型 → floor(点数和/2) 真实伤害
   'zhuzai.smash': {
     run({ g, player, params, reportConsumed }) {
-      const p = g.players[player];
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
       const kind = params.kind as DiceKind;
       if (kind !== 'attack' && kind !== 'defense' && kind !== 'meditation') throw new Error('invalid kind');
-      const consumedIds = (params.consumedIds as string[]) ?? [];
-      if (consumedIds.length !== 4) throw new Error('need exactly 4 dice');
-      if (new Set(consumedIds).size !== 4) throw new Error('duplicate die id');
+      const effective = paySlots(
+        g,
+        player,
+        Array.from({ length: 4 }, () => ({ kind })),
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
       let sum = 0;
-      for (const id of consumedIds) {
-        const die = p.areas[kind].find((d) => d.id === id);
-        if (!die) throw new Error(`not your ${kind} die: ${id}`);
-        sum += die.value;
-      }
-      consumeDice(p, kind, consumedIds);
-      reportConsumed(consumedIds.length);
+      for (const e of effective) sum += e.value;
       const oppIds = ((params.opponentDiscardIds as string[]) ?? [])
         .filter((id) => g.players[opp].areas[kind].some((d) => d.id === id))
         .slice(0, 4);
@@ -367,12 +358,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'tiebi.fist': {
     run({ g, player, rng, params, reportConsumed }) {
       const p = g.players[player];
-      const medIds = (params.meditationDieIds as string[]) ?? [];
-      if (medIds.length !== 2) throw new Error('need exactly 2 meditation dice');
-      if (new Set(medIds).size !== 2) throw new Error('duplicate die id');
-      for (const id of medIds) if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
-      consumeDice(p, 'meditation', medIds);
-      reportConsumed(medIds.length);
+      paySlots(
+        g,
+        player,
+        [{ kind: 'meditation' }, { kind: 'meditation' }],
+        (params.costSlots as SlotFill[] | undefined) ?? [],
+        reportConsumed,
+      );
       const defIds = (params.defenseDieIds as string[]) ?? [];
       if (new Set(defIds).size !== defIds.length) throw new Error('duplicate die id');
       const validDef = defIds.filter((id) => p.areas.defense.some((d) => d.id === id)).slice(0, 2);
@@ -388,28 +380,26 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'dunwu.barrier.activate': {
     run({ g, player, rng, params, reportConsumed }) {
       const p = g.players[player];
-      const ids = (params.defenseDieIds as string[]) ?? [];
-      if (ids.length < 1 || ids.length > 3) throw new Error('defenseDieIds must be 1..3');
-      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
-      for (const id of ids) if (!p.areas.defense.some((d) => d.id === id)) throw new Error(`not your defense die: ${id}`);
-      consumeDice(p, 'defense', ids);
-      reportConsumed(ids.length);
-      for (let i = 0; i < ids.length * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
-      logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${ids.length} 防御骰，获得 ${ids.length * 2} 冥想骰`);
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
+      const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'defense' as const }));
+      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const n = effective.length;
+      for (let i = 0; i < n * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${n} 防御骰，获得 ${n * 2} 冥想骰`);
     },
   },
   // 011 灵能脉冲·启动：消耗最多 3 个攻击骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
   'dunwu.pulse.activate': {
     run({ g, player, rng, params, reportConsumed }) {
       const p = g.players[player];
-      const ids = (params.attackDieIds as string[]) ?? [];
-      if (ids.length < 1 || ids.length > 3) throw new Error('attackDieIds must be 1..3');
-      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
-      for (const id of ids) if (!p.areas.attack.some((d) => d.id === id)) throw new Error(`not your attack die: ${id}`);
-      consumeDice(p, 'attack', ids);
-      reportConsumed(ids.length);
-      for (let i = 0; i < ids.length * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
-      logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${ids.length} 攻击骰，获得 ${ids.length * 2} 冥想骰`);
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
+      const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'attack' as const }));
+      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const n = effective.length;
+      for (let i = 0; i < n * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${n} 攻击骰，获得 ${n * 2} 冥想骰`);
     },
   },
   // 012 魔女·必杀 梦醒时分：将最多 3 个冥想骰移动至自己的另一个区域（攻击/防御），保留原本点数

@@ -5,6 +5,7 @@ import {
   moveDice,
   heal,
   gainRandomDice,
+  paySlots,
 } from '../src/core/engine/effects';
 import { createGame, endMainPhase, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { SeededRng } from '../src/core/rng/rng';
@@ -132,6 +133,124 @@ describe('effects primitives', () => {
       const gained = gainRandomDice(g, 'A', 'attack', 0, new SeededRng(7));
       expect(gained).toHaveLength(0);
       expect(g.players.A.areas.attack).toHaveLength(before);
+    });
+  });
+
+  describe('paySlots', () => {
+    const setup = () => {
+      const g = freshGame();
+      clearAreas(g, 'A');
+      return g;
+    };
+
+    it('pays an all-real slot (type must match) and returns the effective die', () => {
+      const g = setup();
+      g.players.A.areas.meditation = [
+        { id: 'm1', value: 4, kind: 'meditation' },
+        { id: 'm2', value: 2, kind: 'meditation' },
+      ];
+      const eff = paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['m1'] }]);
+      expect(eff).toEqual([{ kind: 'meditation', value: 4, source: 'real', realIds: ['m1'] }]);
+      expect(g.players.A.areas.meditation.map((d) => d.id)).toEqual(['m2']);
+    });
+
+    it('rejects a real die whose kind does not match the slot', () => {
+      const g = setup();
+      g.players.A.areas.attack = [{ id: 'a1', value: 3, kind: 'attack' }];
+      expect(() => paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['a1'] }])).toThrow();
+    });
+
+    it('converts 2 any dice into a value-5 effective die and removes both', () => {
+      const g = setup();
+      g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+      g.players.A.areas.defense = [{ id: 'd1', value: 6, kind: 'defense' }];
+      const eff = paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['a1', 'd1'] }]);
+      expect(eff).toEqual([{ kind: 'meditation', value: 5, source: 'converted', realIds: ['a1', 'd1'] }]);
+      expect(g.players.A.areas.attack).toHaveLength(0);
+      expect(g.players.A.areas.defense).toHaveLength(0);
+    });
+
+    it('supports mixed real + converted slots', () => {
+      const g = setup();
+      g.players.A.areas.attack = [
+        { id: 'a1', value: 2, kind: 'attack' },
+        { id: 'a2', value: 3, kind: 'attack' },
+      ];
+      g.players.A.areas.meditation = [{ id: 'm1', value: 4, kind: 'meditation' }];
+      const eff = paySlots(
+        g,
+        'A',
+        [{ kind: 'meditation' }, { kind: 'meditation' }],
+        [{ dieIds: ['m1'] }, { dieIds: ['a1', 'a2'] }],
+      );
+      expect(eff).toEqual([
+        { kind: 'meditation', value: 4, source: 'real', realIds: ['m1'] },
+        { kind: 'meditation', value: 5, source: 'converted', realIds: ['a1', 'a2'] },
+      ]);
+      expect(g.players.A.areas.meditation).toHaveLength(0);
+      expect(g.players.A.areas.attack).toHaveLength(0);
+    });
+
+    it('removes up to 2N real dice when every slot is converted', () => {
+      const g = setup();
+      g.players.A.areas.attack = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((id) => ({
+        id,
+        value: 1,
+        kind: 'attack' as const,
+      }));
+      const eff = paySlots(
+        g,
+        'A',
+        Array.from({ length: 3 }, () => ({ kind: 'defense' as const })),
+        [{ dieIds: ['a1', 'a2'] }, { dieIds: ['a3', 'a4'] }, { dieIds: ['a5', 'a6'] }],
+      );
+      expect(eff).toHaveLength(3);
+      expect(eff.every((e) => e.value === 5 && e.source === 'converted')).toBe(true);
+      expect(g.players.A.areas.attack).toHaveLength(0);
+    });
+
+    it('rejects a duplicate die id across slots', () => {
+      const g = setup();
+      g.players.A.areas.meditation = [{ id: 'm1', value: 4, kind: 'meditation' }];
+      expect(() =>
+        paySlots(g, 'A', [{ kind: 'meditation' }, { kind: 'meditation' }], [{ dieIds: ['m1'] }, { dieIds: ['m1'] }]),
+      ).toThrow();
+    });
+
+    it('rejects the wrong number of slot fills', () => {
+      const g = setup();
+      g.players.A.areas.meditation = [{ id: 'm1', value: 4, kind: 'meditation' }];
+      expect(() => paySlots(g, 'A', [{ kind: 'meditation' }], [])).toThrow();
+      expect(() =>
+        paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['m1'] }, { dieIds: ['m1'] }]),
+      ).toThrow();
+    });
+
+    it('rejects a slot fill with 3 dice', () => {
+      const g = setup();
+      g.players.A.areas.attack = ['a1', 'a2', 'a3'].map((id) => ({ id, value: 1, kind: 'attack' as const }));
+      expect(() => paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a1', 'a2', 'a3'] }])).toThrow();
+    });
+
+    it('rejects a foreign / unknown die', () => {
+      const g = setup();
+      expect(() => paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['nope'] }])).toThrow();
+    });
+
+    it('reports the slot count (not the real-die count) to reportConsumed', () => {
+      const g = setup();
+      g.players.A.areas.attack = ['a1', 'a2', 'a3'].map((id) => ({ id, value: 1, kind: 'attack' as const }));
+      let reported = -1;
+      paySlots(
+        g,
+        'A',
+        [{ kind: 'attack' }, { kind: 'attack' }],
+        [{ dieIds: ['a1'] }, { dieIds: ['a2', 'a3'] }],
+        (n) => {
+          reported = n;
+        },
+      );
+      expect(reported).toBe(2);
     });
   });
 

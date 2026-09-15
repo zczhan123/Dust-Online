@@ -158,20 +158,20 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
       if (g.skillsUsedThisTurn.includes(s.key)) continue;
       if (s.key === 'buxiang.cuilian') {
         if (a.count >= 3) continue;
-        for (const d of p.areas.attack) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: d.id } });
+        for (const d of p.areas.attack) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: [{ dieIds: [d.id] }] } });
       } else if (s.key === 'youlong.tengwan') {
-        if (p.areas.meditation.length >= 3) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) } });
+        if (p.areas.meditation.length >= 3) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: p.areas.meditation.slice(0, 3).map((d) => ({ dieIds: [d.id] })) } });
       } else if (s.key === 'yingle.qianxing') {
-        if (p.areas.attack.length >= 2) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 2).map((d) => d.id) } });
+        if (p.areas.attack.length >= 2) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: p.areas.attack.slice(0, 2).map((d) => ({ dieIds: [d.id] })) } });
       } else if (s.key === 'yuqie.breakthrough') {
         const medCount = Math.min(3, p.areas.meditation.length);
         if (medCount >= 1) {
-          const medIds = p.areas.meditation.slice(0, medCount).map((d) => d.id);
+          const costSlots = p.areas.meditation.slice(0, medCount).map((d) => ({ dieIds: [d.id] }));
           const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
           const oppDef = g.players[opp].areas.defense;
           const required = Math.min(medCount, oppDef.length);
           const oppDefIds = oppDef.slice(0, required).map((d) => d.id);
-          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { meditationDieIds: medIds, opponentDefenseDieIds: oppDefIds } });
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots, opponentDefenseDieIds: oppDefIds } });
         }
       } else if (s.key === 'yingle.yingxi') {
         const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].find((d) => d.value >= 2);
@@ -183,7 +183,7 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         if (atk) {
           const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
           const oppDef = g.players[opp].areas.defense.slice(0, atk.value).map((d) => d.id);
-          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieId: atk.id, opponentDefenseDieIds: oppDef } });
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: [{ dieIds: [atk.id] }], opponentDefenseDieIds: oppDef } });
         }
       } else if (s.key === 'zhuzai.sweep') {
         if (p.areas.attack.length >= 1 && p.areas.defense.length >= 1 && p.areas.meditation.length >= 1) {
@@ -198,11 +198,11 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             artifactId: a.id,
             side: s.side,
             params: {
-              consumed: {
-                attack: p.areas.attack[0].id,
-                defense: p.areas.defense[0].id,
-                meditation: p.areas.meditation[0].id,
-              },
+              costSlots: [
+                { dieIds: [p.areas.attack[0].id] },
+                { dieIds: [p.areas.defense[0].id] },
+                { dieIds: [p.areas.meditation[0].id] },
+              ],
               discard,
             },
           });
@@ -218,7 +218,7 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             side: s.side,
             params: {
               kind,
-              consumedIds: p.areas[kind].slice(0, 4).map((d) => d.id),
+              costSlots: p.areas[kind].slice(0, 4).map((d) => ({ dieIds: [d.id] })),
               opponentDiscardIds: g.players[opp].areas[kind].slice(0, 4).map((d) => d.id),
             },
           });
@@ -230,7 +230,7 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             artifactId: a.id,
             side: s.side,
             params: {
-              meditationDieIds: p.areas.meditation.slice(0, 2).map((d) => d.id),
+              costSlots: p.areas.meditation.slice(0, 2).map((d) => ({ dieIds: [d.id] })),
               defenseDieIds: p.areas.defense.slice(0, 2).map((d) => d.id),
             },
           });
@@ -239,11 +239,11 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         acts.push({ t: 'skill', artifactId: a.id, side: s.side });
       } else if (s.key === 'dunwu.barrier.activate') {
         if (p.areas.defense.length >= 1) {
-          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { defenseDieIds: p.areas.defense.slice(0, 3).map((d) => d.id) } });
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: p.areas.defense.slice(0, 3).map((d) => ({ dieIds: [d.id] })) } });
         }
       } else if (s.key === 'dunwu.pulse.activate') {
         if (p.areas.attack.length >= 1) {
-          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 3).map((d) => d.id) } });
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { costSlots: p.areas.attack.slice(0, 3).map((d) => ({ dieIds: [d.id] })) } });
         }
       } else if (s.key === 'monv.ultimate') {
         if (p.areas.meditation.length >= 1) {
