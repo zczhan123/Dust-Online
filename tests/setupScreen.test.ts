@@ -9,6 +9,9 @@ const click = (root: HTMLElement, selector: string): void => {
 
 const KONG = ['001', '002', '003'];
 const YING = ['004', '005', '006'];
+const BAT = ['007', '008', '009'];
+const TATA = ['010', '011', '012'];
+const HERO_SETS = [KONG, YING, BAT, TATA];
 
 describe('renderSetup', () => {
   let root: HTMLElement;
@@ -22,7 +25,7 @@ describe('renderSetup', () => {
     expect(root.textContent).toContain('尘起时刻 · 开始新对局');
     expect(root.querySelector('.setup')).not.toBeNull();
     expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
-    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(3);
+    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(5); // 4 英雄 + 随机
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 
@@ -36,7 +39,7 @@ describe('renderSetup', () => {
     ).toBe(true);
   });
 
-  it('selects 雨中剑圣·空 + 玩家A 先手', () => {
+  it('selects 雨中剑圣·空 + 玩家A 先手 (对手是另一位英雄)', () => {
     const onStart = vi.fn();
     renderSetup(root, onStart);
     click(root, '[data-role="heroA"][data-value="kong"]');
@@ -46,38 +49,34 @@ describe('renderSetup', () => {
     ).toBe(true);
     click(root, '.setup-start');
     expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith({
-      heroA: KONG,
-      heroB: YING,
-      firstPlayer: 'A',
-    });
+    const opts = onStart.mock.calls[0][0] as SetupOptions;
+    expect(opts.heroA).toEqual(KONG);
+    expect(opts.firstPlayer).toBe('A');
+    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroB))).toBe(true);
+    expect(JSON.stringify(opts.heroB)).not.toBe(JSON.stringify(KONG));
   });
 
-  it('selects 永暗之刃·影 + 玩家B 先手', () => {
+  it('can select 孤塔之王·巴顿二世', () => {
     const onStart = vi.fn();
     renderSetup(root, onStart);
-    click(root, '[data-role="heroA"][data-value="ying"]');
-    click(root, '[data-role="first"][data-value="B"]');
+    click(root, '[data-role="heroA"][data-value="batton"]');
     click(root, '.setup-start');
     expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith({
-      heroA: YING,
-      heroB: KONG,
-      firstPlayer: 'B',
-    });
+    const opts = onStart.mock.calls[0][0] as SetupOptions;
+    expect(opts.heroA).toEqual(BAT);
+    expect(JSON.stringify(opts.heroB)).not.toBe(JSON.stringify(BAT));
   });
 
-  it('resolves random defaults to a valid, complete option pair', () => {
+  it('resolves random defaults to two different heroes', () => {
     const onStart = vi.fn();
     renderSetup(root, onStart);
     click(root, '.setup-start');
     expect(onStart).toHaveBeenCalledTimes(1);
     const opts = onStart.mock.calls[0][0] as SetupOptions;
     expect(['A', 'B']).toContain(opts.firstPlayer);
-    const isKong = JSON.stringify(opts.heroA) === JSON.stringify(KONG);
-    const isYing = JSON.stringify(opts.heroA) === JSON.stringify(YING);
-    expect(isKong || isYing).toBe(true);
-    expect(JSON.stringify(opts.heroB)).toBe(JSON.stringify(isKong ? YING : KONG));
+    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroA))).toBe(true);
+    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroB))).toBe(true);
+    expect(JSON.stringify(opts.heroA)).not.toBe(JSON.stringify(opts.heroB));
   });
 
   it('shows mode/draft placeholder options (disabled, marked 开发中)', () => {

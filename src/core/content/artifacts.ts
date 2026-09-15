@@ -60,4 +60,6 @@ export function makeArtifact(id: string): Artifact {
 export const HEROES = {
   kong: { name: '雨中剑圣 空', artifacts: ['001', '002', '003'] },
   ying: { name: '永暗之刃 影', artifacts: ['004', '005', '006'] },
+  batton: { name: '孤塔之王 巴顿二世', artifacts: ['007', '008', '009'] },
+  tata: { name: '地狱的魔女 塔塔萝丝', artifacts: ['010', '011', '012'] },
 } as const;

@@ -3,6 +3,16 @@ import type { PlayerId } from '../core/model/types';
 export const HEROES = {
   kong: ['001', '002', '003'] as [string, string, string], // 雨中剑圣 空
   ying: ['004', '005', '006'] as [string, string, string], // 永暗之刃 影
+  batton: ['007', '008', '009'] as [string, string, string], // 孤塔之王 巴顿二世
+  tata: ['010', '011', '012'] as [string, string, string], // 地狱的魔女 塔塔萝丝
+};
+
+const HERO_KEYS = ['kong', 'ying', 'batton', 'tata'] as const;
+const HERO_LABELS: Record<(typeof HERO_KEYS)[number], string> = {
+  kong: '雨中剑圣·空',
+  ying: '永暗之刃·影',
+  batton: '孤塔之王·巴顿二世',
+  tata: '地狱的魔女·塔塔萝丝',
 };
 
 export interface SetupOptions {
@@ -11,7 +21,7 @@ export interface SetupOptions {
   firstPlayer: PlayerId;
 }
 
-type HeroChoice = 'kong' | 'ying' | 'random';
+type HeroChoice = (typeof HERO_KEYS)[number] | 'random';
 type FirstChoice = 'A' | 'B' | 'random';
 
 function el(tag: string, className: string): HTMLElement {
@@ -110,8 +120,7 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   const heroGroup = el('div', 'choice-group');
   const heroButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
   const heroDefs: Array<[HeroChoice, string]> = [
-    ['kong', '雨中剑圣·空'],
-    ['ying', '永暗之刃·影'],
+    ...HERO_KEYS.map((k) => [k, HERO_LABELS[k]] as [HeroChoice, string]),
     ['random', '随机'],
   ];
   for (const [value, label] of heroDefs) {
@@ -153,13 +162,13 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   start.className = 'setup-start';
   start.textContent = '开始游戏';
   start.addEventListener('click', () => {
-    const heroA: [string, string, string] =
-      heroChoice === 'random'
-        ? Math.random() < 0.5
-          ? HEROES.kong
-          : HEROES.ying
-        : HEROES[heroChoice];
-    const heroB: [string, string, string] = heroA === HEROES.kong ? HEROES.ying : HEROES.kong;
+    const pickKey = (): (typeof HERO_KEYS)[number] =>
+      HERO_KEYS[Math.floor(Math.random() * HERO_KEYS.length)];
+    const heroAKey = heroChoice === 'random' ? pickKey() : heroChoice;
+    const others = HERO_KEYS.filter((k) => k !== heroAKey);
+    const heroBKey = others[Math.floor(Math.random() * others.length)];
+    const heroA: [string, string, string] = HEROES[heroAKey];
+    const heroB: [string, string, string] = HEROES[heroBKey];
     const firstPlayer: PlayerId =
       firstChoice === 'random' ? (Math.random() < 0.5 ? 'A' : 'B') : firstChoice;
     onStart({ heroA, heroB, firstPlayer });
