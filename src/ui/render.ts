@@ -788,6 +788,34 @@ function dustEntryButton(ctx: Ctx, a: Artifact): HTMLButtonElement {
   return b;
 }
 
+function chipDieId(a: Action): string | undefined {
+  if (a.t === 'attack') return a.costSlots[0]?.dieIds[0];
+  if (a.t === 'block') return a.costSlots?.[0]?.dieIds?.[0];
+  return undefined;
+}
+
+/** 攻击/抵挡的紧凑呈现：标签 + 骰片（与「选择冥想骰」同款），节省纵向空间 */
+function actionChipRow(ctx: Ctx, labelText: string, actions: Action[]): HTMLElement {
+  const row = el('div', 'actionlist-chips');
+  const lab = el('span', 'chip-label');
+  lab.textContent = labelText;
+  row.appendChild(lab);
+  for (const a of actions) {
+    const id = chipDieId(a);
+    const d = id ? findDie(ctx.state, id) : undefined;
+    if (!d) continue;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pay-die clickable';
+    chip.dataset.id = d.id;
+    chip.dataset.act = a.t === 'attack' ? 'attack' : 'block';
+    chip.textContent = String(d.value);
+    chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? labelText));
+    row.appendChild(chip);
+  }
+  return row;
+}
+
 function operationList(ctx: Ctx): HTMLElement {
   const box = el('div', 'actionlist');
 
@@ -832,8 +860,14 @@ function operationList(ctx: Ctx): HTMLElement {
 
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
+  const attackChips = ctx.legal.filter((a) => a.t === 'attack');
+  if (attackChips.length > 0) box.appendChild(actionChipRow(ctx, '攻击', attackChips));
+  const blockChips = ctx.legal.filter((a) => a.t === 'block' && chipDieId(a));
+  if (blockChips.length > 0) box.appendChild(actionChipRow(ctx, '抵挡', blockChips));
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
+    if (a.t === 'attack') continue;
+    if (a.t === 'block' && chipDieId(a)) continue;
     if (a.t === 'skill') {
       const sig = `${a.artifactId}:${a.side}`;
       if (seenSkill.has(sig)) continue;

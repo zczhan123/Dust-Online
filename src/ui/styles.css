@@ -368,6 +368,20 @@ body {
   font-size: 13px;
   color: var(--muted);
 }
+.actionlist-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chip-label {
+  font-size: 13px;
+  color: #4b5563;
+}
+button.pay-die {
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+}
 .btn-skill {
   background: #eaf7ee;
   border-color: #8fc7a5;

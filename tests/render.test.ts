@@ -261,6 +261,27 @@ describe('renderGame (interaction)', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'attack', costSlots: [{ dieIds: [die.id] }] });
   });
 
+  it('renders attack dice as compact chips (label + die chips) in the operation list', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const { ui } = mount(state, root);
+
+    const chips = root.querySelectorAll<HTMLButtonElement>(
+      '.actionlist-chips .pay-die[data-act="attack"]',
+    );
+    expect(chips.length).toBeGreaterThan(0);
+    expect(root.querySelector('.actionlist-chips .chip-label')!.textContent).toBe('攻击');
+    const textBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
+      (b) => (b.textContent ?? '').includes('点攻击骰'),
+    );
+    expect(textBtn).toBeUndefined();
+
+    chips[0].click();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action.t).toBe('attack');
+  });
+
   it('clicking a parameterized skill card opens the dice chooser (no default dispatch)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
