@@ -1,5 +1,15 @@
-import type { DiceKind, Die, GameState, PlayerId } from '../model/types';
+import type {
+  DiceKind,
+  Die,
+  EffectiveDie,
+  GameState,
+  PlayerId,
+  SlotFill,
+  SlotSpec,
+} from '../model/types';
 import { newDieId } from '../model/dice';
+
+export type { EffectiveDie, SlotFill, SlotSpec } from '../model/types';
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 
@@ -42,21 +52,6 @@ export function heal(g: GameState, player: PlayerId, amount: number): number {
   const before = p.life;
   p.life = Math.min(p.lifeMax, p.life + amount);
   return p.life - before;
-}
-
-export interface SlotSpec {
-  kind: DiceKind;
-}
-
-export interface SlotFill {
-  dieIds: string[];
-}
-
-export interface EffectiveDie {
-  kind: DiceKind;
-  value: number;
-  source: 'real' | 'converted';
-  realIds: string[];
 }
 
 /** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(折算,值5)。

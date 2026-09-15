@@ -1,5 +1,6 @@
 import type { GameState, PlayerId } from '../model/types';
 import { hasActiveSkill } from './skill-state';
+import { paySlots, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
@@ -10,13 +11,6 @@ export function attackDamageBuff(g: GameState, player: PlayerId): number {
     ? p.artifacts.find((a) => a.id === '004')?.count ?? 0
     : 0;
   return Math.max(buffMax, fengmang);
-}
-
-function removeDie(g: GameState, player: PlayerId, dieId: string): void {
-  const p = g.players[player];
-  for (const kind of ['attack', 'defense', 'meditation'] as const) {
-    p.areas[kind] = p.areas[kind].filter((d) => d.id !== dieId);
-  }
 }
 
 export function checkLifeEnd(g: GameState): void {
@@ -38,24 +32,24 @@ export function checkLifeEnd(g: GameState): void {
   }
 }
 
-/** 使用 1 个攻击骰发起攻击：消耗该骰，产生待结算攻击（伤害=点数+攻击伤害加成） */
-export function doAttack(g: GameState, player: PlayerId, dieId: string): void {
+/** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
+export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[]): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
-  const die = g.players[player].areas.attack.find((d) => d.id === dieId);
-  if (!die) throw new Error(`not an attack die: ${dieId}`);
-  removeDie(g, player, dieId);
+  const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots);
+  const effDie = eff[0];
   const buff = attackDamageBuff(g, player);
+  const value = effDie.value + buff;
   g.pendingAttack = {
     attacker: player,
-    value: die.value + buff,
+    value,
     unblockable: g.unblockableThisTurn,
     physical: true,
-    sourceDieId: dieId,
-    sourceValue: die.value,
+    sourceDieId: effDie.realIds[0],
+    sourceValue: effDie.value,
   };
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
-  const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${die.value + buff} 点）` : '';
-  logLine(g, `${pname(player)} 使用 ${die.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${value} 点）` : '';
+  logLine(g, `${pname(player)} 使用 ${effDie.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
   // 011 顿悟·灵能屏障 触发：当对方使用 1 个攻击骰后，可消耗 1 个冥想骰使伤害减半
   if (
     g.pending === null &&
@@ -76,19 +70,17 @@ export function virtualAttack(g: GameState, player: PlayerId, baseValue: number)
   };
 }
 
-/** 结算待处理攻击：给出防御骰=抵挡（无伤害）；不给/不可抵挡=造成伤害 */
-export function resolveBlock(g: GameState, blockDieId?: string): void {
+/** 结算待处理攻击：支付防御骰位=抵挡（无伤害）；不给/不可抵挡=造成伤害 */
+export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   const pa = g.pendingAttack;
   if (!pa) throw new Error('no pending attack');
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   const defender = g.players[defenderId];
   let blocked = false;
-  if (!pa.unblockable && blockDieId) {
-    const die = defender.areas.defense.find((d) => d.id === blockDieId);
-    if (!die) throw new Error(`not a defense die: ${blockDieId}`);
-    removeDie(g, defenderId, blockDieId);
+  if (!pa.unblockable && costSlots && costSlots.length > 0) {
+    const eff = paySlots(g, defenderId, [{ kind: 'defense' }], costSlots);
     blocked = true;
-    logLine(g, `${pname(defenderId)} 用 ${die.value} 点防御骰抵挡了攻击`);
+    logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点防御骰抵挡了攻击`);
   } else {
     const before = defender.life;
     defender.life -= pa.value;

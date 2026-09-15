@@ -76,13 +76,13 @@ describe('charge effects', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '003', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '003', costSlots: [{ dieIds: ['m0'] }] });
     expect(g.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer).toBe(1);
     expect(g.freeDustRise).toBe(1);
     expect(getLegalActions(g).some((a) => a.t === 'dustRise')).toBe(true);
     // 用掉这次额外尘起（再次充能 → 又获得 1 次额外）
     g.players.A.areas.meditation.push({ id: 'm1', value: 3, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '003', meditationDieId: 'm1' });
+    applyAction(g, { t: 'dustRise', artifactId: '003', costSlots: [{ dieIds: ['m1'] }] });
     expect(g.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer).toBe(2);
     expect(g.freeDustRise).toBe(1);
   });
@@ -92,7 +92,7 @@ describe('charge effects', () => {
     skipInitialReroll(g);
     g.players.B.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
     const before = g.players.B.areas.attack.length;
-    applyAction(g, { t: 'dustRise', artifactId: '006', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '006', costSlots: [{ dieIds: ['m0'] }] });
     const wansha = g.players.B.artifacts.find((a) => a.id === '006')!;
     expect(wansha.chargeLayer).toBe(1);
     expect(g.players.B.areas.attack.length).toBe(before + 1);
@@ -145,11 +145,11 @@ describe('中央突破', () => {
     const medIds = g.players.A.areas.meditation.slice(0, 3).map((d) => d.id);
     applyAction(g, { t: 'skill', artifactId: '001', side: 'left', params: { costSlots: medIds.map((id) => ({ dieIds: [id] })), opponentDefenseDieIds: oppDef } });
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
-    applyAction(g, { t: 'attack', dieId: 'a1' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
     expect(g.pendingAttack!.unblockable).toBe(true);
     const def = g.players.B.areas.defense[0];
     const lifeBefore = g.players.B.life;
-    applyAction(g, { t: 'block', dieId: def?.id });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: [def?.id ?? ''] }] });
     expect(g.players.B.life).toBe(lifeBefore - 5);
   });
 
@@ -227,7 +227,7 @@ describe('裁雨流 / 锋芒触发', () => {
     applyAction(g, { t: 'advance' }); // -> main
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'atk1', value: 5, kind: 'attack' });
-    applyAction(g, { t: 'attack', dieId: 'atk1' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk1'] }] });
     applyAction(g, { t: 'block' }); // B does not block
     expect(g.pending).toMatchObject({ kind: 'caiyuliu', player: 'A', dieId: 'atk1', value: 5 });
     applyAction(g, { t: 'caiyuliu', to: 'defense' });
@@ -257,8 +257,8 @@ describe('裁雨流 / 锋芒触发', () => {
     g.players.A.areas.attack.push({ id: 'a2', value: 3, kind: 'attack' });
     g.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
     g.players.B.areas.defense.push({ id: 'd1', value: 3, kind: 'defense' });
-    applyAction(g, { t: 'attack', dieId: 'a1' });
-    applyAction(g, { t: 'block', dieId: 'd1' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['d1'] }] });
     expect(g.pending).toMatchObject({ kind: 'fengmang', player: 'A', defenderId: 'B', value: 5 });
     const lifeBefore = g.players.B.life;
     applyAction(g, { t: 'fengmang', accept: true, attackDieId: 'a2', meditationDieId: 'mm' });
@@ -272,8 +272,8 @@ describe('裁雨流 / 锋芒触发', () => {
     g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
     g.players.B.areas.defense.push({ id: 'd1', value: 3, kind: 'defense' });
-    applyAction(g, { t: 'attack', dieId: 'a1' });
-    applyAction(g, { t: 'block', dieId: 'd1' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['d1'] }] });
     const lifeBefore = g.players.B.life;
     applyAction(g, { t: 'fengmang', accept: false });
     expect(g.players.B.life).toBe(lifeBefore);
@@ -639,7 +639,7 @@ describe('009 孤王', () => {
       { id: 'oa2', value: 3, kind: 'attack' },
     ];
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', costSlots: [{ dieIds: ['m0'] }] });
     expect(g.pending).toEqual({ kind: 'guwangCharge', player: 'A' });
     const legal = getLegalActions(g);
     expect(legal).toContainEqual({ t: 'guwangCharge' });
@@ -654,7 +654,7 @@ describe('009 孤王', () => {
       { id: 'oa2', value: 3, kind: 'attack' },
     ];
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', costSlots: [{ dieIds: ['m0'] }] });
     applyAction(g, { t: 'guwangCharge', dieId: 'oa1' });
     expect(g.players.B.areas.attack).toEqual([
       { id: 'oa1', value: 1, kind: 'attack' },
@@ -668,7 +668,7 @@ describe('009 孤王', () => {
     const g = setup009();
     g.players.B.areas.attack = [{ id: 'oa1', value: 5, kind: 'attack' }];
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', costSlots: [{ dieIds: ['m0'] }] });
     applyAction(g, { t: 'guwangCharge' });
     expect(g.players.B.areas.attack).toEqual([{ id: 'oa1', value: 5, kind: 'attack' }]);
     expect(g.pending).toBeNull();
@@ -678,7 +678,7 @@ describe('009 孤王', () => {
     const g = setup009();
     g.players.B.areas.attack = [];
     g.players.A.areas.meditation.push({ id: 'm0', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '009', meditationDieId: 'm0' });
+    applyAction(g, { t: 'dustRise', artifactId: '009', costSlots: [{ dieIds: ['m0'] }] });
     expect(g.pending).toBeNull();
   });
 
@@ -987,7 +987,7 @@ describe('011 灵能屏障·触发', () => {
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     expect(g.pending).toEqual({ kind: 'dunwuHalve', player: 'B' });
     expect(g.pendingAttack).not.toBeNull();
     expect(g.pendingAttack!.value).toBe(5);
@@ -1001,7 +1001,7 @@ describe('011 灵能屏障·触发', () => {
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     applyAction(g, { t: 'dunwuHalve', accept: true, meditationDieId: 'm1' });
     expect(g.pending).toBeNull();
     expect(g.pendingAttack!.value).toBe(2); // floor(5/2)
@@ -1013,7 +1013,7 @@ describe('011 灵能屏障·触发', () => {
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
     g.players.A.areas.attack = [{ id: 'atk', value: 1, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     applyAction(g, { t: 'dunwuHalve', accept: true, meditationDieId: 'm1' });
     expect(g.pendingAttack!.value).toBe(0); // floor(1/2)
   });
@@ -1023,7 +1023,7 @@ describe('011 灵能屏障·触发', () => {
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     applyAction(g, { t: 'dunwuHalve', accept: false });
     expect(g.pending).toBeNull();
     expect(g.pendingAttack!.value).toBe(5);
@@ -1035,7 +1035,7 @@ describe('011 灵能屏障·触发', () => {
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     g.players.B.areas.meditation = [];
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     expect(g.pending).toBeNull();
     expect(g.pendingAttack!.value).toBe(5);
   });
@@ -1046,7 +1046,7 @@ describe('011 灵能屏障·触发', () => {
     art.activeMarkerSide = 'right'; // 仅激活脉冲侧
     g.players.B.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(g, { t: 'attack', dieId: 'atk' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     expect(g.pending).toBeNull();
     expect(g.pendingAttack!.value).toBe(5);
   });
@@ -1355,6 +1355,73 @@ describe('012 魔女', () => {
       side: 'only',
       params: { to: 'attack', meditationDieIds: ['m1', 'm2', 'm3'] },
     });
+  });
+});
+
+describe('010 真实之剑 折算骰位', () => {
+  it('攻击折算：已激活 010 左（真实之剑）时，2 颗骰折算为 5 点有效攻击（含加成）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    g.players.A.areas.attack = [
+      { id: 'ca1', value: 2, kind: 'attack' },
+      { id: 'ca2', value: 3, kind: 'attack' },
+    ];
+    g.players.A.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['ca1', 'ca2'] }] });
+    expect(g.pendingAttack).toMatchObject({
+      attacker: 'A',
+      value: 6, // 折算有效值 5 + 加成 1
+      physical: true,
+      sourceValue: 5,
+      sourceDieId: 'ca1',
+    });
+    expect(g.players.A.areas.attack).toHaveLength(0);
+  });
+
+  it('攻击折算：未激活 010（真实之剑）时抛错', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    g.players.A.areas.attack = [
+      { id: 'ca1', value: 2, kind: 'attack' },
+      { id: 'ca2', value: 3, kind: 'attack' },
+    ];
+    expect(() => applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['ca1', 'ca2'] }] })).toThrow();
+  });
+
+  it('抵挡折算：防御方已激活 010 时，2 颗骰折算抵挡并无伤消耗', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['010', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // A -> main
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
+    g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    g.players.B.areas.defense = [
+      { id: 'bd1', value: 1, kind: 'defense' },
+      { id: 'bd2', value: 2, kind: 'defense' },
+    ];
+    const before = g.players.B.life;
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['bd1', 'bd2'] }] });
+    expect(g.players.B.life).toBe(before);
+    expect(g.players.B.areas.defense).toHaveLength(0);
+    expect(g.pendingAttack).toBeNull();
+  });
+
+  it('抵挡折算：未激活 010 时抛错且不消耗骰子', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['004', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // A -> main
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
+    g.players.B.areas.defense = [
+      { id: 'bd1', value: 1, kind: 'defense' },
+      { id: 'bd2', value: 2, kind: 'defense' },
+    ];
+    expect(() => applyAction(g, { t: 'block', costSlots: [{ dieIds: ['bd1', 'bd2'] }] })).toThrow();
+    expect(g.players.B.areas.defense).toHaveLength(2);
+    expect(g.pendingAttack).not.toBeNull();
   });
 });
 

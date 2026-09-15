@@ -219,12 +219,12 @@ describe('renderGame (interaction)', () => {
     dieEl!.click();
     expect(onAction).not.toHaveBeenCalled();
     expect(ui.pendingConfirm).not.toBeNull();
-    expect(ui.pendingConfirm!.action).toEqual({ t: 'attack', dieId: die.id });
+    expect(ui.pendingConfirm!.action).toEqual({ t: 'attack', costSlots: [{ dieIds: [die.id] }] });
 
     const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
     expect(confirmBtn).not.toBeNull();
     confirmBtn!.click();
-    expect(onAction).toHaveBeenCalledWith({ t: 'attack', dieId: die.id });
+    expect(onAction).toHaveBeenCalledWith({ t: 'attack', costSlots: [{ dieIds: [die.id] }] });
   });
 
   it('clicking a parameterized skill card opens the dice chooser (no default dispatch)', () => {
@@ -406,7 +406,7 @@ describe('renderGame (interaction)', () => {
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // -> main
     state.players.A.areas.attack.push({ id: 'atk', value: 5, kind: 'attack' });
-    applyAction(state, { t: 'attack', dieId: 'atk' });
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     renderGame(state, root, hooksFor());
     const turn = root.querySelector('.hint-turn')!;
     expect(turn.textContent).toContain('玩家B'); // 轮到防御方
@@ -563,7 +563,7 @@ describe('renderGame (interaction)', () => {
       { id: 'oa1', value: 5, kind: 'attack' },
       { id: 'oa2', value: 3, kind: 'attack' },
     ];
-    applyAction(state, { t: 'dustRise', artifactId: '009', meditationDieId: 'mm' });
+    applyAction(state, { t: 'dustRise', artifactId: '009', costSlots: [{ dieIds: ['mm'] }] });
     expect(state.pending!.kind).toBe('guwangCharge');
 
     renderGame(state, root, hooksFor());
@@ -725,7 +725,7 @@ describe('renderGame (interaction)', () => {
     state.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     state.players.B.areas.meditation = [{ id: 'bm1', value: 3, kind: 'meditation' }];
     state.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
-    applyAction(state, { t: 'attack', dieId: 'atk' });
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     expect(state.pending!.kind).toBe('dunwuHalve');
 
     renderGame(state, root, hooksFor());

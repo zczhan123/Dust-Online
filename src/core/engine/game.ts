@@ -5,15 +5,23 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage, applyDeferredTrueDamage } from './combat';
-import { setDieValue, heal } from './effects';
+import { setDieValue, heal, paySlots } from './effects';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
-import type { Action, GameState, PlayerId, PlayerState } from '../model/types';
+import type { Action, GameState, PlayerId, PlayerState, SlotFill } from '../model/types';
 
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
   const rng = new SeededRng(g.rngState);
   fn(rng);
   g.rngState = rng.state();
+}
+
+/** 若骰位中出现“折算”（2 颗真骰）填法，则要求该玩家已激活 010 深红的「真实之剑」 */
+function assertConversionAllowed(g: GameState, player: PlayerId, fills?: SlotFill[]): void {
+  const usesConversion = (fills ?? []).some((f) => f.dieIds.length === 2);
+  if (usesConversion && !hasActiveSkill(g.players[player], 'shenhong.sword')) {
+    throw new Error('conversion requires 真实之剑');
+  }
 }
 
 export function beginTurn(g: GameState): void {
@@ -125,15 +133,16 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   const hasMed = p.areas.meditation.length > 0;
   const canNormal = (g.freeDustRise > 0 || !g.dustRiseNormalUsed) && hasMed;
   const medId = hasMed ? p.areas.meditation[0].id : undefined; // 默认候选（仅供 AI）；UI 会让玩家自选
+  const medSlot = medId ? [{ dieIds: [medId] }] : undefined;
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (a.column === 3) {
-      if (canNormal && medId) acts.push({ t: 'dustRise', artifactId: a.id, meditationDieId: medId });
+      if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, costSlots: medSlot });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
-      if (canNormal && medId) {
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', meditationDieId: medId });
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', meditationDieId: medId });
+      if (canNormal && medSlot) {
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', costSlots: medSlot });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', costSlots: medSlot });
       }
       if (p.hasDustSeal) {
         acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
@@ -141,7 +150,7 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       }
     } else {
       const other = a.activeMarkerSide === 'left' ? 'right' : 'left';
-      if (canNormal && medId) acts.push({ t: 'dustRise', artifactId: a.id, side: other, meditationDieId: medId });
+      if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, side: other, costSlots: medSlot });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
     }
   }
@@ -326,7 +335,9 @@ export function getLegalActions(g: GameState): Action[] {
     const defender: PlayerId = g.pendingAttack.attacker === 'A' ? 'B' : 'A';
     const acts: Action[] = [{ t: 'block' }];
     if (!g.pendingAttack.unblockable) {
-      for (const d of g.players[defender].areas.defense) acts.push({ t: 'block', dieId: d.id });
+      for (const d of g.players[defender].areas.defense) {
+        acts.push({ t: 'block', costSlots: [{ dieIds: [d.id] }] });
+      }
     }
     return acts;
   }
@@ -349,7 +360,7 @@ export function getLegalActions(g: GameState): Action[] {
       return [...dustRiseActions(g, g.activePlayer), { t: 'advance' }];
     case 'main': {
       const acts: Action[] = [{ t: 'advance' }];
-      for (const d of p.areas.attack) acts.push({ t: 'attack', dieId: d.id });
+      for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
       acts.push(...activateSkillActions(g, p));
       return acts;
     }
@@ -427,10 +438,9 @@ export function applyAction(g: GameState, action: Action): GameState {
         } else {
           throw new Error('no dust rise action available');
         }
-        const medId = action.meditationDieId;
-        if (!medId) throw new Error('meditationDieId required');
-        if (!p.areas.meditation.some((d) => d.id === medId)) throw new Error('not your meditation die');
-        p.areas.meditation = p.areas.meditation.filter((d) => d.id !== medId);
+        assertConversionAllowed(g, g.activePlayer, action.costSlots);
+        if (!action.costSlots || action.costSlots.length === 0) throw new Error('costSlots required');
+        paySlots(g, g.activePlayer, [{ kind: 'meditation' }], action.costSlots);
       }
       const desc = applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
       logLine(
@@ -444,12 +454,16 @@ export function applyAction(g: GameState, action: Action): GameState {
     case 'attack':
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
-      doAttack(g, g.activePlayer, action.dieId);
+      assertConversionAllowed(g, g.activePlayer, action.costSlots);
+      doAttack(g, g.activePlayer, action.costSlots);
       break;
-    case 'block':
+    case 'block': {
       if (!g.pendingAttack) throw new Error('no pending attack');
-      resolveBlock(g, action.dieId);
+      const defender: PlayerId = g.pendingAttack.attacker === 'A' ? 'B' : 'A';
+      assertConversionAllowed(g, defender, action.costSlots);
+      resolveBlock(g, action.costSlots);
       break;
+    }
     case 'caiyuliu': {
       const pd = g.pending;
       if (!pd || pd.kind !== 'caiyuliu') throw new Error('no caiyuliu pending');

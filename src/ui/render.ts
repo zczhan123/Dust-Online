@@ -173,7 +173,8 @@ function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
 function dustRiseActionLabel(ctx: Ctx, act: DustRiseAction): string {
   const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === act.artifactId);
   const base = art ? dustRiseLabel(art, act) : '尘起';
-  const v = dieValue(ctx.state, act.meditationDieId);
+  const firstId = act.costSlots?.[0]?.dieIds?.[0];
+  const v = dieValue(ctx.state, firstId);
   if (!act.useSeal && v !== undefined) return `${base}：消耗 1 颗冥想骰（${v}点）`;
   return base;
 }
@@ -476,8 +477,12 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
         });
       }
     } else {
-      const attackAction = ctx.legal.find((x) => x.t === 'attack' && x.dieId === d.id);
-      const blockAction = ctx.legal.find((x) => x.t === 'block' && x.dieId === d.id);
+      const attackAction = ctx.legal.find(
+        (x) => x.t === 'attack' && x.costSlots[0]?.dieIds[0] === d.id,
+      );
+      const blockAction = ctx.legal.find(
+        (x) => x.t === 'block' && x.costSlots?.[0]?.dieIds[0] === d.id,
+      );
       if (attackAction) {
         die.classList.add('clickable');
         die.dataset.act = 'attack';
@@ -652,12 +657,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'advance':
       return advanceLabel(state.phase);
     case 'attack': {
-      const v = findDie(state, a.dieId)?.value ?? '?';
+      const v = findDie(state, a.costSlots[0]?.dieIds[0])?.value ?? '?';
       return `攻击：用 ${v} 点攻击骰`;
     }
     case 'block': {
-      if (!a.dieId) return '不抵挡';
-      const v = findDie(state, a.dieId)?.value ?? '?';
+      const id = a.costSlots?.[0]?.dieIds?.[0];
+      if (!id) return '不抵挡';
+      const v = findDie(state, id)?.value ?? '?';
       return `抵挡：用 ${v} 点防御骰`;
     }
     case 'dustRise': {
@@ -914,7 +920,7 @@ function confirmSelection(ctx: Ctx): void {
         t: 'dustRise',
         artifactId: sel.artifactId,
         side: sel.side === 'only' ? undefined : sel.side,
-        meditationDieId: medId,
+        costSlots: medId ? [{ dieIds: [medId] }] : undefined,
       };
       hooks.ui.selection = null;
       hooks.propose(built, dustRiseActionLabel(ctx, built));

@@ -8,7 +8,7 @@ describe('combat', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const die = g.players.A.areas.attack[0];
     const before = totalDice(g.players.A);
-    doAttack(g, 'A', die.id);
+    doAttack(g, 'A', [{ dieIds: [die.id] }]);
     expect(g.pendingAttack).toMatchObject({
       attacker: 'A',
       value: die.value,
@@ -23,10 +23,10 @@ describe('combat', () => {
   it('blocking prevents damage and consumes the defense die', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const atk = g.players.A.areas.attack[0];
-    doAttack(g, 'A', atk.id);
+    doAttack(g, 'A', [{ dieIds: [atk.id] }]);
     const def = g.players.B.areas.defense[0];
     const before = g.players.B.life;
-    resolveBlock(g, def.id);
+    resolveBlock(g, [{ dieIds: [def.id] }]);
     expect(g.players.B.life).toBe(before);
     expect(g.pendingAttack).toBeNull();
   });
@@ -34,7 +34,7 @@ describe('combat', () => {
   it('not blocking deals damage equal to the attack value', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const atk = g.players.A.areas.attack[0];
-    doAttack(g, 'A', atk.id);
+    doAttack(g, 'A', [{ dieIds: [atk.id] }]);
     const value = g.pendingAttack!.value;
     const before = g.players.B.life;
     resolveBlock(g);
@@ -44,7 +44,7 @@ describe('combat', () => {
   it('logs a readable damage line', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const atk = g.players.A.areas.attack[0];
-    doAttack(g, 'A', atk.id);
+    doAttack(g, 'A', [{ dieIds: [atk.id] }]);
     resolveBlock(g);
     const text = g.log.map((l) => l.text).join('\n');
     expect(text).toContain('玩家A 使用');
@@ -70,8 +70,8 @@ describe('combat', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     g.players.A.areas.attack.push({ id: 'x1', value: 3, kind: 'attack' });
     g.players.A.areas.attack.push({ id: 'x2', value: 4, kind: 'attack' });
-    doAttack(g, 'A', 'x1');
-    expect(() => doAttack(g, 'A', 'x2')).toThrow();
+    doAttack(g, 'A', [{ dieIds: ['x1'] }]);
+    expect(() => doAttack(g, 'A', [{ dieIds: ['x2'] }])).toThrow();
   });
 });
 

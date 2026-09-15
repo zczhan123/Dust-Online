@@ -17,12 +17,27 @@ export interface Die {
   kind: DiceKind;
 }
 
+export interface SlotSpec {
+  kind: DiceKind;
+}
+
+export interface SlotFill {
+  dieIds: string[];
+}
+
+export interface EffectiveDie {
+  kind: DiceKind;
+  value: number;
+  source: 'real' | 'converted';
+  realIds: string[];
+}
+
 export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
-  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; meditationDieId?: string }
-  | { t: 'attack'; dieId: string }
-  | { t: 'block'; dieId?: string }
+  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; costSlots?: SlotFill[] }
+  | { t: 'attack'; costSlots: SlotFill[] }
+  | { t: 'block'; costSlots?: SlotFill[] }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
   | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
   | { t: 'guwangCharge'; dieId?: string }

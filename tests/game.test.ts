@@ -14,7 +14,7 @@ describe('game actions and turn flow', () => {
     skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'med-a', value: 2, kind: 'meditation' });
     const before = g.players.A.areas.meditation.length;
-    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'med-a' });
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', costSlots: [{ dieIds: ['med-a'] }] });
     expect(g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide).toBe('left');
     expect(g.players.A.areas.meditation.length).toBe(before - 1);
     expect(g.dustRiseActed).toBe(true);
@@ -28,7 +28,7 @@ describe('game actions and turn flow', () => {
       { id: 'q1', value: 2, kind: 'meditation' },
       { id: 'q2', value: 5, kind: 'meditation' },
     ];
-    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'q2' });
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', costSlots: [{ dieIds: ['q2'] }] });
     expect(g.players.A.areas.meditation.map((d) => d.id)).toEqual(['q1']);
   });
 
@@ -44,7 +44,7 @@ describe('game actions and turn flow', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'med-a', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', meditationDieId: 'med-a' });
+    applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', costSlots: [{ dieIds: ['med-a'] }] });
     applyAction(g, { t: 'advance' });
     expect(g.dustfall).toBe(0);
     expect(g.phase).toBe('main');
@@ -55,7 +55,7 @@ describe('game actions and turn flow', () => {
     skipInitialReroll(g);
     g.players.B.hasDustSeal = true; // B 持有尘印
     g.players.B.areas.meditation.push({ id: 'med-b', value: 2, kind: 'meditation' });
-    applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left', meditationDieId: 'med-b' });
+    applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left', costSlots: [{ dieIds: ['med-b'] }] });
     applyAction(g, { t: 'dustRise', artifactId: '005', side: 'left', useSeal: true });
     expect(g.players.B.hasDustSeal).toBe(false);
     expect(g.players.B.artifacts.find((a) => a.id === '005')!.activeMarkerSide).toBe('left');
@@ -77,17 +77,17 @@ describe('game actions and turn flow', () => {
     skipInitialReroll(g);
     applyAction(g, { t: 'advance' });
     const atk = g.players.A.areas.attack[0];
-    applyAction(g, { t: 'attack', dieId: atk.id });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: [atk.id] }] });
     const actions = getLegalActions(g);
-    expect(actions.some((a) => a.t === 'block' && a.dieId === undefined)).toBe(true);
-    expect(actions.some((a) => a.t === 'block' && a.dieId !== undefined)).toBe(true);
+    expect(actions.some((a) => a.t === 'block' && a.costSlots === undefined)).toBe(true);
+    expect(actions.some((a) => a.t === 'block' && a.costSlots !== undefined)).toBe(true);
   });
 
   it('attack outside main phase throws', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
     const atk = g.players.A.areas.attack[0];
-    expect(() => applyAction(g, { t: 'attack', dieId: atk.id })).toThrow();
+    expect(() => applyAction(g, { t: 'attack', costSlots: [{ dieIds: [atk.id] }] })).toThrow();
   });
 
   it('ending main starts the opponent turn (still first round -> dustRise, no refill)', () => {
