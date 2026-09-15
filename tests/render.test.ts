@@ -5,7 +5,13 @@ import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
 
-const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null, pendingConfirm: null, payPanel: null });
+const freshUi = (): UiState => ({
+  rerollSelected: new Set(),
+  selection: null,
+  pendingConfirm: null,
+  payPanel: null,
+  dustFlow: null,
+});
 
 const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => {
   const ui = freshUi();
@@ -411,22 +417,6 @@ describe('renderGame (interaction)', () => {
     }
     expect(root.querySelectorAll('.player--self .die.die-A').length).toBe(7); // A will 7
     expect(root.querySelectorAll('.player--enemy .die.die-B').length).toBe(8); // B will 8
-  });
-
-  it('clicking a dust-rise button opens the meditation-die chooser (no auto-pick)', () => {
-    const state = createGame({ seed: 1, firstPlayer: 'A' });
-    skipInitialReroll(state);
-    state.players.A.areas.meditation.push({ id: 'mm', value: 2, kind: 'meditation' });
-    const { ui, onAction } = mount(state, root);
-    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.btn')).find(
-      (b) => b.dataset.act === 'dustRise',
-    );
-    expect(btn).toBeTruthy();
-    btn!.click();
-    expect(onAction).not.toHaveBeenCalled();
-    expect(ui.selection).not.toBeNull();
-    expect(ui.selection!.key).toBe('@dustRise');
-    expect(root.querySelector('.selector')).not.toBeNull();
   });
 
   it('shows the defender as the acting player while an attack is pending (colored)', () => {
@@ -1013,5 +1003,120 @@ describe('renderGame (interaction)', () => {
       side: 'left',
       params: { costSlots: [{ dieIds: ['nd1'] }] },
     });
+  });
+});
+
+describe('dust-rise 2-step flow', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  const dustState = (hero: [string, string, string] = ['001', '002', '003']) => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: hero });
+    skipInitialReroll(state);
+    if (state.players.A.areas.meditation.length === 0) {
+      state.players.A.areas.meditation.push({ id: 'dm', value: 3, kind: 'meditation' });
+    }
+    return state;
+  };
+
+  const clickEntry = (label: string): void => {
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
+      (b) => b.textContent === label,
+    );
+    expect(btn, `entry ${label}`).toBeTruthy();
+    btn!.click();
+  };
+
+  /** 打开尘起条目；若是「激活」则自动选左侧进入支付步骤 */
+  const openPay = (label: string): void => {
+    clickEntry(label);
+    const side = root.querySelector<HTMLButtonElement>('.dustflow-side-btn[data-side="left"]');
+    if (side) side.click();
+  };
+
+  it('shows one 激活「雨切」 entry, no ·左/·右 suffix, and no card-face dust buttons', () => {
+    renderGame(dustState(), root, hooksFor());
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn'));
+    expect(buttons.some((b) => b.textContent === '激活「雨切」')).toBe(true);
+    expect(root.textContent ?? '').not.toContain('激活·');
+    expect(root.querySelectorAll('.card-actions').length).toBe(0);
+  });
+
+  it('opens side step by skill name, then pay step, and dispatches on a meditation die', () => {
+    const state = dustState();
+    const med = state.players.A.areas.meditation[0];
+    const { ui, onAction } = mount(state, root);
+
+    clickEntry('激活「雨切」');
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.dustFlow).not.toBeNull();
+    expect(ui.dustFlow!.step).toBe('side');
+
+    const sideBox = root.querySelector('.dustflow-side');
+    expect(sideBox).not.toBeNull();
+    expect(sideBox!.textContent ?? '').toContain('中央突破');
+    expect(sideBox!.textContent ?? '').toContain('裁雨流');
+
+    const leftBtn = root.querySelector<HTMLButtonElement>(
+      '.dustflow-side-btn[data-side="left"]',
+    )!;
+    expect(leftBtn.textContent).toBe('中央突破');
+    leftBtn.click();
+    expect(ui.dustFlow!.step).toBe('pay');
+    expect(ui.dustFlow!.side).toBe('left');
+
+    const dieEl = root.querySelector<HTMLElement>(`.dustflow .pay-die[data-id="${med.id}"]`)!;
+    expect(dieEl).not.toBeNull();
+    dieEl.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'dustRise',
+      artifactId: '001',
+      side: 'left',
+      costSlots: [{ dieIds: [med.id] }],
+    });
+    expect(ui.dustFlow).toBeNull();
+  });
+
+  it('offers 使用尘印标记 only when the active player holds the seal', () => {
+    mount(dustState(), root);
+    openPay('激活「雨切」');
+    expect(root.querySelector('.dustflow')!.textContent ?? '').not.toContain('使用尘印标记');
+
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    const state = dustState();
+    state.players.A.hasDustSeal = true;
+    mount(state, root);
+    openPay('激活「雨切」');
+    expect(root.querySelector('.dustflow')!.textContent ?? '').toContain('使用尘印标记');
+  });
+
+  it('offers 使用「真实之剑」置换能力骰 only when 010 真实之剑 is active', () => {
+    mount(dustState(), root);
+    openPay('激活「雨切」');
+    expect(root.querySelector('.dustflow')!.textContent ?? '').not.toContain('真实之剑');
+
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    const state = dustState(['010', '002', '003']);
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    mount(state, root);
+    openPay('激活「游龙」');
+    expect(root.querySelector('.dustflow')!.textContent ?? '').toContain(
+      '使用「真实之剑」置换能力骰',
+    );
+  });
+
+  it('labels a column-3 artifact 充能「明镜」 and skips the side step', () => {
+    const { ui } = mount(dustState(), root);
+    clickEntry('充能「明镜」');
+    expect(ui.dustFlow).not.toBeNull();
+    expect(ui.dustFlow!.step).toBe('pay');
+    expect(ui.dustFlow!.kind).toBe('charge');
+    expect(root.querySelector('.dustflow-side')).toBeNull();
+    expect(root.querySelector('.dustflow-pay')).not.toBeNull();
   });
 });

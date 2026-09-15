@@ -52,6 +52,15 @@ export interface UiState {
     slotModes: ('real' | 'convert')[];
   };
   pendingConfirm: null | { action: Action; label: string };
+  /** 尘起 2 步流程：选择（激活时）启动侧 → 支付代价 */
+  dustFlow: null | {
+    artifactId: string;
+    kind: 'activate' | 'switch' | 'charge';
+    side?: 'left' | 'right';
+    step: 'side' | 'pay';
+    /** 「真实之剑」置换：已选中的 2 颗能力骰 */
+    convertPick?: string[];
+  };
   payPanel: null | {
     label: string;
     payer: PlayerId;
@@ -87,6 +96,8 @@ interface Ctx {
   payPanelOpen: boolean;
   /** 技能选择器处于「slots」步骤时，区域骰由选择器内部处理，禁用区域骰点击 */
   slotsStepOpen: boolean;
+  /** 尘起流程开启时禁用区域骰点击，避免与流程内选骰冲突 */
+  dustFlowOpen: boolean;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -178,26 +189,24 @@ function skillLabel(
 type DustRiseAction = Extract<Action, { t: 'dustRise' }>;
 type SkillAction = Extract<Action, { t: 'skill' }>;
 
-function dustRiseLabel(a: Artifact, act: DustRiseAction): string {
-  let label: string;
-  if (a.column === 3) {
-    label = '充能';
-  } else if (a.activeMarkerSide == null) {
-    label = act.side === 'right' ? '激活·右' : '激活·左';
-  } else {
-    label = '切换到另一侧';
-  }
-  if (act.useSeal) label += '（尘印）';
-  return label;
+const DUST_KIND_LABEL: Record<'activate' | 'switch' | 'charge', string> = {
+  activate: '激活',
+  switch: '切换',
+  charge: '充能',
+};
+
+function dustFlowKind(a: Artifact): 'activate' | 'switch' | 'charge' {
+  if (a.column === 3) return 'charge';
+  return a.activeMarkerSide == null ? 'activate' : 'switch';
 }
 
-function dustRiseActionLabel(ctx: Ctx, act: DustRiseAction): string {
-  const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === act.artifactId);
-  const base = art ? dustRiseLabel(art, act) : '尘起';
-  const firstId = act.costSlots?.[0]?.dieIds?.[0];
-  const v = dieValue(ctx.state, firstId);
-  if (!act.useSeal && v !== undefined) return `${base}：消耗 1 颗冥想骰（${v}点）`;
-  return base;
+function dustSideSkillName(artifactId: string, side: 'left' | 'right'): string {
+  const text = ARTIFACT_TEXT[artifactId];
+  return text?.skills.find((s) => s.side === side)?.name ?? (side === 'left' ? '左侧' : '右侧');
+}
+
+function dustEntryLabel(a: Artifact): string {
+  return `${DUST_KIND_LABEL[dustFlowKind(a)]}「${a.name}」`;
 }
 
 function skillName(state: GameState, a: SkillAction): string {
@@ -302,18 +311,12 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   ctx.hooks.requestRender();
 }
 
-function startDustRiseSelection(ctx: Ctx, act: DustRiseAction): void {
-  ctx.hooks.ui.selection = {
-    key: '@dustRise',
-    artifactId: act.artifactId,
-    side: act.side ?? 'left',
-    stepIndex: 0,
-    chosenDice: [],
-    options: [],
-    currentSel: new Set<string>(),
-    numbers: [],
-    slots: [],
-    slotModes: [],
+function openDustFlow(ctx: Ctx, a: Artifact): void {
+  const kind = dustFlowKind(a);
+  ctx.hooks.ui.dustFlow = {
+    artifactId: a.id,
+    kind,
+    step: kind === 'activate' ? 'side' : 'pay',
   };
   ctx.hooks.requestRender();
 }
@@ -450,29 +453,6 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     card.appendChild(skills);
   }
 
-  const dustActions = ctx.legal.filter(
-    (x): x is DustRiseAction => x.t === 'dustRise' && x.artifactId === a.id,
-  );
-  if (dustActions.length) {
-    const actions = el('div', 'card-actions');
-    for (const act of dustActions) {
-      const label = dustRiseLabel(a, act);
-      if (act.useSeal) {
-        actions.appendChild(button(label, act, ctx.hooks));
-      } else {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn';
-        b.dataset.act = 'dustRise';
-        b.textContent = label;
-        b.title = '选择 1 颗冥想骰作为尘起代价';
-        b.addEventListener('click', () => startDustRiseSelection(ctx, act));
-        actions.appendChild(b);
-      }
-    }
-    card.appendChild(actions);
-  }
-
   return card;
 }
 
@@ -499,8 +479,8 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    if (ctx.payPanelOpen || ctx.slotsStepOpen) {
-      // 折算支付面板 / 技能代价骰位面板开启时，区域骰不可点击
+    if (ctx.payPanelOpen || ctx.slotsStepOpen || ctx.dustFlowOpen) {
+      // 折算支付面板 / 技能代价骰位面板 / 尘起流程开启时，区域骰不可点击
     } else if (diceStep) {
       const step = diceStep;
       const selectable = !step.filter || step.filter(d);
@@ -709,7 +689,7 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     }
     case 'dustRise': {
       const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
-      return art ? dustRiseLabel(art, a) : '尘起';
+      return art ? dustEntryLabel(art) : '尘起';
     }
     case 'caiyuliu':
       return a.to === 'defense' ? '移到防御骰区' : a.to === 'meditation' ? '移到冥想骰区' : '不移动';
@@ -797,6 +777,17 @@ function rerollButton(ctx: Ctx): HTMLButtonElement | null {
   return b;
 }
 
+function dustEntryButton(ctx: Ctx, a: Artifact): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn btn-dust';
+  b.dataset.act = 'dustRise';
+  b.dataset.artifact = a.id;
+  b.textContent = dustEntryLabel(a);
+  b.addEventListener('click', () => openDustFlow(ctx, a));
+  return b;
+}
+
 function operationList(ctx: Ctx): HTMLElement {
   const box = el('div', 'actionlist');
 
@@ -840,6 +831,7 @@ function operationList(ctx: Ctx): HTMLElement {
   }
 
   const seenSkill = new Set<string>();
+  const seenDust = new Set<string>();
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
     if (a.t === 'skill') {
@@ -849,38 +841,15 @@ function operationList(ctx: Ctx): HTMLElement {
       box.appendChild(skillButton(ctx, a));
       continue;
     }
-    const label = actionLabel(ctx, a);
-    if (label === null) continue;
-    if (a.t === 'dustRise' && !a.useSeal) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn';
-      b.dataset.act = 'dustRise';
-      b.textContent = label;
-      b.title = '选择 1 颗冥想骰作为尘起代价';
-      b.addEventListener('click', () => startDustRiseSelection(ctx, a));
-      box.appendChild(b);
-      if (convertAvailable(state, state.activePlayer)) {
-        box.appendChild(
-          convertButton(`折算：${label}`, () =>
-            openPayPanel(ctx, {
-              label,
-              payer: state.activePlayer,
-              kinds: ['meditation'],
-              modes: ['convert'],
-              slots: [[]],
-              build: (s) => ({
-                t: 'dustRise',
-                artifactId: a.artifactId,
-                side: a.side,
-                costSlots: s,
-              }),
-            }),
-          ),
-        );
-      }
+    if (a.t === 'dustRise') {
+      if (seenDust.has(a.artifactId)) continue;
+      seenDust.add(a.artifactId);
+      const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+      if (art) box.appendChild(dustEntryButton(ctx, art));
       continue;
     }
+    const label = actionLabel(ctx, a);
+    if (label === null) continue;
     box.appendChild(button(label, a, ctx.hooks));
   }
   if (box.childElementCount === 0) {
@@ -1099,19 +1068,6 @@ function confirmSelection(ctx: Ctx): void {
 
   const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
   if (sel.stepIndex >= nextSteps.length) {
-    if (sel.key === '@dustRise') {
-      const medId = sel.chosenDice.flat()[0];
-      const built: DustRiseAction = {
-        t: 'dustRise',
-        artifactId: sel.artifactId,
-        side: sel.side === 'only' ? undefined : sel.side,
-        costSlots: medId ? [{ dieIds: [medId] }] : undefined,
-      };
-      hooks.ui.selection = null;
-      hooks.propose(built, dustRiseActionLabel(ctx, built));
-      hooks.requestRender();
-      return;
-    }
     const numberIdx = nextSteps
       .map((s, i) => (s.kind === 'number' ? i : -1))
       .filter((i) => i >= 0);
@@ -1365,6 +1321,187 @@ function openPayPanel(ctx: Ctx, panel: PayPanel): void {
   ctx.hooks.requestRender();
 }
 
+type DustFlow = NonNullable<UiState['dustFlow']>;
+
+function totalDice(p: PlayerState): number {
+  return p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length;
+}
+
+/** 当前是否仍存在某神器的指定尘起支付变体（真骰 / 尘印） */
+function hasDustVariant(ctx: Ctx, artifactId: string, variant: 'dice' | 'seal'): boolean {
+  return ctx.legal.some(
+    (x) =>
+      x.t === 'dustRise' &&
+      x.artifactId === artifactId &&
+      (variant === 'seal' ? x.useSeal === true : !x.useSeal && (x.costSlots?.length ?? 0) > 0),
+  );
+}
+
+function dispatchDustPay(ctx: Ctx, dieIds: string[]): void {
+  const flow = ctx.hooks.ui.dustFlow;
+  if (!flow) return;
+  const action: DustRiseAction = { t: 'dustRise', artifactId: flow.artifactId, costSlots: [{ dieIds }] };
+  if (flow.side) action.side = flow.side;
+  ctx.hooks.ui.dustFlow = null;
+  ctx.hooks.onAction(action);
+}
+
+function dispatchDustSeal(ctx: Ctx): void {
+  const flow = ctx.hooks.ui.dustFlow;
+  if (!flow) return;
+  const action: DustRiseAction = { t: 'dustRise', artifactId: flow.artifactId, useSeal: true };
+  if (flow.side) action.side = flow.side;
+  ctx.hooks.ui.dustFlow = null;
+  ctx.hooks.onAction(action);
+}
+
+function dustCancelButton(ctx: Ctx): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn btn-cancel';
+  b.dataset.act = 'dustCancel';
+  b.textContent = '取消';
+  b.addEventListener('click', () => {
+    ctx.hooks.ui.dustFlow = null;
+    ctx.hooks.requestRender();
+  });
+  return b;
+}
+
+function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
+  const flow = ctx.hooks.ui.dustFlow as DustFlow;
+  const wrap = el('div', 'dustflow-side');
+  const hint = el('div', 'dustflow-hint');
+  hint.textContent = '选择启动的一侧：';
+  wrap.appendChild(hint);
+  for (const side of ['left', 'right'] as const) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn dustflow-side-btn';
+    b.dataset.side = side;
+    b.textContent = dustSideSkillName(art.id, side);
+    b.addEventListener('click', () => {
+      flow.side = side;
+      flow.step = 'pay';
+      ctx.hooks.requestRender();
+    });
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
+  const flow = ctx.hooks.ui.dustFlow as DustFlow;
+  const wrap = el('div', 'dustflow-pay');
+
+  if (flow.convertPick) {
+    const hint = el('div', 'dustflow-hint');
+    hint.textContent = `使用「真实之剑」置换：选择 2 颗能力骰（已选 ${flow.convertPick.length}/2）`;
+    wrap.appendChild(hint);
+    const diceBox = el('div', 'pay-dice');
+    for (const k of AREA_ORDER) {
+      for (const d of payer.areas[k]) {
+        const die = el('span', 'pay-die');
+        die.dataset.id = d.id;
+        die.dataset.kind = d.kind;
+        die.dataset.value = String(d.value);
+        die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+        die.classList.add('clickable');
+        if (flow.convertPick.includes(d.id)) die.classList.add('selected');
+        die.addEventListener('click', () => {
+          const pick = flow.convertPick;
+          if (!pick) return;
+          const i = pick.indexOf(d.id);
+          if (i >= 0) pick.splice(i, 1);
+          else if (pick.length < 2) pick.push(d.id);
+          if (pick.length === 2) {
+            dispatchDustPay(ctx, [...pick]);
+            return;
+          }
+          ctx.hooks.requestRender();
+        });
+        diceBox.appendChild(die);
+      }
+    }
+    wrap.appendChild(diceBox);
+    return wrap;
+  }
+
+  const medSection = el('div', 'dustflow-section');
+  if (hasDustVariant(ctx, flow.artifactId, 'dice')) {
+    const medLabel = el('div', 'dustflow-label');
+    medLabel.textContent = '用 1 颗冥想骰';
+    medSection.appendChild(medLabel);
+    const medDice = el('div', 'pay-dice');
+    for (const d of payer.areas.meditation) {
+      const die = el('span', 'pay-die');
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = String(d.value);
+      die.classList.add('clickable');
+      die.addEventListener('click', () => dispatchDustPay(ctx, [d.id]));
+      medDice.appendChild(die);
+    }
+    if (payer.areas.meditation.length === 0) {
+      const empty = el('div', 'dustflow-empty');
+      empty.textContent = '（无冥想骰）';
+      medDice.appendChild(empty);
+    }
+    medSection.appendChild(medDice);
+  }
+  wrap.appendChild(medSection);
+
+  const options = el('div', 'dustflow-options');
+  if (payer.hasDustSeal && hasDustVariant(ctx, flow.artifactId, 'seal')) {
+    const seal = document.createElement('button');
+    seal.type = 'button';
+    seal.className = 'btn btn-dust-seal';
+    seal.dataset.act = 'dustSeal';
+    seal.textContent = '使用尘印标记';
+    seal.addEventListener('click', () => dispatchDustSeal(ctx));
+    options.appendChild(seal);
+  }
+  if (
+    hasDustVariant(ctx, flow.artifactId, 'dice') &&
+    hasActiveSkill(payer, 'shenhong.sword') &&
+    totalDice(payer) >= 2
+  ) {
+    const conv = document.createElement('button');
+    conv.type = 'button';
+    conv.className = 'btn btn-dust-convert';
+    conv.dataset.act = 'dustConvert';
+    conv.textContent = '使用「真实之剑」置换能力骰';
+    conv.addEventListener('click', () => {
+      flow.convertPick = [];
+      ctx.hooks.requestRender();
+    });
+    options.appendChild(conv);
+  }
+  wrap.appendChild(options);
+  return wrap;
+}
+
+function dustFlowView(ctx: Ctx): HTMLElement {
+  const flow = ctx.hooks.ui.dustFlow as DustFlow;
+  const payer = ctx.state.players[ctx.state.activePlayer];
+  const art = payer.artifacts.find((a) => a.id === flow.artifactId);
+  const box = el('div', 'dustflow');
+  if (!art) {
+    box.appendChild(dustCancelButton(ctx));
+    return box;
+  }
+  const title = el('div', 'dustflow-title');
+  title.textContent = `${DUST_KIND_LABEL[flow.kind]}「${art.name}」`;
+  box.appendChild(title);
+
+  if (flow.step === 'side') box.appendChild(dustSideStep(ctx, art));
+  else box.appendChild(dustPayStep(ctx, payer));
+
+  box.appendChild(dustCancelButton(ctx));
+  return box;
+}
+
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   const legal = getLegalActions(state);
   const selfId: PlayerId = state.activePlayer;
@@ -1403,6 +1540,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     selectionOwner,
     payPanelOpen: hooks.ui.payPanel != null,
     slotsStepOpen,
+    dustFlowOpen: hooks.ui.dustFlow != null,
   };
 
   root.innerHTML = '';
@@ -1426,6 +1564,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   if (hooks.ui.payPanel) {
     left.appendChild(payPanelView(ctx));
+  } else if (hooks.ui.dustFlow) {
+    left.appendChild(dustFlowView(ctx));
   } else {
     const confirm = confirmRow(ctx);
     if (confirm) {
