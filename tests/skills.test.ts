@@ -1036,6 +1036,128 @@ describe('011 灵能屏障·触发', () => {
   });
 });
 
+describe('011 灵能脉冲·触发', () => {
+  const setupPulse = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '011', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    // 001 中央突破（左，消耗自身冥想骰）；011 灵能脉冲·触发（右侧激活）
+    g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    g.players.B.areas.defense = [
+      { id: 'bd1', value: 1, kind: 'defense' },
+      { id: 'bd2', value: 1, kind: 'defense' },
+    ];
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 2, kind: 'meditation' },
+        { id: 'm2', value: 3, kind: 'meditation' },
+      ],
+    };
+    return g;
+  };
+
+  const useBreakthrough2 = (g: ReturnType<typeof setupPulse>) =>
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '001',
+      side: 'left',
+      params: { meditationDieIds: ['m1', 'm2'], opponentDefenseDieIds: ['bd1', 'bd2'] },
+    });
+
+  it('通过技能消耗 2 颗能力骰后挂起 dunwuPulse（数量=消耗骰数）', () => {
+    const g = setupPulse();
+    expect(g.skillConsumedThisAction).toBe(0);
+    useBreakthrough2(g);
+    expect(g.skillConsumedThisAction).toBe(2);
+    expect(g.pending).toEqual({ kind: 'dunwuPulse', player: 'A', amount: 2 });
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({ t: 'dunwuPulse', accept: true });
+    expect(legal).toContainEqual({ t: 'dunwuPulse', accept: false });
+  });
+
+  it('接受：造成等同消耗数量的真实伤害并标记本回合已触发', () => {
+    const g = setupPulse();
+    useBreakthrough2(g);
+    const lifeBefore = g.players.B.life;
+    applyAction(g, { t: 'dunwuPulse', accept: true });
+    expect(g.players.B.life).toBe(lifeBefore - 2);
+    expect(g.pending).toBeNull();
+    expect(g.dunwuPulseUsedThisTurn).toBe(true);
+    expect(g.log.some((e) => e.text.includes('灵能脉冲'))).toBe(true);
+  });
+
+  it('同一回合第二次消耗不再挂起', () => {
+    const g = setupPulse();
+    useBreakthrough2(g);
+    applyAction(g, { t: 'dunwuPulse', accept: true });
+    g.players.A.areas.attack = [
+      { id: 'a1', value: 2, kind: 'attack' },
+      { id: 'a2', value: 3, kind: 'attack' },
+    ];
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1', 'a2'] } });
+    expect(g.skillConsumedThisAction).toBe(2);
+    expect(g.pending).toBeNull();
+  });
+
+  it('放弃后可本回合再次触发（used 保持 false）', () => {
+    const g = setupPulse();
+    useBreakthrough2(g);
+    applyAction(g, { t: 'dunwuPulse', accept: false });
+    expect(g.pending).toBeNull();
+    expect(g.dunwuPulseUsedThisTurn).toBe(false);
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { attackDieIds: ['a1'] } });
+    expect(g.pending).toEqual({ kind: 'dunwuPulse', player: 'A', amount: 1 });
+  });
+
+  it('弃置（非消耗）能力骰的技能不触发脉冲（明镜·必杀）', () => {
+    const g = setupPulse();
+    g.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [{ id: 'a1', value: 4, kind: 'attack' }],
+      defense: [{ id: 'd1', value: 2, kind: 'defense' }],
+      meditation: [{ id: 'm1', value: 5, kind: 'meditation' }],
+    };
+    applyAction(g, { t: 'skill', artifactId: '003', side: 'only' });
+    expect(g.pending).toBeNull();
+  });
+
+  it('技能消耗后若产生其他待决策（孤王取消），不挂起脉冲', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '011', '003'], heroB: ['004', '002', '009'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' });
+    g.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = 'left';
+    g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    g.players.B.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [{ id: 'a1', value: 6, kind: 'attack' }],
+      defense: [{ id: 'd1', value: 6, kind: 'defense' }],
+      meditation: [{ id: 'm1', value: 6, kind: 'meditation' }],
+    };
+    g.players.B.areas = {
+      attack: [{ id: 'ba1', value: 1, kind: 'attack' }],
+      defense: [
+        { id: 'bd1', value: 1, kind: 'defense' },
+        { id: 'bd2', value: 1, kind: 'defense' },
+      ],
+      meditation: [{ id: 'bm1', value: 1, kind: 'meditation' }],
+    };
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '007',
+      side: 'left',
+      params: {
+        consumed: { attack: 'a1', defense: 'd1', meditation: 'm1' },
+        discard: { attack: 'ba1', defense: 'bd1', meditation: 'bm1' },
+      },
+    });
+    expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 9 });
+  });
+});
+
 describe('012 魔女', () => {
   const setup012 = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });

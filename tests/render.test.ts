@@ -738,6 +738,20 @@ describe('renderGame (interaction)', () => {
     expect(state.pending!.kind).toBe('dunwuHalve'); // 渲染不应改变状态
   });
 
+  it('renders the 011 灵能脉冲 触发 prompt with activate / decline buttons', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    state.pending = { kind: 'dunwuPulse', player: 'A', amount: 2 };
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-phase')?.textContent).toContain('灵能脉冲');
+    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="dunwuPulse"]');
+    expect(btns.length).toBe(2);
+    const labels = Array.from(btns).map((b) => b.textContent);
+    expect(labels).toContain('发动脉冲（2 点真实伤害）');
+    expect(labels).toContain('不发动');
+    expect(state.pending!.kind).toBe('dunwuPulse'); // 渲染不应改变状态
+  });
+
   it('opens the 012 梦醒时分 chooser and proposes explicit destination + meditation dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });
     skipInitialReroll(state);

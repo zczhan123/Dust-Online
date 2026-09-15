@@ -28,6 +28,8 @@ export function beginTurn(g: GameState): void {
   g.freeDustRise = 0;
   g.rerollUsed = 0;
   g.skillsUsedThisTurn = [];
+  g.skillConsumedThisAction = 0;
+  g.dunwuPulseUsedThisTurn = false;
   const p = g.activePlayer;
   // 回合开始触发（补充之前，故获得的骰计入意志上限）：008 战车
   applyTurnStartEffects(g, p);
@@ -294,6 +296,12 @@ export function getLegalActions(g: GameState): Action[] {
         ...p.areas.meditation.map((d) => ({ t: 'dunwuHalve' as const, accept: true, meditationDieId: d.id })),
       ];
     }
+    if (g.pending.kind === 'dunwuPulse') {
+      return [
+        { t: 'dunwuPulse', accept: true },
+        { t: 'dunwuPulse', accept: false },
+      ];
+    }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
     if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
@@ -357,14 +365,22 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
   const cs = a.skills.find((s) => s.kind === 'charge');
   if (cs && SKILL_HANDLERS[cs.key]) {
     withRng(g, (rng) =>
-      SKILL_HANDLERS[cs.key].run({ g, player, artifact: a, rng, params: {}, endMainPhase: () => endMainPhase(g) }),
+      SKILL_HANDLERS[cs.key].run({
+        g,
+        player,
+        artifact: a,
+        rng,
+        params: {},
+        endMainPhase: () => endMainPhase(g),
+        reportConsumed: () => {},
+      }),
     );
   }
 }
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve' && action.t !== 'dunwuPulse') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -538,6 +554,21 @@ export function applyAction(g: GameState, action: Action): GameState {
       g.pending = null;
       break;
     }
+    case 'dunwuPulse': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'dunwuPulse') throw new Error('no dunwuPulse pending');
+      if (action.accept) {
+        const opponent: PlayerId = pd.player === 'A' ? 'B' : 'A';
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 发动「灵能脉冲」：造成 ${pd.amount} 点真实伤害`);
+        dealTrueDamage(g, opponent, pd.amount);
+        g.dunwuPulseUsedThisTurn = true;
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃灵能脉冲`);
+        g.pending = null;
+      }
+      break;
+    }
     case 'skill': {
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
@@ -551,6 +582,7 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
+      g.skillConsumedThisAction = 0;
       withRng(g, (rng) =>
         handler.run({
           g,
@@ -559,10 +591,22 @@ export function applyAction(g: GameState, action: Action): GameState {
           rng,
           params: action.params ?? {},
           endMainPhase: () => endMainPhase(g),
+          reportConsumed: (n) => {
+            g.skillConsumedThisAction += n;
+          },
         }),
       );
       g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
+      // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）
+      if (
+        g.skillConsumedThisAction > 0 &&
+        hasActiveSkill(g.players[g.activePlayer], 'dunwu.pulse.trigger') &&
+        !g.dunwuPulseUsedThisTurn &&
+        g.pending === null
+      ) {
+        g.pending = { kind: 'dunwuPulse', player: g.activePlayer, amount: g.skillConsumedThisAction };
+      }
       break;
     }
   }

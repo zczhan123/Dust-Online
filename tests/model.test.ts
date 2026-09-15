@@ -43,8 +43,12 @@ describe('model types', () => {
       skillsUsedThisTurn: [],
       ultimatesUsed: [],
       winner: null,
+      skillConsumedThisAction: 0,
+      dunwuPulseUsedThisTurn: false,
     };
     expect(g.players.A.life).toBe(50);
+    expect(g.skillConsumedThisAction).toBe(0);
+    expect(g.dunwuPulseUsedThisTurn).toBe(false);
   });
 });
 

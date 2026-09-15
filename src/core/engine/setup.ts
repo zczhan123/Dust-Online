@@ -76,5 +76,7 @@ export function setupGame(opts: SetupOptions): GameState {
     skillsUsedThisTurn: [],
     ultimatesUsed: [],
     winner: null,
+    skillConsumedThisAction: 0,
+    dunwuPulseUsedThisTurn: false,
   };
 }

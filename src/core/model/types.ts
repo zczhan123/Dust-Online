@@ -29,6 +29,7 @@ export type Action =
   | { t: 'guwangCancel'; cancel: boolean; defenseDieId?: string }
   | { t: 'shenhongKill'; accept: boolean }
   | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string }
+  | { t: 'dunwuPulse'; accept: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -46,7 +47,8 @@ export type Pending =
   | { kind: 'guwangCharge'; player: PlayerId }
   | { kind: 'guwangCancel'; player: PlayerId; amount: number }
   | { kind: 'shenhongKill'; player: PlayerId }
-  | { kind: 'dunwuHalve'; player: PlayerId };
+  | { kind: 'dunwuHalve'; player: PlayerId }
+  | { kind: 'dunwuPulse'; player: PlayerId; amount: number };
 
 export interface Distribution {
   defense: number[];
@@ -121,4 +123,6 @@ export interface GameState {
   skillsUsedThisTurn: string[];
   ultimatesUsed: string[];
   winner: PlayerId | null;
+  skillConsumedThisAction: number;
+  dunwuPulseUsedThisTurn: boolean;
 }

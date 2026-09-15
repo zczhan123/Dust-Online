@@ -534,6 +534,7 @@ function phaseHint(ctx: Ctx): string {
   if (pd && pd.kind === 'guwangCancel') return `孤王·高塔铁幕：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。`;
   if (pd && pd.kind === 'shenhongKill') return '深红·杀意：本回合补充≤3，可造成 3 点真实伤害并回复 2 点生命。';
   if (pd && pd.kind === 'dunwuHalve') return '顿悟·灵能屏障：可消耗 1 个冥想骰，使本次攻击伤害减半。';
+  if (pd && pd.kind === 'dunwuPulse') return `顿悟·灵能脉冲：可造成 ${pd.amount} 点真实伤害（本回合消耗 ${pd.amount} 颗能力骰）。`;
   if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
   switch (state.phase) {
     case 'initialReroll':
@@ -669,6 +670,11 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       const defender: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
       const v = state.players[defender].areas.meditation.find((d) => d.id === a.meditationDieId)?.value ?? '?';
       return `伤害减半（消耗 冥想${v}）`;
+    }
+    case 'dunwuPulse': {
+      const pd = state.pending;
+      const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;
+      return a.accept ? `发动脉冲（${amount} 点真实伤害）` : '不发动';
     }
     case 'reroll':
     case 'skill':
