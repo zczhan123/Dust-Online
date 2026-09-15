@@ -8,7 +8,7 @@ const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
 
 let state: GameState | null = null;
-const ui: UiState = { rerollSelected: new Set(), selection: null, pendingConfirm: null, payPanel: null, dustFlow: null };
+const ui: UiState = { rerollSelected: new Set(), selection: null, pendingConfirm: null, convertPick: null, dustFlow: null };
 let lastError = '';
 
 const render = () => {
@@ -26,7 +26,7 @@ const render = () => {
         ui.rerollSelected.clear();
         ui.selection = null;
         ui.pendingConfirm = null;
-        ui.payPanel = null;
+        ui.convertPick = null;
         ui.dustFlow = null;
       }
       catch (e) { lastError = e instanceof Error ? e.message : String(e); }
@@ -42,7 +42,7 @@ const showSetup = () => {
     ui.rerollSelected.clear();
     ui.selection = null;
     ui.pendingConfirm = null;
-    ui.payPanel = null;
+    ui.convertPick = null;
     ui.dustFlow = null;
     render();
   });

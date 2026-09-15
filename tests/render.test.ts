@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
@@ -9,7 +9,7 @@ const freshUi = (): UiState => ({
   rerollSelected: new Set(),
   selection: null,
   pendingConfirm: null,
-  payPanel: null,
+  convertPick: null,
   dustFlow: null,
 });
 
@@ -943,7 +943,7 @@ describe('renderGame (interaction)', () => {
     });
   });
 
-  it('offers 置换攻击 when 真实之剑 is active and dispatches the 2-die slot', () => {
+  it('offers 置换攻击 when 真实之剑 is active: pick 2 dice then confirm', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -962,20 +962,62 @@ describe('renderGame (interaction)', () => {
     expect(openBtn).toBeTruthy();
     openBtn!.click();
     expect(onAction).not.toHaveBeenCalled();
-    expect(ui.payPanel).not.toBeNull();
-    expect(root.querySelector('.paypanel')).not.toBeNull();
+    expect(ui.convertPick).not.toBeNull();
+    expect(root.querySelector('.convertpick')).not.toBeNull();
 
-    root.querySelector<HTMLElement>('.paypanel .pay-die[data-id="pd1"]')!.click();
-    root.querySelector<HTMLElement>('.paypanel .pay-die[data-id="pm1"]')!.click();
+    // 单步：直接选 2 颗能力骰（无 4换2 / 6换3 之类）
+    root.querySelector<HTMLElement>('.convertpick .pay-die[data-id="pd1"]')!.click();
+    root.querySelector<HTMLElement>('.convertpick .pay-die[data-id="pm1"]')!.click();
 
-    const ok = root.querySelector<HTMLButtonElement>('.paypanel .btn-confirm')!;
-    expect(ok.disabled).toBe(false);
-    ok.click();
-    expect(ui.payPanel).toBeNull();
+    // 选满 2 颗 → 走统一确认条（不直接执行）
+    expect(ui.convertPick).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'attack',
+      costSlots: [{ dieIds: ['pd1', 'pm1'] }],
+    });
+    expect(ui.pendingConfirm!.label).toContain('置换攻击');
+
+    const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!;
+    confirmBtn.click();
     expect(onAction).toHaveBeenCalledWith({
       t: 'attack',
       costSlots: [{ dieIds: ['pd1', 'pm1'] }],
     });
+  });
+
+  it('re-opens the 置换攻击 picker on each click (one conversion per click)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    state.players.A.areas = {
+      attack: [],
+      defense: [
+        { id: 'pd1', value: 2, kind: 'defense' },
+        { id: 'pd2', value: 4, kind: 'defense' },
+      ],
+      meditation: [
+        { id: 'pm1', value: 3, kind: 'meditation' },
+        { id: 'pm2', value: 5, kind: 'meditation' },
+      ],
+    };
+    const { ui } = mount(state, root);
+    const findBtn = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+        (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
+      );
+
+    findBtn()!.click();
+    expect(ui.convertPick).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('.convertpick .btn-cancel')!.click();
+    expect(ui.convertPick).toBeNull();
+
+    // 同一入口可再次点击 = 第二次置换攻击
+    expect(findBtn()).toBeTruthy();
+    findBtn()!.click();
+    expect(ui.convertPick).not.toBeNull();
   });
 
   it('does not offer 置换攻击 when 真实之剑 is not active', () => {
@@ -1012,10 +1054,10 @@ describe('renderGame (interaction)', () => {
       (b) => (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
     )!;
     openBtn.click();
-    expect(ui.payPanel).not.toBeNull();
+    expect(ui.convertPick).not.toBeNull();
 
-    root.querySelector<HTMLButtonElement>('.paypanel .btn-cancel')!.click();
-    expect(ui.payPanel).toBeNull();
+    root.querySelector<HTMLButtonElement>('.convertpick .btn-cancel')!.click();
+    expect(ui.convertPick).toBeNull();
     expect(onAction).not.toHaveBeenCalled();
   });
 
@@ -1082,6 +1124,9 @@ describe('renderGame (interaction)', () => {
 
     expect(onAction).not.toHaveBeenCalled();
     expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.label).toBe(
+      '发动「灵能脉冲」：消耗 3 颗攻击骰（2/3/5点），其中 1 颗攻击骰是用「真实之剑」置换',
+    );
     expect(ui.pendingConfirm!.action).toEqual({
       t: 'skill',
       artifactId: '011',
@@ -1090,6 +1135,42 @@ describe('renderGame (interaction)', () => {
         costSlots: [{ dieIds: ['atk1'] }, { dieIds: ['atk2'] }, { dieIds: ['def1', 'med1'] }],
       },
     });
+  });
+
+  it('shows the active skill name in the card badge (已激活·技能名)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    renderGame(state, root, hooksFor());
+    const badge = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="010"] .badge-active',
+    )!;
+    expect(badge.textContent).toBe('已激活·真实之剑');
+
+    // 第三列（技能在 only 侧）显示对应技能名，而非「左侧」
+    const state2 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
+    skipInitialReroll(state2);
+    applyAction(state2, { t: 'advance' });
+    const wansha = state2.players.A.artifacts.find((a) => a.id === '006')!;
+    wansha.chargeLayer = wansha.chargeReq ?? 4;
+    wansha.activeMarkerSide = 'left';
+    renderGame(state2, root, hooksFor());
+    const badge2 = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="006"] .badge-active',
+    )!;
+    expect(badge2.textContent).toBe('已激活·零时枭首');
+  });
+
+  it('shows the kind prefix on attack/block chips (攻N / 防N)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    renderGame(state, root, hooksFor());
+    const chip = root.querySelector<HTMLButtonElement>(
+      '.actionlist-chips .pay-die[data-act="attack"]',
+    )!;
+    expect(chip.textContent).toMatch(/^攻\d$/);
   });
 
   it('uses the normal all-real dice step for a skill cost when 真实之剑 is inactive', () => {

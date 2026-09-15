@@ -61,13 +61,10 @@ export interface UiState {
     /** 「真实之剑」置换：已选中的 2 颗能力骰 */
     convertPick?: string[];
   };
-  payPanel: null | {
-    label: string;
-    payer: PlayerId;
-    kinds: DiceKind[]; // one entry per slot
-    modes: ('real' | 'convert')[]; // chosen mode per slot
-    slots: string[][]; // chosen die ids per slot (length 0..mode size)
-    build: (slots: { dieIds: string[] }[]) => Action;
+  /** 攻击/抵挡的「真实之剑」置换：单步选择 2 颗能力骰 */
+  convertPick: null | {
+    kind: 'attack' | 'block';
+    dieIds: string[];
   };
 }
 
@@ -92,8 +89,8 @@ interface Ctx {
   maxReroll: number;
   selectionStep: SelectStep | null;
   selectionOwner: PlayerId | null;
-  /** 置换支付面板开启时禁用区域骰点击，避免歧义 */
-  payPanelOpen: boolean;
+  /** 「真实之剑」置换选骰面板开启时禁用区域骰点击，避免歧义 */
+  convertPickOpen: boolean;
   /** 技能选择器处于「slots」步骤时，区域骰由选择器内部处理，禁用区域骰点击 */
   slotsStepOpen: boolean;
   /** 尘起流程开启时禁用区域骰点击，避免与流程内选骰冲突 */
@@ -138,8 +135,6 @@ function diceListLabel(state: GameState, ids: string[]): string {
 const KIND_NAMES: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
 
 const KIND_SHORT: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
-
-type PayPanel = NonNullable<UiState['payPanel']>;
 
 /** 各技能代价所需骰类型（用于确认条文案；引擎按同样规则构造槽位） */
 const COST_KIND_LABEL: Record<string, string> = {
@@ -254,15 +249,21 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
 
   if (Array.isArray(params.costSlots) && params.costSlots.length) {
     const fills = params.costSlots as { dieIds?: string[] }[];
-    const realIds = fills.flatMap((f) => f.dieIds ?? []);
     const converted = fills.filter((f) => (f.dieIds ?? []).length > 1).length;
     const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
     const sk = art?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'));
     const kindName =
       COST_KIND_LABEL[sk?.key ?? ''] ?? (typeof params.kind === 'string' ? KIND_NAMES[params.kind] : undefined);
-    const detail = realIds.length ? `（${diceListLabel(ctx.state, realIds)}点）` : '';
-    const suffix = converted > 0 ? `，其中 ${converted} 格用「真实之剑」置换` : '';
-    parts.push(`消耗 ${fills.length} 颗${kindName ?? ''}骰${detail}${suffix}`);
+    // 按“骰位”列出有效点数：真骰 = 其点数；置换 = 5
+    const values = fills.map((f) => {
+      const ids = f.dieIds ?? [];
+      if (ids.length > 1) return '5';
+      const v = dieValue(ctx.state, ids[0]);
+      return v !== undefined ? String(v) : '?';
+    });
+    const suffix =
+      converted > 0 ? `，其中 ${converted} 颗${kindName ?? ''}骰是用「真实之剑」置换` : '';
+    parts.push(`消耗 ${fills.length} 颗${kindName ?? ''}骰（${values.join('/')}点）${suffix}`);
   }
   if (typeof params.attackDieId === 'string') {
     const v = dieValue(ctx.state, params.attackDieId);
@@ -376,7 +377,9 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
 
   if (a.activeMarkerSide) {
     const act = el('span', 'badge badge-active');
-    act.textContent = `已激活·${a.activeMarkerSide === 'left' ? '左' : '右'}侧`;
+    const activeName =
+      sideDisplayName(a, a.activeMarkerSide) ?? sideDisplayName(a, 'only') ?? a.name;
+    act.textContent = `已激活·${activeName}`;
     head.appendChild(act);
   }
   if (a.chargeReq !== undefined) {
@@ -515,7 +518,7 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    if (ctx.payPanelOpen || ctx.slotsStepOpen || ctx.dustFlowOpen) {
+    if (ctx.convertPickOpen || ctx.slotsStepOpen || ctx.dustFlowOpen) {
       // 置换支付面板 / 技能代价骰位面板 / 尘起流程开启时，区域骰不可点击
     } else if (diceStep) {
       const step = diceStep;
@@ -850,7 +853,7 @@ function actionChipRow(
     chip.className = `pay-die clickable die-${owner}`;
     chip.dataset.id = d.id;
     chip.dataset.act = a.t === 'attack' ? 'attack' : 'block';
-    chip.textContent = String(d.value);
+    chip.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
     chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? labelText));
     row.appendChild(chip);
   }
@@ -868,16 +871,7 @@ function operationList(ctx: Ctx): HTMLElement {
     const payer = state.activePlayer;
     if (convertAvailable(state, payer)) {
       box.appendChild(
-        convertButton('使用「真实之剑」置换进行攻击', () =>
-          openPayPanel(ctx, {
-            label: '攻击',
-            payer,
-            kinds: ['attack'],
-            modes: ['convert'],
-            slots: [[]],
-            build: (s) => ({ t: 'attack', costSlots: s }),
-          }),
-        ),
+        convertButton('使用「真实之剑」置换进行攻击', () => openConvertPick(ctx, 'attack')),
       );
     }
   }
@@ -885,16 +879,7 @@ function operationList(ctx: Ctx): HTMLElement {
     const defender: PlayerId = state.pendingAttack.attacker === 'A' ? 'B' : 'A';
     if (convertAvailable(state, defender)) {
       box.appendChild(
-        convertButton('使用「真实之剑」置换进行抵挡', () =>
-          openPayPanel(ctx, {
-            label: '抵挡',
-            payer: defender,
-            kinds: ['defense'],
-            modes: ['convert'],
-            slots: [[]],
-            build: (s) => ({ t: 'block', costSlots: s }),
-          }),
-        ),
+        convertButton('使用「真实之剑」置换进行抵挡', () => openConvertPick(ctx, 'block')),
       );
     }
   }
@@ -1217,23 +1202,80 @@ function convertAvailable(state: GameState, payer: PlayerId): boolean {
   return p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length >= 2;
 }
 
-function slotRequired(panel: PayPanel, i: number): number {
-  return panel.modes[i] === 'real' ? 1 : 2;
+/** 置换选骰的付款方：抵挡时是防守方，否则是当前行动方 */
+function convertPickOwner(state: GameState): PlayerId {
+  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
+  return state.activePlayer;
 }
 
-function firstUnfilledSlot(panel: PayPanel): number {
-  for (let i = 0; i < panel.slots.length; i++) {
-    if (panel.slots[i].length < slotRequired(panel, i)) return i;
+function openConvertPick(ctx: Ctx, kind: 'attack' | 'block'): void {
+  ctx.hooks.ui.convertPick = { kind, dieIds: [] };
+  ctx.hooks.requestRender();
+}
+
+/** 选满 2 颗 → 提出待确认的攻击/抵挡动作（走统一确认条） */
+function dispatchConvertPick(ctx: Ctx): void {
+  const cp = ctx.hooks.ui.convertPick;
+  if (!cp || cp.dieIds.length !== 2) return;
+  const isAtk = cp.kind === 'attack';
+  const action: Action = isAtk
+    ? { t: 'attack', costSlots: [{ dieIds: [...cp.dieIds] }] }
+    : { t: 'block', costSlots: [{ dieIds: [...cp.dieIds] }] };
+  ctx.hooks.ui.convertPick = null;
+  ctx.hooks.propose(
+    action,
+    isAtk
+      ? '置换攻击：消耗 2 颗能力骰 → 1 颗攻击骰（点数按 5）'
+      : '置换抵挡：消耗 2 颗能力骰 → 1 颗防御骰（点数按 5）',
+  );
+}
+
+function convertPickPanel(ctx: Ctx): HTMLElement {
+  const cp = ctx.hooks.ui.convertPick!;
+  const payer = ctx.state.players[convertPickOwner(ctx.state)];
+  const isAtk = cp.kind === 'attack';
+  const kindName = isAtk ? '攻击' : '防御';
+  const wrap = el('div', 'convertpick');
+  const title = el('span', 'convertpick-title');
+  title.textContent = `使用「真实之剑」置换进行${isAtk ? '攻击' : '抵挡'}`;
+  wrap.appendChild(title);
+  const hint = el('span', 'convertpick-hint');
+  hint.textContent = `请选择 2 颗能力骰（每 2 颗顶 1 颗${kindName}骰，点数按 5；已选 ${cp.dieIds.length}/2）`;
+  wrap.appendChild(hint);
+  const diceBox = el('div', 'pay-dice');
+  for (const k of AREA_ORDER) {
+    for (const d of payer.areas[k]) {
+      const die = el('span', `pay-die clickable die-${payer.id}`);
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (cp.dieIds.includes(d.id)) die.classList.add('selected');
+      die.addEventListener('click', () => {
+        const i = cp.dieIds.indexOf(d.id);
+        if (i >= 0) cp.dieIds.splice(i, 1);
+        else if (cp.dieIds.length < 2) cp.dieIds.push(d.id);
+        if (cp.dieIds.length === 2) {
+          dispatchConvertPick(ctx);
+          return;
+        }
+        ctx.hooks.requestRender();
+      });
+      diceBox.appendChild(die);
+    }
   }
-  return -1;
-}
-
-function allSlotsFilled(panel: PayPanel): boolean {
-  return panel.slots.every((_, i) => panel.slots[i].length >= slotRequired(panel, i));
-}
-
-function usedDieIds(panel: PayPanel): Set<string> {
-  return new Set(panel.slots.flat());
+  wrap.appendChild(diceBox);
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.dataset.act = 'convertCancel';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    ctx.hooks.ui.convertPick = null;
+    ctx.hooks.requestRender();
+  });
+  wrap.appendChild(cancel);
+  return wrap;
 }
 
 function slotSummary(
@@ -1283,119 +1325,6 @@ function assignSelDie(ctx: Ctx, sel: ActiveSelection, step: SlotsStep, d: Die): 
   ctx.hooks.requestRender();
 }
 
-function assignPayDie(ctx: Ctx, d: Die): void {
-  const panel = ctx.hooks.ui.payPanel;
-  if (!panel) return;
-  const i = firstUnfilledSlot(panel);
-  if (i < 0) return;
-  if (panel.modes[i] === 'real' && d.kind !== panel.kinds[i]) return;
-  if (usedDieIds(panel).has(d.id)) return;
-  panel.slots[i].push(d.id);
-  ctx.hooks.requestRender();
-}
-
-function payPanelView(ctx: Ctx): HTMLElement {
-  const panel = ctx.hooks.ui.payPanel as PayPanel;
-  const box = el('div', 'paypanel');
-
-  const headWrap = el('div', 'paypanel-head');
-  const title = el('div', 'paypanel-title');
-  title.textContent = `置换支付：${panel.label}`;
-  headWrap.appendChild(title);
-
-  for (let i = 0; i < panel.kinds.length; i++) {
-    const row = el('div', 'slot-row');
-    row.dataset.slot = String(i);
-
-    const head = el('div', 'slot-head');
-    const kindName = KIND_NAMES[panel.kinds[i]];
-    const name = el('span', 'slot-name');
-    name.textContent = `格${i + 1}（${kindName}）`;
-    head.appendChild(name);
-
-    const modeDefs: { mode: 'real' | 'convert'; text: string }[] = [
-      { mode: 'real', text: `用 1 颗${kindName}` },
-      { mode: 'convert', text: '置换：2 颗任意骰' },
-    ];
-    for (const m of modeDefs) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `btn slot-btn${panel.modes[i] === m.mode ? ' slot-btn--on' : ''}`;
-      b.dataset.mode = m.mode;
-      b.textContent = m.text;
-      b.addEventListener('click', () => {
-        if (panel.modes[i] === m.mode) return;
-        panel.modes[i] = m.mode;
-        panel.slots[i] = [];
-        ctx.hooks.requestRender();
-      });
-      head.appendChild(b);
-    }
-
-    const summary = el('span', 'slot-summary');
-    summary.textContent = slotSummary(ctx.state, panel.kinds, panel.modes, panel.slots, i);
-    head.appendChild(summary);
-
-    row.appendChild(head);
-    headWrap.appendChild(row);
-  }
-  box.appendChild(headWrap);
-
-  const payer = ctx.state.players[panel.payer];
-  const current = firstUnfilledSlot(panel);
-  const used = usedDieIds(panel);
-  const diceBox = el('div', 'pay-dice');
-  for (const k of AREA_ORDER) {
-    for (const d of payer.areas[k]) {
-      const die = el('span', `pay-die die-${payer.id}`);
-      die.dataset.id = d.id;
-      die.dataset.kind = d.kind;
-      die.dataset.value = String(d.value);
-      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
-      if (used.has(d.id)) {
-        die.classList.add('pay-die--used');
-      } else if (current >= 0) {
-        const allowed = panel.modes[current] === 'convert' || d.kind === panel.kinds[current];
-        if (allowed) {
-          die.classList.add('clickable');
-          die.addEventListener('click', () => assignPayDie(ctx, d));
-        }
-      }
-      diceBox.appendChild(die);
-    }
-  }
-  box.appendChild(diceBox);
-
-  const actions = el('div', 'pay-actions');
-
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'btn btn-cancel';
-  cancel.textContent = '取消';
-  cancel.addEventListener('click', () => {
-    ctx.hooks.ui.payPanel = null;
-    ctx.hooks.requestRender();
-  });
-  actions.appendChild(cancel);
-
-  const ok = document.createElement('button');
-  ok.type = 'button';
-  ok.className = 'btn btn-confirm';
-  ok.textContent = '确认';
-  ok.disabled = !allSlotsFilled(panel);
-  ok.addEventListener('click', () => {
-    const p = ctx.hooks.ui.payPanel;
-    if (!p || !allSlotsFilled(p)) return;
-    const fills = p.slots.map((ids) => ({ dieIds: [...ids] }));
-    ctx.hooks.ui.payPanel = null;
-    ctx.hooks.onAction(p.build(fills));
-  });
-  actions.appendChild(ok);
-  box.appendChild(actions);
-
-  return box;
-}
-
 function convertButton(label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
@@ -1404,11 +1333,6 @@ function convertButton(label: string, onClick: () => void): HTMLButtonElement {
   b.textContent = label;
   b.addEventListener('click', onClick);
   return b;
-}
-
-function openPayPanel(ctx: Ctx, panel: PayPanel): void {
-  ctx.hooks.ui.payPanel = panel;
-  ctx.hooks.requestRender();
 }
 
 type DustFlow = NonNullable<UiState['dustFlow']>;
@@ -1534,7 +1458,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
       die.dataset.id = d.id;
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);
-      die.textContent = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
       die.classList.add('clickable');
       die.addEventListener('click', () => dispatchDustPay(ctx, [d.id]));
       medDice.appendChild(die);
@@ -1640,7 +1564,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     maxReroll,
     selectionStep,
     selectionOwner,
-    payPanelOpen: hooks.ui.payPanel != null,
+    convertPickOpen: hooks.ui.convertPick != null,
     slotsStepOpen,
     dustFlowOpen: hooks.ui.dustFlow != null,
   };
@@ -1664,8 +1588,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const left = el('div', 'centerband-left');
   left.appendChild(hintBox(ctx));
 
-  if (hooks.ui.payPanel) {
-    left.appendChild(payPanelView(ctx));
+  if (hooks.ui.convertPick) {
+    left.appendChild(convertPickPanel(ctx));
   } else if (hooks.ui.dustFlow) {
     left.appendChild(dustFlowView(ctx));
   } else {
