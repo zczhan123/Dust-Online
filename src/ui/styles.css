@@ -180,6 +180,8 @@ body {
 .skill:has(.skill-part--used) .skill-name { text-decoration: line-through; color: #6b7280; }
 .skill-part--full { background: #f3ecec; border-left-color: #b75b5b; }
 .skill:has(.skill-part--full) .skill-name { color: #8a2b2b; }
+/* 不能再激活/不能再使用（充能满、计数满、必杀已用）→ 更深的灰，区别于「未激活」 */
+.skill-part--disabled { background: #cfd4db; border-left-color: #6b7280; opacity: 0.95; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
 .skill-part-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; }

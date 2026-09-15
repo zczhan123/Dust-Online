@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
@@ -203,7 +203,9 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(state, root, hooksFor());
     const text = root.textContent ?? '';
     expect(text).not.toContain('启动技能：淬炼');
-    const box = root.querySelector<HTMLElement>('.player--self .card[data-artifact="004"] .skill-part--on');
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="004"] .skill-part--disabled',
+    );
     expect(box).not.toBeNull();
     expect(box!.classList.contains('skill-part--full')).toBe(true);
     expect(box!.textContent).toContain('已满');
@@ -262,6 +264,73 @@ describe('renderGame (interaction)', () => {
       expect(h.querySelector('.skill-type')).not.toBeNull();
       expect(h.querySelector('.skill-text')).not.toBeNull();
     }
+  });
+
+  it('never renders an internal skill key (e.g. wansha.ultimate) in the UI', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
+    wansha.chargeLayer = wansha.chargeReq ?? 4;
+    wansha.activeMarkerSide = 'left';
+    state.players.A.areas.attack.push({ id: 'atk-x', value: 4, kind: 'attack' });
+    renderGame(state, root, hooksFor());
+    const text = root.textContent ?? '';
+    expect(text).not.toMatch(/[a-z]+\.[a-z]+/i);
+    expect(text).toContain('零时枭首');
+  });
+
+  it('recolors a fully charged 完杀: 充能 disabled, 必杀 green', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
+    wansha.chargeLayer = wansha.chargeReq ?? 4;
+    wansha.activeMarkerSide = 'left';
+    renderGame(state, root, hooksFor());
+    const parts = Array.from(
+      root.querySelectorAll<HTMLElement>('.player--self .card[data-artifact="006"] .skill-part'),
+    );
+    const charge = parts.find((p) => p.dataset.key === 'wansha.charge')!;
+    const ult = parts.find((p) => p.dataset.key === 'wansha.ultimate')!;
+    expect(charge.classList.contains('skill-part--disabled')).toBe(true);
+    expect(charge.classList.contains('skill-part--on')).toBe(false);
+    expect(ult.classList.contains('skill-part--on')).toBe(true);
+  });
+
+  it('distinguishes disabled (darker grey) from inactive (light grey) and used ultimate', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
+    buxiang.activeMarkerSide = 'left';
+    buxiang.count = 3;
+    renderGame(state, root, hooksFor());
+    const cuilian = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="004"] .skill-part[data-key="buxiang.cuilian"]',
+    )!;
+    expect(cuilian.classList.contains('skill-part--disabled')).toBe(true);
+    // 右（未激活的持续）应为浅灰 off，而非 disabled
+    const fengmang = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="004"] .skill-part[data-side="right"]',
+    )!;
+    expect(fengmang.classList.contains('skill-part--off')).toBe(true);
+    expect(fengmang.classList.contains('skill-part--disabled')).toBe(false);
+  });
+
+  it('marks a used ultimate row as disabled', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
+    wansha.chargeLayer = wansha.chargeReq ?? 4;
+    wansha.activeMarkerSide = 'left';
+    state.ultimatesUsed.push('wansha.ultimate');
+    renderGame(state, root, hooksFor());
+    const ult = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="006"] .skill-part[data-key="wansha.ultimate"]',
+    )!;
+    expect(ult.classList.contains('skill-part--disabled')).toBe(true);
   });
 
   it('clicking a legal attack die proposes a confirm, and 确认 dispatches it', () => {

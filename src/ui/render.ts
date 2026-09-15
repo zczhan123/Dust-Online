@@ -186,6 +186,31 @@ function skillLabel(
   return t?.name;
 }
 
+/** 该神器某侧显示名（不区分技能类型），用于名称兜底 */
+function sideDisplayName(a: Artifact | undefined, side: 'left' | 'right' | 'only'): string | undefined {
+  if (!a) return undefined;
+  return ARTIFACT_TEXT[a.id]?.skills.find((s) => s.side === side)?.name;
+}
+
+/** 内部 key 形如 `wansha.ultimate`，绝不应出现在界面上 */
+function looksLikeInternalKey(s: string): boolean {
+  return /^[a-z0-9]+(\.[a-z0-9]+)+$/i.test(s.trim());
+}
+
+/** 单条技能行的展示状态：可用(绿) / 未激活(浅灰) / 不能再使用(深灰) */
+function skillPartState(
+  ctx: Ctx,
+  a: Artifact,
+  s: { side: SkillDef['side']; type: string },
+): 'on' | 'off' | 'disabled' {
+  const key = findSkillKey(a, s.side, s.type);
+  const markerOk = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
+  if (key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key)) return 'disabled';
+  if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
+  if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
+  return markerOk ? 'on' : 'off';
+}
+
 type DustRiseAction = Extract<Action, { t: 'dustRise' }>;
 type SkillAction = Extract<Action, { t: 'skill' }>;
 
@@ -214,7 +239,12 @@ function skillName(state: GameState, a: SkillAction): string {
   const skill = art?.skills.find(
     (s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'),
   );
-  return skillLabel(art, a.side, skill?.kind) ?? skill?.key ?? '技能';
+  const resolved =
+    skillLabel(art, a.side, skill?.kind) ??
+    sideDisplayName(art, a.side) ??
+    art?.name ??
+    '技能';
+  return looksLikeInternalKey(resolved) ? (art?.name ?? '技能') : resolved;
 }
 
 function skillActionLabel(ctx: Ctx, a: SkillAction): string {
@@ -395,8 +425,14 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
       box.appendChild(sHead);
 
       for (const s of parts) {
-        const isActive = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
-        const part = el('div', `skill-part ${isActive ? 'skill-part--on' : 'skill-part--off'}`);
+        const pstate = skillPartState(ctx, a, s);
+        const pcls =
+          pstate === 'on'
+            ? 'skill-part--on'
+            : pstate === 'disabled'
+              ? 'skill-part--disabled'
+              : 'skill-part--off';
+        const part = el('div', `skill-part ${pcls}`);
         part.dataset.side = s.side;
         const key = findSkillKey(a, s.side, s.type);
         if (key) part.dataset.key = key;
