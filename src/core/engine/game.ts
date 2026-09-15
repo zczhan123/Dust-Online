@@ -594,6 +594,7 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (!skillActive(a, s)) throw new Error('skill not active');
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) throw new Error('ultimate already used');
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
+      assertConversionAllowed(g, g.activePlayer, action.params?.costSlots as SlotFill[] | undefined);
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
       g.skillConsumedThisAction = 0;

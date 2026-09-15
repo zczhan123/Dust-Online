@@ -340,11 +340,12 @@ describe('必杀', () => {
     expect(g.players.B.areas.attack.length).toBe(0);
   });
 
-  it('零时枭首: a converted (2-dice) slot yields X=5', () => {
-    const g = createGame({ seed: 1, firstPlayer: 'B' }); // B has 006 完杀
+  it('零时枭首: a converted (2-dice) slot yields X=5 (requires 真实之剑)', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B', heroB: ['010', '005', '006'] }); // B: 010 深红 + 006 完杀
     g.activePlayer = 'B';
     g.phase = 'main';
     g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
+    g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑
     g.players.B.areas.attack = [
       { id: 'k1', value: 3, kind: 'attack' },
       { id: 'k2', value: 1, kind: 'attack' },
@@ -354,6 +355,20 @@ describe('必杀', () => {
     // 2 real dice consumed as one converted slot → X = 5
     expect(g.players.B.areas.attack).toHaveLength(5); // gained X=5
     expect(g.players.A.areas.defense).toHaveLength(1); // 5 discarded
+  });
+
+  it('零时枭首: a converted slot without 真实之剑 is rejected', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' }); // B has 006 only (no 010)
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    g.players.B.artifacts.find((a) => a.id === '006')!.activeMarkerSide = 'left';
+    g.players.B.areas.attack = [
+      { id: 'k1', value: 3, kind: 'attack' },
+      { id: 'k2', value: 1, kind: 'attack' },
+    ];
+    expect(() =>
+      applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { costSlots: [{ dieIds: ['k1', 'k2'] }] } }),
+    ).toThrow();
   });
 });
 
