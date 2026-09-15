@@ -26,6 +26,7 @@ describe('renderSetup', () => {
     expect(root.querySelector('.setup')).not.toBeNull();
     expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
     expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(5); // 4 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(5); // 4 英雄 + 随机
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 
@@ -35,8 +36,44 @@ describe('renderSetup', () => {
       root.querySelector('[data-role="heroA"][data-value="random"]')!.classList.contains('selected'),
     ).toBe(true);
     expect(
+      root.querySelector('[data-role="heroB"][data-value="random"]')!.classList.contains('selected'),
+    ).toBe(true);
+    expect(
       root.querySelector('[data-role="first"][data-value="random"]')!.classList.contains('selected'),
     ).toBe(true);
+  });
+
+  it('disables the opposite column cell of the same specific hero', () => {
+    renderSetup(root, () => {});
+    // A 选“空” → B 的“空”单元格禁用
+    click(root, '[data-role="heroA"][data-value="kong"]');
+    const bKong = root.querySelector<HTMLButtonElement>('[data-role="heroB"][data-value="kong"]')!;
+    expect(bKong.disabled).toBe(true);
+    expect(bKong.classList.contains('choice--muted')).toBe(true);
+    // 随机永不被互斥
+    expect(
+      root.querySelector<HTMLButtonElement>('[data-role="heroB"][data-value="random"]')!.disabled,
+    ).toBe(false);
+
+    // 回到 A=随机 后，B 选“空” → A 的“空”单元格禁用（反之亦然）
+    click(root, '[data-role="heroA"][data-value="random"]');
+    expect(bKong.disabled).toBe(false);
+    click(root, '[data-role="heroB"][data-value="kong"]');
+    const aKong = root.querySelector<HTMLButtonElement>('[data-role="heroA"][data-value="kong"]')!;
+    expect(aKong.disabled).toBe(true);
+    expect(aKong.classList.contains('choice--muted')).toBe(true);
+  });
+
+  it('starts deterministically when both columns pick specific heroes', () => {
+    const onStart = vi.fn();
+    renderSetup(root, onStart);
+    click(root, '[data-role="heroA"][data-value="kong"]');
+    click(root, '[data-role="heroB"][data-value="ying"]');
+    click(root, '.setup-start');
+    expect(onStart).toHaveBeenCalledTimes(1);
+    const opts = onStart.mock.calls[0][0] as SetupOptions;
+    expect(opts.heroA).toEqual(KONG);
+    expect(opts.heroB).toEqual(YING);
   });
 
   it('selects 雨中剑圣·空 + 玩家A 先手 (对手是另一位英雄)', () => {

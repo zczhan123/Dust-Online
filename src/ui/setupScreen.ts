@@ -109,30 +109,55 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
     ]),
   );
 
-  let heroChoice: HeroChoice = 'random';
+  let heroAChoice: HeroChoice = 'random';
+  let heroBChoice: HeroChoice = 'random';
   let firstChoice: FirstChoice = 'random';
 
-  const heroRow = el('div', 'setup-row');
-  const heroLabel = el('span', 'setup-label');
-  heroLabel.textContent = '玩家A 的英雄：';
-  heroRow.appendChild(heroLabel);
-
-  const heroGroup = el('div', 'choice-group');
-  const heroButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
   const heroDefs: Array<[HeroChoice, string]> = [
     ...HERO_KEYS.map((k) => [k, HERO_LABELS[k]] as [HeroChoice, string]),
     ['random', '随机'],
   ];
+
+  const matrix = el('div', 'hero-matrix');
+  const head = el('div', 'hero-matrix-row hero-matrix-head');
+  head.appendChild(el('span', 'setup-label'));
+  const headA = el('span', 'hero-cell');
+  headA.textContent = '玩家A';
+  const headB = el('span', 'hero-cell');
+  headB.textContent = '玩家B';
+  head.appendChild(headA);
+  head.appendChild(headB);
+  matrix.appendChild(head);
+
+  const heroAButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
+  const heroBButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
   for (const [value, label] of heroDefs) {
-    const node = choiceButton('heroA', value, label, () => {
-      heroChoice = value;
+    const row = el('div', 'hero-matrix-row');
+    const lab = el('span', 'setup-label');
+    lab.textContent = label;
+    row.appendChild(lab);
+
+    const cellA = el('div', 'hero-cell');
+    const nodeA = choiceButton('heroA', value, '○', () => {
+      heroAChoice = value;
       sync();
     });
-    heroButtons.push({ value, node });
-    heroGroup.appendChild(node);
+    heroAButtons.push({ value, node: nodeA });
+    cellA.appendChild(nodeA);
+    row.appendChild(cellA);
+
+    const cellB = el('div', 'hero-cell');
+    const nodeB = choiceButton('heroB', value, '○', () => {
+      heroBChoice = value;
+      sync();
+    });
+    heroBButtons.push({ value, node: nodeB });
+    cellB.appendChild(nodeB);
+    row.appendChild(cellB);
+
+    matrix.appendChild(row);
   }
-  heroRow.appendChild(heroGroup);
-  wrap.appendChild(heroRow);
+  wrap.appendChild(matrix);
 
   const firstRow = el('div', 'setup-row');
   const firstLabel = el('span', 'setup-label');
@@ -162,11 +187,17 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   start.className = 'setup-start';
   start.textContent = '开始游戏';
   start.addEventListener('click', () => {
-    const pickKey = (): (typeof HERO_KEYS)[number] =>
-      HERO_KEYS[Math.floor(Math.random() * HERO_KEYS.length)];
-    const heroAKey = heroChoice === 'random' ? pickKey() : heroChoice;
-    const others = HERO_KEYS.filter((k) => k !== heroAKey);
-    const heroBKey = others[Math.floor(Math.random() * others.length)];
+    const pickKey = (
+      pool: ReadonlyArray<(typeof HERO_KEYS)[number]>,
+    ): (typeof HERO_KEYS)[number] => pool[Math.floor(Math.random() * pool.length)];
+    let heroAKey = heroAChoice === 'random' ? pickKey(HERO_KEYS) : heroAChoice;
+    const heroBKey =
+      heroBChoice === 'random'
+        ? pickKey(HERO_KEYS.filter((k) => k !== heroAKey))
+        : heroBChoice;
+    if (heroAKey === heroBKey) {
+      heroAKey = pickKey(HERO_KEYS.filter((k) => k !== heroBKey));
+    }
     const heroA: [string, string, string] = HEROES[heroAKey];
     const heroB: [string, string, string] = HEROES[heroBKey];
     const firstPlayer: PlayerId =
@@ -176,8 +207,17 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   wrap.appendChild(start);
 
   function sync(): void {
-    for (const { value, node } of heroButtons) {
-      node.classList.toggle('selected', value === heroChoice);
+    for (const { value, node } of heroAButtons) {
+      node.classList.toggle('selected', value === heroAChoice);
+      const muted = value !== 'random' && value === heroBChoice;
+      node.classList.toggle('choice--muted', muted);
+      node.disabled = muted;
+    }
+    for (const { value, node } of heroBButtons) {
+      node.classList.toggle('selected', value === heroBChoice);
+      const muted = value !== 'random' && value === heroAChoice;
+      node.classList.toggle('choice--muted', muted);
+      node.disabled = muted;
     }
     for (const { value, node } of firstButtons) {
       node.classList.toggle('selected', value === firstChoice);

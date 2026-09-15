@@ -506,6 +506,47 @@ body {
   background: #f1efe9;
   border-color: var(--line);
 }
+.choice--muted {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f1efe9;
+  border-color: var(--line);
+  color: var(--muted);
+}
+.choice--muted:hover {
+  background: #f1efe9;
+  border-color: var(--line);
+}
+
+/* 选将矩阵：单表对齐 玩家A/玩家B 两列 */
+.hero-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hero-matrix-row {
+  display: grid;
+  grid-template-columns: 1fr 96px 96px;
+  align-items: center;
+  gap: 8px;
+}
+.hero-matrix-head {
+  font-size: 13px;
+  color: var(--muted);
+}
+.hero-matrix-head .hero-cell {
+  justify-content: center;
+  font-weight: 700;
+}
+.hero-cell {
+  display: flex;
+  justify-content: center;
+}
+.hero-cell .choice {
+  min-width: 52px;
+  padding: 4px 10px;
+  text-align: center;
+}
 .setup-start {
   align-self: flex-start;
   font: inherit;
