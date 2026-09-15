@@ -2,9 +2,9 @@ import type { DiceKind, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
 
 export type SelectStep =
-  | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number; filter?: (d: { value: number }) => boolean }
+  | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number; filter?: (d: { id: string; value: number; kind: DiceKind }) => boolean }
   | { kind: 'option'; label: string; options: { value: string; label: string }[] }
-  | { kind: 'number'; label: string; min: number; max: number }
+  | { kind: 'number'; label: string; min: number; max: number; fmt?: (n: number) => string }
   | { kind: 'slots'; label: string; kinds: DiceKind[] } // 每个代价骰位一个类型
 
 export interface StepArgs {
@@ -12,6 +12,7 @@ export interface StepArgs {
   player: PlayerId;
   chosenDice: string[][];
   options: string[];
+  numbers: number[];
   slots: string[][];
 }
 
@@ -36,6 +37,133 @@ const hasSword = (state: GameState, player: PlayerId): boolean =>
 const SLOTS_LABEL = '支付代价（可用「真实之剑」置换能力骰）';
 const repeatKind = (kind: DiceKind, n: number): DiceKind[] => Array.from({ length: n }, () => kind);
 
+const KIND_CN: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+const kindCount = (state: GameState, player: PlayerId, kind: DiceKind): number =>
+  state.players[player].areas[kind].length;
+const totalDice = (state: GameState, player: PlayerId): number =>
+  KINDS.reduce((n, k) => n + state.players[player].areas[k].length, 0);
+/** 把一串 id 每 2 个配成一对（用于「置换」骰位） */
+const chunkPairs = (ids: string[]): string[][] => {
+  const out: string[][] = [];
+  for (let i = 0; i + 1 < ids.length; i += 2) out.push([ids[i], ids[i + 1]]);
+  return out;
+};
+
+/** 一次“消耗 N 个<类型>骰”代价的静态描述 */
+interface CostSpec {
+  /** 技能显示名（用于步骤用语） */
+  skill: string;
+  /** 所需骰类型 */
+  kind: DiceKind;
+  /** 骰位上限 */
+  maxSlots: number;
+  /** 数量是否可变（1..maxSlots）；false 表示恰好 maxSlots 颗 */
+  variable: boolean;
+}
+
+/** 最多可支付的骰位数：2N ≤（总骰数 + 该类型真骰数），且不超过上限 */
+function maxSlotsFor(state: GameState, player: PlayerId, spec: CostSpec): number {
+  const bound = Math.floor((totalDice(state, player) + kindCount(state, player, spec.kind)) / 2);
+  return Math.max(0, Math.min(spec.maxSlots, bound));
+}
+
+/** 给定骰位数 N，可行的置换数区间 [minM, maxM]（连续） */
+function mRangeFor(state: GameState, player: PlayerId, spec: CostSpec, N: number): [number, number] {
+  const minM = Math.max(0, N - kindCount(state, player, spec.kind));
+  const maxM = Math.min(N, totalDice(state, player) - N);
+  return [minM, Math.max(minM, maxM)];
+}
+
+/** 读取玩家已选的置换数 M（可变数量技能：numbers[1]；固定数量：numbers[0]） */
+const chosenM = (spec: CostSpec, numbers: number[]): number =>
+  spec.variable ? (numbers[1] ?? 0) : (numbers[0] ?? 0);
+
+/** 真实之剑激活时，「支付 N 个骰位」的统一向导步骤（①数量 ②置换数 ③真实骰 ④任意骰） */
+function swordCostSteps(
+  state: GameState,
+  player: PlayerId,
+  spec: CostSpec,
+  numbers: number[],
+  chosenDice: string[][],
+): SelectStep[] {
+  const typeName = KIND_CN[spec.kind];
+  const steps: SelectStep[] = [];
+  const maxN = Math.max(1, maxSlotsFor(state, player, spec));
+  const N = spec.variable ? numbers[0] ?? 1 : spec.maxSlots;
+  if (spec.variable) {
+    steps.push({
+      kind: 'number',
+      label: `请选择「${spec.skill}」本次结算消耗几颗${typeName}骰`,
+      min: 1,
+      max: maxN,
+      fmt: (n) => `${n} 颗`,
+    });
+  }
+  const [minM, maxM] = mRangeFor(state, player, spec, N);
+  steps.push({
+    kind: 'number',
+    label: `请选择「真实之剑」置换填充几颗${typeName}骰（2 颗任意骰＝1 颗，点数按 5；0 为不置换）`,
+    min: minM,
+    max: maxM,
+    fmt: (n) => (n === 0 ? '不置换' : `置换 ${n} 颗`),
+  });
+  const M = chosenM(spec, numbers);
+  const realCount = N - M;
+  steps.push({
+    kind: 'dice',
+    label: `请选择「${spec.skill}」实际消耗的${typeName}骰`,
+    owner: 'self',
+    areas: [spec.kind],
+    min: realCount,
+    max: realCount,
+  });
+  if (M > 0) {
+    const realPicked = new Set(chosenDice[0] ?? []);
+    steps.push({
+      kind: 'dice',
+      label: `请选择用于置换的任意 ${M * 2} 颗能力骰（每 2 颗顶 1 颗${typeName}骰）`,
+      owner: 'self',
+      areas: KINDS,
+      min: M * 2,
+      max: M * 2,
+      filter: (d) => !realPicked.has(d.id),
+    });
+  }
+  return steps;
+}
+
+/** 从向导状态组装 costSlots；groups = 代价占用的 chosenDice 组数（供后续步骤定位） */
+function costPart(
+  state: GameState,
+  player: PlayerId,
+  spec: CostSpec,
+  numbers: number[],
+  chosenDice: string[][],
+): { costSlots: { dieIds: string[] }[]; groups: number } {
+  if (!hasSword(state, player)) {
+    return { costSlots: realSlots(chosenDice[0]), groups: 1 };
+  }
+  const M = chosenM(spec, numbers);
+  const real = chosenDice[0] ?? [];
+  const conv = M > 0 ? chosenDice[1] ?? [] : [];
+  return {
+    costSlots: [
+      ...real.map((id) => ({ dieIds: [id] })),
+      ...chunkPairs(conv).map((pair) => ({ dieIds: pair })),
+    ],
+    groups: M > 0 ? 2 : 1,
+  };
+}
+
+const SPEC_YUQIE: CostSpec = { skill: '中央突破', kind: 'meditation', maxSlots: 3, variable: true };
+const SPEC_TENGWAN: CostSpec = { skill: '龙腾万丈', kind: 'meditation', maxSlots: 3, variable: false };
+const SPEC_QIANXING: CostSpec = { skill: '潜行', kind: 'attack', maxSlots: 2, variable: false };
+const SPEC_CUILIAN: CostSpec = { skill: '淬炼', kind: 'attack', maxSlots: 1, variable: false };
+const SPEC_FIST: CostSpec = { skill: '王家之拳', kind: 'meditation', maxSlots: 2, variable: false };
+const SPEC_BARRIER: CostSpec = { skill: '灵能屏障', kind: 'defense', maxSlots: 3, variable: true };
+const SPEC_PULSE: CostSpec = { skill: '灵能脉冲', kind: 'attack', maxSlots: 3, variable: true };
+const SPEC_WANSHA: CostSpec = { skill: '零时枭首', kind: 'attack', maxSlots: 1, variable: false };
+
 function ownDieValue(state: GameState, player: PlayerId, id: string | undefined): number | undefined {
   if (!id) return undefined;
   for (const k of KINDS) {
@@ -47,55 +175,54 @@ function ownDieValue(state: GameState, player: PlayerId, id: string | undefined)
 
 export const SKILL_SELECTION: Record<string, SkillSelection> = {
   'yuqie.breakthrough': {
-    steps: ({ state, player, chosenDice, slots }) => {
+    steps: ({ state, player, chosenDice, numbers }) => {
       const selfMed = state.players[player].areas.meditation.length;
       const oppDef = state.players[oppOf(player)].areas.defense.length;
       if (hasSword(state, player)) {
-        const n = Math.min(3, selfMed);
+        const n = numbers[0] ?? 1;
         const need = Math.min(n, oppDef);
         return [
-          { kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('meditation', n) },
+          ...swordCostSteps(state, player, SPEC_YUQIE, numbers, chosenDice),
           { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
         ];
       }
       const medCount = chosenDice[0]?.length ?? 0;
       const need = Math.min(medCount, oppDef);
-      void slots;
       return [
         { kind: 'dice', label: '选择消耗的冥想骰（1–3 颗）', owner: 'self', areas: ['meditation'], min: 1, max: Math.min(3, selfMed) },
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
-      opponentDefenseDieIds: slots.length ? (chosenDice[0] ?? []) : (chosenDice[1] ?? []),
-    }),
+    buildParams: ({ state, player, chosenDice, numbers }) => {
+      const { costSlots, groups } = costPart(state, player, SPEC_YUQIE, numbers, chosenDice);
+      return { costSlots, opponentDefenseDieIds: chosenDice[groups] ?? [] };
+    },
   },
   'youlong.tengwan': {
-    steps: ({ state, player }) =>
+    steps: ({ state, player, chosenDice, numbers }) =>
       hasSword(state, player)
-        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('meditation', 3) }]
+        ? swordCostSteps(state, player, SPEC_TENGWAN, numbers, chosenDice)
         : [{ kind: 'dice', label: '选择消耗的冥想骰（恰好 3 颗）', owner: 'self', areas: ['meditation'], min: 3, max: 3 }],
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_TENGWAN, numbers, chosenDice).costSlots,
     }),
   },
   'yingle.qianxing': {
-    steps: ({ state, player }) =>
+    steps: ({ state, player, chosenDice, numbers }) =>
       hasSword(state, player)
-        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('attack', 2) }]
+        ? swordCostSteps(state, player, SPEC_QIANXING, numbers, chosenDice)
         : [{ kind: 'dice', label: '选择消耗的攻击骰（恰好 2 颗）', owner: 'self', areas: ['attack'], min: 2, max: 2 }],
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_QIANXING, numbers, chosenDice).costSlots,
     }),
   },
   'buxiang.cuilian': {
-    steps: ({ state, player }) =>
+    steps: ({ state, player, chosenDice, numbers }) =>
       hasSword(state, player)
-        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('attack', 1) }]
+        ? swordCostSteps(state, player, SPEC_CUILIAN, numbers, chosenDice)
         : [{ kind: 'dice', label: '选择消耗的攻击骰（恰好 1 颗）', owner: 'self', areas: ['attack'], min: 1, max: 1 }],
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_CUILIAN, numbers, chosenDice).costSlots,
     }),
   },
   'yingle.yingxi': {
@@ -114,24 +241,28 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ chosenDice, numbers }) => ({ dieId: chosenDice[0]?.[0], x: numbers[0] }),
   },
   'wansha.ultimate': {
-    steps: ({ state, player, chosenDice, slots }) => {
-      const sword = hasSword(state, player);
-      const costIds = sword ? (slots[0] ?? []) : (chosenDice[0] ?? []);
-      const costValue = costIds.length === 2 ? 5 : (ownDieValue(state, player, costIds[0]) ?? 0);
+    steps: ({ state, player, chosenDice, numbers }) => {
       const oppDef = state.players[oppOf(player)].areas.defense.length;
+      if (hasSword(state, player)) {
+        const M = chosenM(SPEC_WANSHA, numbers);
+        const costValue = M > 0 ? 5 : ownDieValue(state, player, chosenDice[0]?.[0]) ?? 0;
+        const need = Math.min(costValue, oppDef);
+        return [
+          ...swordCostSteps(state, player, SPEC_WANSHA, numbers, chosenDice),
+          { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
+        ];
+      }
+      const costValue = ownDieValue(state, player, chosenDice[0]?.[0]) ?? 0;
       const need = Math.min(costValue, oppDef);
-      const cost: SelectStep = sword
-        ? { kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('attack', 1) }
-        : { kind: 'dice', label: '选择消耗的攻击骰（恰好 1 颗）', owner: 'self', areas: ['attack'], min: 1, max: 1 };
       return [
-        cost,
+        { kind: 'dice', label: '选择消耗的攻击骰（恰好 1 颗）', owner: 'self', areas: ['attack'], min: 1, max: 1 },
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
-      opponentDefenseDieIds: slots.length ? (chosenDice[0] ?? []) : (chosenDice[1] ?? []),
-    }),
+    buildParams: ({ state, player, chosenDice, numbers }) => {
+      const { costSlots, groups } = costPart(state, player, SPEC_WANSHA, numbers, chosenDice);
+      return { costSlots, opponentDefenseDieIds: chosenDice[groups] ?? [] };
+    },
   },
   'mingjing.ultimate': {
     steps: ({ state, player, chosenDice }) => {
@@ -234,42 +365,64 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
   },
   // 008 王家之拳：消耗 2 颗冥想骰 → 弃置自己的 0–2 颗防御骰（不足可少弃，代价为真实伤害）
   'tiebi.fist': {
-    steps: ({ state, player }) => {
-      const cost: SelectStep = hasSword(state, player)
-        ? { kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('meditation', 2) }
-        : { kind: 'dice', label: '选择消耗的冥想骰（恰好 2 颗）', owner: 'self', areas: ['meditation'], min: 2, max: 2 };
+    steps: ({ state, player, chosenDice, numbers }) => {
+      const discard: SelectStep = {
+        kind: 'dice',
+        label: '选择弃置的防御骰（0–2 颗，不足可少弃）',
+        owner: 'self',
+        areas: ['defense'],
+        min: 0,
+        max: 2,
+      };
+      if (hasSword(state, player)) {
+        return [...swordCostSteps(state, player, SPEC_FIST, numbers, chosenDice), discard];
+      }
       return [
-        cost,
-        { kind: 'dice', label: '选择弃置的防御骰（0–2 颗，不足可少弃）', owner: 'self', areas: ['defense'], min: 0, max: 2 },
+        { kind: 'dice', label: '选择消耗的冥想骰（恰好 2 颗）', owner: 'self', areas: ['meditation'], min: 2, max: 2 },
+        discard,
       ];
     },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
-      defenseDieIds: slots.length ? (chosenDice[0] ?? []) : (chosenDice[1] ?? []),
-    }),
+    buildParams: ({ state, player, chosenDice, numbers }) => {
+      const { costSlots, groups } = costPart(state, player, SPEC_FIST, numbers, chosenDice);
+      return { costSlots, defenseDieIds: chosenDice[groups] ?? [] };
+    },
   },
   // 011 灵能屏障·启动：消耗最多 3 颗防御骰 → 获得 2 倍冥想骰
   'dunwu.barrier.activate': {
-    steps: ({ state, player }) => {
-      const max = Math.min(3, state.players[player].areas.defense.length);
-      return hasSword(state, player)
-        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('defense', max) }]
-        : [{ kind: 'dice', label: '选择消耗的防御骰（1–3 颗）', owner: 'self', areas: ['defense'], min: 1, max }];
-    },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+    steps: ({ state, player, chosenDice, numbers }) =>
+      hasSword(state, player)
+        ? swordCostSteps(state, player, SPEC_BARRIER, numbers, chosenDice)
+        : [
+            {
+              kind: 'dice',
+              label: '选择消耗的防御骰（1–3 颗）',
+              owner: 'self',
+              areas: ['defense'],
+              min: 1,
+              max: Math.min(3, state.players[player].areas.defense.length),
+            },
+          ],
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_BARRIER, numbers, chosenDice).costSlots,
     }),
   },
   // 011 灵能脉冲·启动：消耗最多 3 颗攻击骰 → 获得 2 倍冥想骰
   'dunwu.pulse.activate': {
-    steps: ({ state, player }) => {
-      const max = Math.min(3, state.players[player].areas.attack.length);
-      return hasSword(state, player)
-        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('attack', max) }]
-        : [{ kind: 'dice', label: '选择消耗的攻击骰（1–3 颗）', owner: 'self', areas: ['attack'], min: 1, max }];
-    },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+    steps: ({ state, player, chosenDice, numbers }) =>
+      hasSword(state, player)
+        ? swordCostSteps(state, player, SPEC_PULSE, numbers, chosenDice)
+        : [
+            {
+              kind: 'dice',
+              label: '选择消耗的攻击骰（1–3 颗）',
+              owner: 'self',
+              areas: ['attack'],
+              min: 1,
+              max: Math.min(3, state.players[player].areas.attack.length),
+            },
+          ],
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_PULSE, numbers, chosenDice).costSlots,
     }),
   },
   // 012 魔女·必杀 梦醒时分：选择目标区域 → 选择 1–3 颗冥想骰移动（保留点数）

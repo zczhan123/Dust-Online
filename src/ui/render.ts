@@ -313,7 +313,7 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   const spec = SKILL_SELECTION[key];
   if (spec) {
     const player = ctx.state.activePlayer;
-    const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [], slots: [] });
+    const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [], numbers: [], slots: [] });
     if (steps.length === 0) {
       const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], options: [], numbers: [], slots: [] });
       const built: SkillAction = {
@@ -1029,7 +1029,7 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const spec = SKILL_SELECTION[sel.key];
   if (!spec) return null;
   const { state, hooks } = ctx;
-  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
+  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
   const step = steps[sel.stepIndex];
   const panel = el('div', 'selector');
   if (!step) return panel;
@@ -1066,7 +1066,7 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
       b.type = 'button';
       b.className = 'btn number-btn';
       if (sel.numbers[sel.stepIndex] === n) b.classList.add('number-btn--on');
-      b.textContent = String(n);
+      b.textContent = step.fmt ? step.fmt(n) : String(n);
       b.addEventListener('click', () => {
         sel.numbers[sel.stepIndex] = n;
         hooks.requestRender();
@@ -1128,7 +1128,7 @@ function confirmSelection(ctx: Ctx): void {
   }
   const { state, hooks } = ctx;
   const player = state.activePlayer;
-  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
+  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
   const step = steps[sel.stepIndex];
   if (!step) {
     hooks.ui.selection = null;
@@ -1154,7 +1154,7 @@ function confirmSelection(ctx: Ctx): void {
   }
   sel.stepIndex += 1;
 
-  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
+  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
   if (sel.stepIndex >= nextSteps.length) {
     const numberIdx = nextSteps
       .map((s, i) => (s.kind === 'number' ? i : -1))
@@ -1621,6 +1621,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       player: state.activePlayer,
       chosenDice: sel.chosenDice,
       options: sel.options,
+      numbers: sel.numbers,
       slots: sel.slots,
     });
     const step = steps[sel.stepIndex];

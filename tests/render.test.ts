@@ -1019,64 +1019,76 @@ describe('renderGame (interaction)', () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it('pays a skill cost with 置换 via the slots step when 真实之剑 is active', () => {
+  it('offers 3 slots even with only 2 attack dice: 灵能脉冲 + 真实之剑 (N=3, M=1)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑
-    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障
+    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right'; // 灵能脉冲
     state.players.A.areas = {
       attack: [
-        { id: 'sa1', value: 2, kind: 'attack' },
-        { id: 'sa2', value: 3, kind: 'attack' },
+        { id: 'atk1', value: 2, kind: 'attack' },
+        { id: 'atk2', value: 3, kind: 'attack' },
       ],
-      defense: [{ id: 'sd1', value: 4, kind: 'defense' }],
-      meditation: [],
+      defense: [{ id: 'def1', value: 4, kind: 'defense' }],
+      meditation: [
+        { id: 'med1', value: 5, kind: 'meditation' },
+        { id: 'med2', value: 6, kind: 'meditation' },
+      ],
     };
 
     const { ui, onAction } = mount(state, root);
+    const numberBtn = (label: string) =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .number-btn')).find(
+        (b) => b.textContent === label,
+      );
+    const okBtn = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+        (b) => b.textContent === '确认',
+      )!;
+    const clickDie = (id: string) =>
+      root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
 
-    const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="011"] .skill-part[data-side="left"].clickable',
-    );
-    expect(box).not.toBeNull();
-    box!.click();
-    expect(onAction).not.toHaveBeenCalled();
-    expect(ui.selection).not.toBeNull();
-    expect(ui.selection!.key).toBe('dunwu.barrier.activate');
+    root
+      .querySelector<HTMLElement>(
+        '.player--self .card[data-artifact="011"] .skill-part[data-side="right"].clickable',
+      )!
+      .click();
+    expect(ui.selection!.key).toBe('dunwu.pulse.activate');
 
-    // 代价改为「slots」步骤（1 个防御骰位）
-    expect(root.querySelector('.selector .paypanel--slots')).not.toBeNull();
-    expect(root.querySelectorAll('.selector .slot-row').length).toBe(1);
+    // ① 结算数量：应提供 1/2/3（不再被「只有 2 颗攻击骰」限制为 2 格）
+    expect(numberBtn('1 颗')).toBeTruthy();
+    expect(numberBtn('2 颗')).toBeTruthy();
+    expect(numberBtn('3 颗')).toBeTruthy();
+    numberBtn('3 颗')!.click();
+    okBtn().click();
 
-    // 切换到置换模式，用 2 颗任意骰填满该格
-    root.querySelector<HTMLButtonElement>('.selector .slot-btn[data-mode="convert"]')!.click();
-    root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa1"]')!.click();
-    root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa2"]')!.click();
+    // ② 置换数量：N=3 时 0 颗不可行（只有 2 颗真实攻击骰），只能置换 1–2 颗
+    expect(numberBtn('不置换')).toBeUndefined();
+    expect(numberBtn('置换 1 颗')).toBeTruthy();
+    expect(numberBtn('置换 2 颗')).toBeTruthy();
+    numberBtn('置换 1 颗')!.click();
+    okBtn().click();
 
-    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
-      (b) => b.textContent === '确认',
-    )!;
-    expect(ok.disabled).toBe(false);
-    ok.click();
+    // ③ 真实攻击骰：N−M = 2 颗
+    clickDie('atk1');
+    clickDie('atk2');
+    okBtn().click();
+
+    // ④ 置换用的任意骰：2M = 2 颗（不含已作真实骰的 atk1/atk2）
+    clickDie('def1');
+    clickDie('med1');
+    okBtn().click();
 
     expect(onAction).not.toHaveBeenCalled();
     expect(ui.pendingConfirm).not.toBeNull();
     expect(ui.pendingConfirm!.action).toEqual({
       t: 'skill',
       artifactId: '011',
-      side: 'left',
-      params: { costSlots: [{ dieIds: ['sa1', 'sa2'] }] },
-    });
-
-    const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
-    expect(confirmBtn).not.toBeNull();
-    confirmBtn!.click();
-    expect(onAction).toHaveBeenCalledWith({
-      t: 'skill',
-      artifactId: '011',
-      side: 'left',
-      params: { costSlots: [{ dieIds: ['sa1', 'sa2'] }] },
+      side: 'right',
+      params: {
+        costSlots: [{ dieIds: ['atk1'] }, { dieIds: ['atk2'] }, { dieIds: ['def1', 'med1'] }],
+      },
     });
   });
 
