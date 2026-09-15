@@ -719,7 +719,7 @@ button.pay-die {
   outline: 2px solid #1b4f9c;
   outline-offset: 1px;
 }
-.pay-die--used {
+.pay-die.pay-die--used {
   background: #cbd2da;
   color: #6b7280;
   opacity: 0.7;

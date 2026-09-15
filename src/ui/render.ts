@@ -960,7 +960,7 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
   const diceBox = el('div', 'pay-dice');
   for (const k of AREA_ORDER) {
     for (const d of payer.areas[k]) {
-      const die = el('span', 'pay-die');
+      const die = el('span', `pay-die die-${payer.id}`);
       die.dataset.id = d.id;
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);
@@ -1311,7 +1311,7 @@ function payPanelView(ctx: Ctx): HTMLElement {
   const diceBox = el('div', 'pay-dice');
   for (const k of AREA_ORDER) {
     for (const d of payer.areas[k]) {
-      const die = el('span', 'pay-die');
+      const die = el('span', `pay-die die-${payer.id}`);
       die.dataset.id = d.id;
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);
@@ -1461,7 +1461,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
     const diceBox = el('div', 'pay-dice');
     for (const k of AREA_ORDER) {
       for (const d of payer.areas[k]) {
-        const die = el('span', 'pay-die');
+        const die = el('span', `pay-die die-${payer.id}`);
         die.dataset.id = d.id;
         die.dataset.kind = d.kind;
         die.dataset.value = String(d.value);
@@ -1494,7 +1494,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
     medSection.appendChild(medLabel);
     const medDice = el('div', 'pay-dice');
     for (const d of payer.areas.meditation) {
-      const die = el('span', 'pay-die');
+      const die = el('span', `pay-die die-${payer.id}`);
       die.dataset.id = d.id;
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);

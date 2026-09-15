@@ -1092,6 +1092,7 @@ describe('dust-rise 2-step flow', () => {
 
     const dieEl = root.querySelector<HTMLElement>(`.dustflow .pay-die[data-id="${med.id}"]`)!;
     expect(dieEl).not.toBeNull();
+    expect(dieEl.classList.contains('die-A')).toBe(true);
     dieEl.click();
     expect(onAction).toHaveBeenCalledWith({
       t: 'dustRise',
