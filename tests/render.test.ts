@@ -911,4 +911,107 @@ describe('renderGame (interaction)', () => {
     expect(ui.payPanel).toBeNull();
     expect(onAction).not.toHaveBeenCalled();
   });
+
+  it('pays a skill cost with 折算 via the slots step when 真实之剑 is active', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑
+    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障
+    state.players.A.areas = {
+      attack: [
+        { id: 'sa1', value: 2, kind: 'attack' },
+        { id: 'sa2', value: 3, kind: 'attack' },
+      ],
+      defense: [{ id: 'sd1', value: 4, kind: 'defense' }],
+      meditation: [],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="011"] .skill-part[data-side="left"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.selection).not.toBeNull();
+    expect(ui.selection!.key).toBe('dunwu.barrier.activate');
+
+    // 代价改为「slots」步骤（1 个防御骰位）
+    expect(root.querySelector('.selector .paypanel--slots')).not.toBeNull();
+    expect(root.querySelectorAll('.selector .slot-row').length).toBe(1);
+
+    // 切换到折算模式，用 2 颗任意骰填满该格
+    root.querySelector<HTMLButtonElement>('.selector .slot-btn[data-mode="convert"]')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa1"]')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="sa2"]')!.click();
+
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'left',
+      params: { costSlots: [{ dieIds: ['sa1', 'sa2'] }] },
+    });
+
+    const confirmBtn = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm');
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '011',
+      side: 'left',
+      params: { costSlots: [{ dieIds: ['sa1', 'sa2'] }] },
+    });
+  });
+
+  it('uses the normal all-real dice step for a skill cost when 真实之剑 is inactive', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障（010 未激活）
+    state.players.A.areas = {
+      attack: [
+        { id: 'na1', value: 2, kind: 'attack' },
+        { id: 'na2', value: 3, kind: 'attack' },
+      ],
+      defense: [{ id: 'nd1', value: 4, kind: 'defense' }],
+      meditation: [],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const box = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="011"] .skill-part[data-side="left"].clickable',
+    );
+    expect(box).not.toBeNull();
+    box!.click();
+    expect(ui.selection).not.toBeNull();
+    // 未激活 010：仍是普通选骰步骤，没有 slots 面板
+    expect(root.querySelector('.selector .paypanel--slots')).toBeNull();
+
+    root.querySelector<HTMLElement>('.player--self .die[data-id="nd1"]')!.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm).not.toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'skill',
+      artifactId: '011',
+      side: 'left',
+      params: { costSlots: [{ dieIds: ['nd1'] }] },
+    });
+  });
 });

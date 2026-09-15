@@ -46,6 +46,10 @@ export interface UiState {
     options: string[];
     currentSel: Set<string>;
     numbers: number[];
+    /** 「slots」步骤的已填骰位（每格长度 1=真骰，2=折算） */
+    slots: string[][];
+    /** 「slots」步骤每格的填充模式 */
+    slotModes: ('real' | 'convert')[];
   };
   pendingConfirm: null | { action: Action; label: string };
   payPanel: null | {
@@ -81,6 +85,8 @@ interface Ctx {
   selectionOwner: PlayerId | null;
   /** 折算支付面板开启时禁用区域骰点击，避免歧义 */
   payPanelOpen: boolean;
+  /** 技能选择器处于「slots」步骤时，区域骰由选择器内部处理，禁用区域骰点击 */
+  slotsStepOpen: boolean;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -268,9 +274,9 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   const spec = SKILL_SELECTION[key];
   if (spec) {
     const player = ctx.state.activePlayer;
-    const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [] });
+    const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [], slots: [] });
     if (steps.length === 0) {
-      const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], options: [], numbers: [] });
+      const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], options: [], numbers: [], slots: [] });
       const built: SkillAction = {
         t: 'skill',
         artifactId: action.artifactId,
@@ -290,6 +296,8 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
     options: [],
     currentSel: new Set<string>(),
     numbers: [],
+    slots: [],
+    slotModes: [],
   };
   ctx.hooks.requestRender();
 }
@@ -304,6 +312,8 @@ function startDustRiseSelection(ctx: Ctx, act: DustRiseAction): void {
     options: [],
     currentSel: new Set<string>(),
     numbers: [],
+    slots: [],
+    slotModes: [],
   };
   ctx.hooks.requestRender();
 }
@@ -489,8 +499,8 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    if (ctx.payPanelOpen) {
-      // 折算支付面板开启时，区域骰不可点击
+    if (ctx.payPanelOpen || ctx.slotsStepOpen) {
+      // 折算支付面板 / 技能代价骰位面板开启时，区域骰不可点击
     } else if (diceStep) {
       const step = diceStep;
       const selectable = !step.filter || step.filter(d);
@@ -881,13 +891,92 @@ function operationList(ctx: Ctx): HTMLElement {
   return box;
 }
 
+/** 技能代价「slots」步骤：复用分格支付面板的呈现（每格 真骰/折算） */
+function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLElement {
+  const { state, hooks } = ctx;
+  if (sel.slots.length !== step.kinds.length) {
+    sel.slots = step.kinds.map(() => []);
+    sel.slotModes = step.kinds.map(() => 'real');
+  }
+
+  const box = el('div', 'paypanel paypanel--slots');
+  for (let i = 0; i < step.kinds.length; i++) {
+    const row = el('div', 'slot-row');
+    row.dataset.slot = String(i);
+
+    const head = el('div', 'slot-head');
+    const kindName = KIND_NAMES[step.kinds[i]];
+    const name = el('span', 'slot-name');
+    name.textContent = `格${i + 1}（${kindName}）`;
+    head.appendChild(name);
+
+    const modeDefs: { mode: 'real' | 'convert'; text: string }[] = [
+      { mode: 'real', text: `用 1 颗${kindName}` },
+      { mode: 'convert', text: '折算 2 颗任意' },
+    ];
+    for (const m of modeDefs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `btn slot-btn${sel.slotModes[i] === m.mode ? ' slot-btn--on' : ''}`;
+      b.dataset.mode = m.mode;
+      b.textContent = m.text;
+      b.addEventListener('click', () => {
+        if (sel.slotModes[i] === m.mode) return;
+        sel.slotModes[i] = m.mode;
+        sel.slots[i] = [];
+        hooks.requestRender();
+      });
+      head.appendChild(b);
+    }
+
+    const summary = el('span', 'slot-summary');
+    summary.textContent = slotSummary(state, step.kinds, sel.slotModes, sel.slots, i);
+    head.appendChild(summary);
+
+    row.appendChild(head);
+    box.appendChild(row);
+  }
+
+  const payer = state.players[state.activePlayer];
+  const current = firstUnfilledSelSlot(sel, step);
+  const used = new Set(sel.slots.flat());
+  const diceBox = el('div', 'pay-dice');
+  for (const k of AREA_ORDER) {
+    for (const d of payer.areas[k]) {
+      const die = el('span', 'pay-die');
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (used.has(d.id)) {
+        die.classList.add('pay-die--used');
+      } else if (current >= 0) {
+        const allowed = sel.slotModes[current] === 'convert' || d.kind === step.kinds[current];
+        if (allowed) {
+          die.classList.add('clickable');
+          die.addEventListener('click', () => assignSelDie(ctx, sel, step, d));
+        }
+      }
+      diceBox.appendChild(die);
+    }
+  }
+  box.appendChild(diceBox);
+
+  const info = el('div', 'selector-info');
+  const filled = step.kinds.filter((_, i) => sel.slots[i].length >= selSlotSize(sel.slotModes[i])).length;
+  info.textContent = `已填 ${filled}/${step.kinds.length}`;
+  box.appendChild(info);
+
+  return box;
+}
+
 function chooserPanel(ctx: Ctx): HTMLElement | null {
   const sel: ActiveSelection | null = ctx.hooks.ui.selection;
   if (!sel) return null;
   const spec = SKILL_SELECTION[sel.key];
   if (!spec) return null;
   const { state, hooks } = ctx;
-  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options });
+  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
   const step = steps[sel.stepIndex];
   const panel = el('div', 'selector');
   if (!step) return panel;
@@ -916,6 +1005,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
       row.appendChild(b);
     }
     panel.appendChild(row);
+  } else if (step.kind === 'slots') {
+    panel.appendChild(slotsStepView(ctx, sel, step));
   } else {
     const nums = el('div', 'number-row');
     for (let n = step.min; n <= step.max; n++) {
@@ -951,6 +1042,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
     satisfied = sel.currentSel.size >= step.min && sel.currentSel.size <= step.max;
   } else if (step.kind === 'option') {
     satisfied = step.options.some((o) => o.value === sel.options[sel.stepIndex]);
+  } else if (step.kind === 'slots') {
+    satisfied = allSelSlotsFilled(sel, step);
   } else {
     satisfied = Number.isInteger(chosenNum) && chosenNum >= step.min && chosenNum <= step.max;
   }
@@ -978,7 +1071,7 @@ function confirmSelection(ctx: Ctx): void {
   }
   const { state, hooks } = ctx;
   const player = state.activePlayer;
-  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options });
+  const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
   const step = steps[sel.stepIndex];
   if (!step) {
     hooks.ui.selection = null;
@@ -995,10 +1088,16 @@ function confirmSelection(ctx: Ctx): void {
       return;
     }
     sel.chosenDice.push([]);
+  } else if (step.kind === 'slots') {
+    if (!allSelSlotsFilled(sel, step)) {
+      hooks.requestRender();
+      return;
+    }
+    sel.slots = sel.slots.map((ids) => [...ids]);
   }
   sel.stepIndex += 1;
 
-  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options });
+  const nextSteps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, slots: sel.slots });
   if (sel.stepIndex >= nextSteps.length) {
     if (sel.key === '@dustRise') {
       const medId = sel.chosenDice.flat()[0];
@@ -1017,7 +1116,7 @@ function confirmSelection(ctx: Ctx): void {
       .map((s, i) => (s.kind === 'number' ? i : -1))
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
-    const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers });
+    const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers, slots: sel.slots });
     const action: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
     hooks.ui.selection = null;
     hooks.propose(action, skillActionLabel(ctx, action));
@@ -1093,18 +1192,51 @@ function usedDieIds(panel: PayPanel): Set<string> {
   return new Set(panel.slots.flat());
 }
 
-function slotSummary(state: GameState, panel: PayPanel, i: number): string {
-  const ids = panel.slots[i];
+function slotSummary(
+  state: GameState,
+  kinds: DiceKind[],
+  modes: ('real' | 'convert')[],
+  slots: string[][],
+  i: number,
+): string {
+  const ids = slots[i];
   if (ids.length === 0) return '（未填）';
-  const kindShort = KIND_SHORT[panel.kinds[i]];
+  const kindShort = KIND_SHORT[kinds[i]];
   const dice = ids.map((id) => findDie(state, id)).filter((d): d is Die => d !== undefined);
-  if (panel.modes[i] === 'real') {
+  if (modes[i] === 'real') {
     const d = dice[0];
     return d ? `${KIND_SHORT[d.kind]}${d.value}（真骰）` : '（真骰）';
   }
   const parts = dice.map((d) => `${KIND_SHORT[d.kind]}${d.value}`);
   const arrow = dice.length >= 2 ? ` → 视为${kindShort}5` : '';
   return `折算：${parts.join('+')}${arrow}`;
+}
+
+type SlotsStep = Extract<SelectStep, { kind: 'slots' }>;
+
+function selSlotSize(mode: 'real' | 'convert'): number {
+  return mode === 'real' ? 1 : 2;
+}
+
+function firstUnfilledSelSlot(sel: ActiveSelection, step: SlotsStep): number {
+  for (let i = 0; i < step.kinds.length; i++) {
+    if (sel.slots[i].length < selSlotSize(sel.slotModes[i])) return i;
+  }
+  return -1;
+}
+
+function allSelSlotsFilled(sel: ActiveSelection, step: SlotsStep): boolean {
+  if (sel.slots.length !== step.kinds.length) return false;
+  return sel.slots.every((_, i) => sel.slots[i].length >= selSlotSize(sel.slotModes[i]));
+}
+
+function assignSelDie(ctx: Ctx, sel: ActiveSelection, step: SlotsStep, d: Die): void {
+  const i = firstUnfilledSelSlot(sel, step);
+  if (i < 0) return;
+  if (sel.slotModes[i] === 'real' && d.kind !== step.kinds[i]) return;
+  if (sel.slots.flat().includes(d.id)) return;
+  sel.slots[i].push(d.id);
+  ctx.hooks.requestRender();
 }
 
 function assignPayDie(ctx: Ctx, d: Die): void {
@@ -1156,7 +1288,7 @@ function payPanelView(ctx: Ctx): HTMLElement {
     }
 
     const summary = el('span', 'slot-summary');
-    summary.textContent = slotSummary(ctx.state, panel, i);
+    summary.textContent = slotSummary(ctx.state, panel.kinds, panel.modes, panel.slots, i);
     head.appendChild(summary);
 
     row.appendChild(head);
@@ -1244,17 +1376,21 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const sel = hooks.ui.selection;
   let selectionStep: SelectStep | null = null;
   let selectionOwner: PlayerId | null = null;
+  let slotsStepOpen = false;
   if (sel && SKILL_SELECTION[sel.key]) {
     const steps = SKILL_SELECTION[sel.key].steps({
       state,
       player: state.activePlayer,
       chosenDice: sel.chosenDice,
       options: sel.options,
+      slots: sel.slots,
     });
     const step = steps[sel.stepIndex];
     if (step && step.kind === 'dice') {
       selectionStep = step;
       selectionOwner = step.owner === 'self' ? state.activePlayer : enemyId;
+    } else if (step && step.kind === 'slots') {
+      slotsStepOpen = true;
     }
   }
 
@@ -1266,6 +1402,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     selectionStep,
     selectionOwner,
     payPanelOpen: hooks.ui.payPanel != null,
+    slotsStepOpen,
   };
 
   root.innerHTML = '';
