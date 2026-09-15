@@ -107,8 +107,36 @@ describe('renderGame (read-only snapshot)', () => {
     yuqie.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
     const card = root.querySelector('.player--self .card[data-artifact="001"]')!;
-    expect(card.querySelectorAll('.skill--on').length).toBe(1);
-    expect(card.querySelectorAll('.skill--off').length).toBe(1);
+    expect(card.querySelectorAll('.skill-part--on').length).toBe(1);
+    expect(card.querySelectorAll('.skill-part--off').length).toBe(1);
+  });
+
+  it('renders one .skill box per shared skill name with one part per entry (009 高塔铁幕)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['009', '002', '003'] });
+    state.players.A.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left';
+    renderGame(state, root, hooksFor());
+    const card = root.querySelector('.player--self .card[data-artifact="009"]')!;
+    const boxes = Array.from(card.querySelectorAll('.skill')).filter(
+      (b) => b.querySelector('.skill-name')?.textContent === '高塔铁幕',
+    );
+    expect(boxes.length).toBe(1);
+    expect(boxes[0].querySelectorAll('.skill-part').length).toBe(3);
+  });
+
+  it('renders the 006 零时枭首 ultimate as a clickable part when active', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
+    wansha.activeMarkerSide = 'left';
+    state.players.A.areas.attack.push({ id: 'wansha-atk', value: 2, kind: 'attack' });
+    renderGame(state, root, hooksFor());
+    const card = root.querySelector('.player--self .card[data-artifact="006"]')!;
+    const parts = Array.from(card.querySelectorAll<HTMLElement>('.skill-part'));
+    const ultimate = parts.find((p) => p.querySelector('.skill-type')?.textContent === '必杀');
+    expect(ultimate).toBeTruthy();
+    expect(ultimate!.dataset.side).toBe('only');
+    expect(ultimate!.classList.contains('clickable')).toBe(true);
   });
 
   it('shows the dustfall counter in the center band and the log in the left sidebar', () => {
@@ -163,9 +191,9 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(state, root, hooksFor());
     const text = root.textContent ?? '';
     expect(text).not.toContain('启动技能：淬炼');
-    const box = root.querySelector<HTMLElement>('.player--self .card[data-artifact="004"] .skill--on');
+    const box = root.querySelector<HTMLElement>('.player--self .card[data-artifact="004"] .skill-part--on');
     expect(box).not.toBeNull();
-    expect(box!.classList.contains('skill--full')).toBe(true);
+    expect(box!.classList.contains('skill-part--full')).toBe(true);
     expect(box!.textContent).toContain('已满');
     expect(box!.classList.contains('clickable')).toBe(false);
   });
@@ -240,7 +268,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="001"] .skill.clickable',
+      '.player--self .card[data-artifact="001"] .skill-part.clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
@@ -351,7 +379,7 @@ describe('renderGame (interaction)', () => {
     state.ultimatesUsed.push('mingjing.ultimate');
     state.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
-    const used = root.querySelectorAll<HTMLElement>('.player--self .skill--used');
+    const used = root.querySelectorAll<HTMLElement>('.player--self .skill-part--used');
     expect(used.length).toBe(1);
     expect(used[0].textContent).toContain('已使用');
     expect(used[0].classList.contains('clickable')).toBe(false);
@@ -442,7 +470,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="007"] .skill[data-side="right"].clickable',
+      '.player--self .card[data-artifact="007"] .skill-part[data-side="right"].clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
@@ -516,7 +544,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="008"] .skill[data-side="right"].clickable',
+      '.player--self .card[data-artifact="008"] .skill-part[data-side="right"].clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
@@ -644,7 +672,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="011"] .skill[data-side="left"].clickable',
+      '.player--self .card[data-artifact="011"] .skill-part[data-side="left"].clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
@@ -690,7 +718,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="011"] .skill[data-side="right"].clickable',
+      '.player--self .card[data-artifact="011"] .skill-part[data-side="right"].clickable',
     );
     expect(box).not.toBeNull();
     box!.click();
@@ -771,7 +799,7 @@ describe('renderGame (interaction)', () => {
     const { ui, onAction } = mount(state, root);
 
     const box = root.querySelector<HTMLElement>(
-      '.player--self .card[data-artifact="012"] .skill[data-side="only"].clickable',
+      '.player--self .card[data-artifact="012"] .skill-part[data-side="only"].clickable',
     );
     expect(box).not.toBeNull();
     box!.click();

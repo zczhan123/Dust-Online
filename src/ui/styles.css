@@ -161,19 +161,28 @@ body {
 .skills { display: flex; flex-direction: column; gap: 4px; }
 .skill {
   border: 1px solid var(--line);
-  border-left-width: 4px;
   border-radius: 8px;
   padding: 5px 8px;
 }
-.skill--on { background: var(--on-bg); border-left-color: var(--on); }
-.skill--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
-.skill--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
-.skill--used .skill-name { text-decoration: line-through; }
-.skill--full { background: #f3ecec; border-left-color: #b75b5b; }
-.skill--full .skill-name { color: #8a2b2b; }
+.skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.skill-name { font-weight: 700; font-size: 13px; }
+
+.skill-part {
+  border-left: 4px solid #cfc8ba;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin-top: 4px;
+}
+.skill-part:first-of-type { margin-top: 0; }
+.skill-part--on { background: var(--on-bg); border-left-color: var(--on); }
+.skill-part--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
+.skill-part--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
+.skill:has(.skill-part--used) .skill-name { text-decoration: line-through; color: #6b7280; }
+.skill-part--full { background: #f3ecec; border-left-color: #b75b5b; }
+.skill:has(.skill-part--full) .skill-name { color: #8a2b2b; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
-.skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.skill-part-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
 .skill-type {
   font-size: 11px;
   background: #e3e7ee;
@@ -181,7 +190,6 @@ body {
   border-radius: 4px;
   padding: 0 6px;
 }
-.skill-name { font-weight: 700; font-size: 13px; }
 .skill-text { font-size: 12px; color: #4b5563; line-height: 1.55; }
 
 .areas { display: flex; gap: 8px; margin: 6px 0; }
@@ -271,11 +279,12 @@ body {
   outline-offset: 1px;
   box-shadow: inset 0 0 0 2px #ffe9a8;
 }
-.skill.clickable {
+.skill-part.clickable {
+  cursor: pointer;
   border-color: #3f7fa6;
   box-shadow: 0 0 0 1px #bcd8ec inset;
 }
-.skill.clickable:hover {
+.skill-part.clickable:hover {
   background: #e6f2fb;
 }
 

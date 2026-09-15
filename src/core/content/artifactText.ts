@@ -103,7 +103,7 @@ export const ARTIFACT_TEXT: Record<string, ArtifactText> = {
         text: '获得 1 个点数等同本神器当前充能层数的攻击骰。',
       },
       {
-        side: 'right',
+        side: 'only',
         name: '零时枭首',
         type: '必杀',
         text: '消耗 1 个攻击骰。弃置对方 X 个防御骰。之后，如果对方还有剩余的防御骰，你再获得 X 个随机点数的攻击骰。X 为你消耗的攻击骰的点数。',

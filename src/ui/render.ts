@@ -367,58 +367,72 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
     const skills = el('div', 'skills');
+    const groups = new Map<string, typeof text.skills>();
     for (const s of text.skills) {
-      const isActive = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
-      const box = el('div', `skill ${isActive ? 'skill--on' : 'skill--off'}`);
-      box.dataset.side = s.side;
-      const key = findSkillKey(a, s.side, s.type);
-      if (key) box.dataset.key = key;
-
-      const isUsedUltimate =
-        key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
-      if (isUsedUltimate) box.classList.add('skill--used');
-
-      const isFull = key === 'buxiang.cuilian' && a.count >= 3;
-      if (isFull) box.classList.add('skill--full');
-
+      const existing = groups.get(s.name);
+      if (existing) existing.push(s);
+      else groups.set(s.name, [s]);
+    }
+    for (const [groupName, parts] of groups) {
+      const box = el('div', 'skill');
       const sHead = el('div', 'skill-head');
-      const badge = el('span', 'skill-type');
-      badge.textContent = s.type;
       const sname = el('span', 'skill-name');
-      sname.textContent = s.name;
-      sHead.appendChild(badge);
+      sname.textContent = groupName;
       sHead.appendChild(sname);
-      if (isUsedUltimate) {
-        const used = el('span', 'badge badge-used');
-        used.textContent = '已使用';
-        sHead.appendChild(used);
-      }
-      if (isFull) {
-        const full = el('span', 'badge badge-full');
-        full.textContent = '已满';
-        sHead.appendChild(full);
-      }
       box.appendChild(sHead);
-      const body = el('div', 'skill-text');
-      body.textContent = s.text;
-      box.appendChild(body);
 
-      const skillAction = ctx.legal.find(
-        (x): x is SkillAction =>
-          x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
-      );
-      if (skillAction && isActivatableType(s.type) && !isUsedUltimate && !isFull) {
-        box.classList.add('clickable');
-        box.dataset.act = 'skill';
-        box.title = '点击启动技能';
-        const skillKey = key;
-        box.addEventListener('click', () => {
-          if (skillKey && SKILL_SELECTION[skillKey]) {
-            startSkillSelection(ctx, skillAction, skillKey);
-          } else {
-            ctx.hooks.propose(skillAction, `启动技能：${skillName(ctx.state, skillAction)}`);
-          }
-        });
+      for (const s of parts) {
+        const isActive = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
+        const part = el('div', `skill-part ${isActive ? 'skill-part--on' : 'skill-part--off'}`);
+        part.dataset.side = s.side;
+        const key = findSkillKey(a, s.side, s.type);
+        if (key) part.dataset.key = key;
+
+        const isUsedUltimate =
+          key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
+        if (isUsedUltimate) part.classList.add('skill-part--used');
+
+        const isFull = key === 'buxiang.cuilian' && a.count >= 3;
+        if (isFull) part.classList.add('skill-part--full');
+
+        const pHead = el('div', 'skill-part-head');
+        const badge = el('span', 'skill-type');
+        badge.textContent = s.type;
+        pHead.appendChild(badge);
+        if (isUsedUltimate) {
+          const used = el('span', 'badge badge-used');
+          used.textContent = '已使用';
+          pHead.appendChild(used);
+        }
+        if (isFull) {
+          const full = el('span', 'badge badge-full');
+          full.textContent = '已满';
+          pHead.appendChild(full);
+        }
+        part.appendChild(pHead);
+        const body = el('div', 'skill-text');
+        body.textContent = s.text;
+        part.appendChild(body);
+
+        const skillAction = ctx.legal.find(
+          (x): x is SkillAction =>
+            x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
+        );
+        if (skillAction && isActivatableType(s.type) && !isUsedUltimate && !isFull) {
+          part.classList.add('clickable');
+          part.dataset.act = 'skill';
+          part.title = '点击启动技能';
+          const skillKey = key;
+          part.addEventListener('click', () => {
+            if (skillKey && SKILL_SELECTION[skillKey]) {
+              startSkillSelection(ctx, skillAction, skillKey);
+            } else {
+              ctx.hooks.propose(skillAction, `启动技能：${skillName(ctx.state, skillAction)}`);
+            }
+          });
+        }
+
+        box.appendChild(part);
       }
 
       skills.appendChild(box);
