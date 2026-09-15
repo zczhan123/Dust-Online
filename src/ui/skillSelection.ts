@@ -155,10 +155,8 @@ function costPart(
   };
 }
 
-const SPEC_YUQIE: CostSpec = { skill: '中央突破', kind: 'meditation', maxSlots: 3, variable: true };
 const SPEC_TENGWAN: CostSpec = { skill: '龙腾万丈', kind: 'meditation', maxSlots: 3, variable: false };
 const SPEC_QIANXING: CostSpec = { skill: '潜行', kind: 'attack', maxSlots: 2, variable: false };
-const SPEC_CUILIAN: CostSpec = { skill: '淬炼', kind: 'attack', maxSlots: 1, variable: false };
 const SPEC_FIST: CostSpec = { skill: '王家之拳', kind: 'meditation', maxSlots: 2, variable: false };
 const SPEC_BARRIER: CostSpec = { skill: '灵能屏障', kind: 'defense', maxSlots: 3, variable: true };
 const SPEC_PULSE: CostSpec = { skill: '灵能脉冲', kind: 'attack', maxSlots: 3, variable: true };
@@ -175,28 +173,29 @@ function ownDieValue(state: GameState, player: PlayerId, id: string | undefined)
 
 export const SKILL_SELECTION: Record<string, SkillSelection> = {
   'yuqie.breakthrough': {
-    steps: ({ state, player, chosenDice, numbers }) => {
+    steps: ({ state, player, chosenDice, slots }) => {
       const selfMed = state.players[player].areas.meditation.length;
       const oppDef = state.players[oppOf(player)].areas.defense.length;
       if (hasSword(state, player)) {
-        const n = numbers[0] ?? 1;
+        const n = Math.min(3, selfMed);
         const need = Math.min(n, oppDef);
         return [
-          ...swordCostSteps(state, player, SPEC_YUQIE, numbers, chosenDice),
+          { kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('meditation', n) },
           { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
         ];
       }
       const medCount = chosenDice[0]?.length ?? 0;
       const need = Math.min(medCount, oppDef);
+      void slots;
       return [
         { kind: 'dice', label: '选择消耗的冥想骰（1–3 颗）', owner: 'self', areas: ['meditation'], min: 1, max: Math.min(3, selfMed) },
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
-    buildParams: ({ state, player, chosenDice, numbers }) => {
-      const { costSlots, groups } = costPart(state, player, SPEC_YUQIE, numbers, chosenDice);
-      return { costSlots, opponentDefenseDieIds: chosenDice[groups] ?? [] };
-    },
+    buildParams: ({ chosenDice, slots }) => ({
+      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
+      opponentDefenseDieIds: slots.length ? (chosenDice[0] ?? []) : (chosenDice[1] ?? []),
+    }),
   },
   'youlong.tengwan': {
     steps: ({ state, player, chosenDice, numbers }) =>
@@ -217,12 +216,12 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     }),
   },
   'buxiang.cuilian': {
-    steps: ({ state, player, chosenDice, numbers }) =>
+    steps: ({ state, player }) =>
       hasSword(state, player)
-        ? swordCostSteps(state, player, SPEC_CUILIAN, numbers, chosenDice)
+        ? [{ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind('attack', 1) }]
         : [{ kind: 'dice', label: '选择消耗的攻击骰（恰好 1 颗）', owner: 'self', areas: ['attack'], min: 1, max: 1 }],
-    buildParams: ({ state, player, chosenDice, numbers }) => ({
-      costSlots: costPart(state, player, SPEC_CUILIAN, numbers, chosenDice).costSlots,
+    buildParams: ({ chosenDice, slots }) => ({
+      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
     }),
   },
   'yingle.yingxi': {
