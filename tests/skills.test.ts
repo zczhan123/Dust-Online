@@ -958,3 +958,187 @@ describe('011 顿悟', () => {
   });
 });
 
+describe('012 魔女', () => {
+  const setup012 = () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // -> main
+    return g;
+  };
+
+  it('必杀 梦醒时分: moves chosen meditation dice to defense preserving their values', () => {
+    const g = setup012();
+    g.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [{ id: 'a1', value: 4, kind: 'attack' }],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 2, kind: 'meditation' },
+        { id: 'm2', value: 5, kind: 'meditation' },
+        { id: 'm3', value: 3, kind: 'meditation' },
+        { id: 'm4', value: 6, kind: 'meditation' },
+      ],
+    };
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '012',
+      side: 'only',
+      params: { to: 'defense', meditationDieIds: ['m1', 'm2'] },
+    });
+    expect(g.players.A.areas.meditation.map((d) => d.id)).toEqual(['m3', 'm4']);
+    expect(g.players.A.areas.defense).toEqual([
+      { id: 'm1', value: 2, kind: 'defense' },
+      { id: 'm2', value: 5, kind: 'defense' },
+    ]);
+    expect(g.players.A.areas.attack).toEqual([{ id: 'a1', value: 4, kind: 'attack' }]);
+    expect(g.ultimatesUsed).toContain('monv.ultimate');
+  });
+
+  it('必杀 梦醒时分: can move meditation dice to the attack area', () => {
+    const g = setup012();
+    g.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 2, kind: 'meditation' },
+        { id: 'm2', value: 5, kind: 'meditation' },
+        { id: 'm3', value: 3, kind: 'meditation' },
+      ],
+    };
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '012',
+      side: 'only',
+      params: { to: 'attack', meditationDieIds: ['m1', 'm2', 'm3'] },
+    });
+    expect(g.players.A.areas.meditation).toHaveLength(0);
+    expect(g.players.A.areas.attack).toEqual([
+      { id: 'm1', value: 2, kind: 'attack' },
+      { id: 'm2', value: 5, kind: 'attack' },
+      { id: 'm3', value: 3, kind: 'attack' },
+    ]);
+  });
+
+  it('必杀 梦醒时分: rejects invalid destination, 0 or >3 dice, duplicates, and foreign dice', () => {
+    const badDest = setup012();
+    badDest.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    badDest.players.A.areas = { attack: [], defense: [], meditation: [{ id: 'm1', value: 2, kind: 'meditation' }] };
+    expect(() =>
+      applyAction(badDest, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'meditation', meditationDieIds: ['m1'] },
+      }),
+    ).toThrow();
+
+    const zero = setup012();
+    zero.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    zero.players.A.areas = { attack: [], defense: [], meditation: [{ id: 'm1', value: 2, kind: 'meditation' }] };
+    expect(() =>
+      applyAction(zero, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'defense', meditationDieIds: [] },
+      }),
+    ).toThrow();
+
+    const many = setup012();
+    many.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    many.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: ['m1', 'm2', 'm3', 'm4'].map((id) => ({ id, value: 2, kind: 'meditation' as const })),
+    };
+    expect(() =>
+      applyAction(many, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'defense', meditationDieIds: ['m1', 'm2', 'm3', 'm4'] },
+      }),
+    ).toThrow();
+
+    const dup = setup012();
+    dup.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    dup.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: ['m1', 'm2'].map((id) => ({ id, value: 2, kind: 'meditation' as const })),
+    };
+    expect(() =>
+      applyAction(dup, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'defense', meditationDieIds: ['m1', 'm1'] },
+      }),
+    ).toThrow();
+
+    const foreign = setup012();
+    foreign.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    foreign.players.A.areas = { attack: [], defense: [], meditation: [{ id: 'm1', value: 2, kind: 'meditation' }] };
+    expect(() =>
+      applyAction(foreign, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'defense', meditationDieIds: ['nope'] },
+      }),
+    ).toThrow();
+  });
+
+  it('必杀 梦醒时分: can only be used once per game', () => {
+    const g = setup012();
+    g.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 2, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ],
+    };
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '012',
+      side: 'only',
+      params: { to: 'defense', meditationDieIds: ['m1'] },
+    });
+    expect(g.ultimatesUsed).toContain('monv.ultimate');
+    g.skillsUsedThisTurn = [];
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '012',
+        side: 'only',
+        params: { to: 'defense', meditationDieIds: ['m2'] },
+      }),
+    ).toThrow();
+  });
+
+  it('candidates: offers the ultimate with up to 3 meditation dice when active', () => {
+    const g = setup012();
+    g.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
+    g.players.A.areas = {
+      attack: [],
+      defense: [],
+      meditation: [
+        { id: 'm1', value: 2, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+        { id: 'm3', value: 3, kind: 'meditation' },
+        { id: 'm4', value: 6, kind: 'meditation' },
+      ],
+    };
+    const legal = getLegalActions(g);
+    expect(legal).toContainEqual({
+      t: 'skill',
+      artifactId: '012',
+      side: 'only',
+      params: { to: 'attack', meditationDieIds: ['m1', 'm2', 'm3'] },
+    });
+  });
+});
+

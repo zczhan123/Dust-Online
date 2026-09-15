@@ -183,6 +183,28 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ chosenDice }) => ({ attackDieIds: chosenDice[0] ?? [] }),
   },
+  // 012 魔女·必杀 梦醒时分：选择目标区域 → 选择 1–3 颗冥想骰移动（保留点数）
+  'monv.ultimate': {
+    steps: ({ state, player }) => [
+      {
+        kind: 'option',
+        label: '选择要移动到的区域',
+        options: [
+          { value: 'attack', label: '攻击骰区' },
+          { value: 'defense', label: '防御骰区' },
+        ],
+      },
+      {
+        kind: 'dice',
+        label: '选择要移动的冥想骰（1–3 颗）',
+        owner: 'self',
+        areas: ['meditation'],
+        min: 1,
+        max: Math.min(3, state.players[player].areas.meditation.length),
+      },
+    ],
+    buildParams: ({ chosenDice, options }) => ({ to: options[0], meditationDieIds: chosenDice[1] ?? [] }),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [

@@ -2,6 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
+import { moveDice } from './effects';
 import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
@@ -397,6 +398,20 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       consumeDice(p, 'attack', ids);
       for (let i = 0; i < ids.length * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
       logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${ids.length} 攻击骰，获得 ${ids.length * 2} 冥想骰`);
+    },
+  },
+  // 012 魔女·必杀 梦醒时分：将最多 3 个冥想骰移动至自己的另一个区域（攻击/防御），保留原本点数
+  'monv.ultimate': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const to = params.to as DiceKind;
+      if (to !== 'attack' && to !== 'defense') throw new Error('destination must be attack or defense');
+      const ids = (params.meditationDieIds as string[]) ?? [];
+      if (ids.length < 1 || ids.length > 3) throw new Error('meditationDieIds must be 1..3');
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      for (const id of ids) if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+      moveDice(g, player, ids, to);
+      logLine(g, `${pname(player)} 发动必杀「梦醒时分」：将 ${ids.length} 颗冥想骰移动到「${to === 'attack' ? '攻击' : '防御'}骰区」（保留点数）`);
     },
   },
 };

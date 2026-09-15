@@ -243,6 +243,15 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         if (p.areas.attack.length >= 1) {
           acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { attackDieIds: p.areas.attack.slice(0, 3).map((d) => d.id) } });
         }
+      } else if (s.key === 'monv.ultimate') {
+        if (p.areas.meditation.length >= 1) {
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: { to: 'attack', meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) },
+          });
+        }
       }
     }
   }
