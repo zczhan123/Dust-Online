@@ -545,3 +545,98 @@ body {
 .gameover-winner { font-size: 26px; font-weight: 800; color: #b23a3a; margin-bottom: 8px; }
 .gameover-reason { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 .gameover-restart { font-size: 16px; }
+
+/* 折算支付面板（真实之剑 2 换 1） */
+.paypanel {
+  background: #f2f7fd;
+  border: 1px solid #9dc0e0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.paypanel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1b4f9c;
+}
+.slot-row {
+  background: #fff;
+  border: 1px solid #cfe0f0;
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+.slot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.slot-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: #23405c;
+}
+.slot-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  background: #eef3f8;
+  border-color: #b7c9d9;
+  color: #3a4658;
+}
+.slot-btn--on {
+  background: #23405c;
+  border-color: #23405c;
+  color: #fff;
+}
+.slot-btn--on:hover:not(:disabled) {
+  background: #2d5175;
+}
+.slot-summary {
+  font-size: 12px;
+  color: #7a5a1e;
+}
+.pay-dice {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.pay-die {
+  display: inline-flex;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  align-items: center;
+  justify-content: center;
+  background: #3b82f6;
+  color: #fff;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.pay-die.clickable {
+  cursor: pointer;
+}
+.pay-die.clickable:hover {
+  outline: 2px solid #1b4f9c;
+  outline-offset: 1px;
+}
+.pay-die--used {
+  background: #cbd2da;
+  color: #6b7280;
+  opacity: 0.7;
+}
+.pay-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-convert {
+  background: #f3e7fd;
+  border-color: #b79bdc;
+  color: #5b3fa0;
+}
+.btn-convert:hover:not(:disabled) {
+  background: #e8d9fa;
+}

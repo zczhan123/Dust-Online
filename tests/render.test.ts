@@ -5,7 +5,7 @@ import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
 
-const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null, pendingConfirm: null });
+const freshUi = (): UiState => ({ rerollSelected: new Set(), selection: null, pendingConfirm: null, payPanel: null });
 
 const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => {
   const ui = freshUi();
@@ -806,5 +806,81 @@ describe('renderGame (interaction)', () => {
       side: 'only',
       params: { to: 'defense', meditationDieIds: ['m1', 'm2'] },
     });
+  });
+
+  it('offers 折算攻击 when 真实之剑 is active and dispatches the 2-die slot', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    state.players.A.areas = {
+      attack: [],
+      defense: [{ id: 'pd1', value: 2, kind: 'defense' }],
+      meditation: [{ id: 'pm1', value: 3, kind: 'meditation' }],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
+      (b) => (b.textContent ?? '').includes('折算攻击'),
+    );
+    expect(openBtn).toBeTruthy();
+    openBtn!.click();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.payPanel).not.toBeNull();
+    expect(root.querySelector('.paypanel')).not.toBeNull();
+
+    root.querySelector<HTMLElement>('.paypanel .pay-die[data-id="pd1"]')!.click();
+    root.querySelector<HTMLElement>('.paypanel .pay-die[data-id="pm1"]')!.click();
+
+    const ok = root.querySelector<HTMLButtonElement>('.paypanel .btn-confirm')!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+    expect(ui.payPanel).toBeNull();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'attack',
+      costSlots: [{ dieIds: ['pd1', 'pm1'] }],
+    });
+  });
+
+  it('does not offer 折算攻击 when 真实之剑 is not active', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    state.players.A.areas = {
+      attack: [],
+      defense: [{ id: 'pd1', value: 2, kind: 'defense' }],
+      meditation: [{ id: 'pm1', value: 3, kind: 'meditation' }],
+    };
+
+    renderGame(state, root, hooksFor());
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
+      (b) => (b.textContent ?? '').includes('折算攻击'),
+    );
+    expect(btn).toBeUndefined();
+  });
+
+  it('cancels the 折算支付 panel without dispatching', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    state.players.A.areas = {
+      attack: [],
+      defense: [{ id: 'pd1', value: 2, kind: 'defense' }],
+      meditation: [{ id: 'pm1', value: 3, kind: 'meditation' }],
+    };
+
+    const { ui, onAction } = mount(state, root);
+
+    const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
+      (b) => (b.textContent ?? '').includes('折算攻击'),
+    )!;
+    openBtn.click();
+    expect(ui.payPanel).not.toBeNull();
+
+    root.querySelector<HTMLButtonElement>('.paypanel .btn-cancel')!.click();
+    expect(ui.payPanel).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,7 @@ import type {
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
+import { hasActiveSkill } from '../core/engine/skill-state';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
 
 const AREA_LABEL: Record<DiceKind, string> = {
@@ -47,6 +48,14 @@ export interface UiState {
     numbers: number[];
   };
   pendingConfirm: null | { action: Action; label: string };
+  payPanel: null | {
+    label: string;
+    payer: PlayerId;
+    kinds: DiceKind[]; // one entry per slot
+    modes: ('real' | 'convert')[]; // chosen mode per slot
+    slots: string[][]; // chosen die ids per slot (length 0..mode size)
+    build: (slots: { dieIds: string[] }[]) => Action;
+  };
 }
 
 export interface RenderHooks {
@@ -70,6 +79,8 @@ interface Ctx {
   maxReroll: number;
   selectionStep: SelectStep | null;
   selectionOwner: PlayerId | null;
+  /** 折算支付面板开启时禁用区域骰点击，避免歧义 */
+  payPanelOpen: boolean;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -108,6 +119,10 @@ function diceListLabel(state: GameState, ids: string[]): string {
 }
 
 const KIND_NAMES: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+
+const KIND_SHORT: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+
+type PayPanel = NonNullable<UiState['payPanel']>;
 
 /** 各技能代价所需骰类型（用于确认条文案；引擎按同样规则构造槽位） */
 const COST_KIND_LABEL: Record<string, string> = {
@@ -460,7 +475,9 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    if (diceStep) {
+    if (ctx.payPanelOpen) {
+      // 折算支付面板开启时，区域骰不可点击
+    } else if (diceStep) {
       const step = diceStep;
       const selectable = !step.filter || step.filter(d);
       if (selectable) {
@@ -762,6 +779,42 @@ function operationList(ctx: Ctx): HTMLElement {
   const rb = rerollButton(ctx);
   if (rb) box.appendChild(rb);
 
+  const { state } = ctx;
+  if (state.phase === 'main' && !state.pendingAttack && !state.pending) {
+    const payer = state.activePlayer;
+    if (convertAvailable(state, payer)) {
+      box.appendChild(
+        convertButton('折算攻击（2 颗顶 1 颗）', () =>
+          openPayPanel(ctx, {
+            label: '攻击',
+            payer,
+            kinds: ['attack'],
+            modes: ['convert'],
+            slots: [[]],
+            build: (s) => ({ t: 'attack', costSlots: s }),
+          }),
+        ),
+      );
+    }
+  }
+  if (state.pendingAttack && !state.pendingAttack.unblockable) {
+    const defender: PlayerId = state.pendingAttack.attacker === 'A' ? 'B' : 'A';
+    if (convertAvailable(state, defender)) {
+      box.appendChild(
+        convertButton('折算抵挡（2 颗顶 1 颗）', () =>
+          openPayPanel(ctx, {
+            label: '抵挡',
+            payer: defender,
+            kinds: ['defense'],
+            modes: ['convert'],
+            slots: [[]],
+            build: (s) => ({ t: 'block', costSlots: s }),
+          }),
+        ),
+      );
+    }
+  }
+
   const seenSkill = new Set<string>();
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
@@ -783,6 +836,25 @@ function operationList(ctx: Ctx): HTMLElement {
       b.title = '选择 1 颗冥想骰作为尘起代价';
       b.addEventListener('click', () => startDustRiseSelection(ctx, a));
       box.appendChild(b);
+      if (convertAvailable(state, state.activePlayer)) {
+        box.appendChild(
+          convertButton(`折算：${label}`, () =>
+            openPayPanel(ctx, {
+              label,
+              payer: state.activePlayer,
+              kinds: ['meditation'],
+              modes: ['convert'],
+              slots: [[]],
+              build: (s) => ({
+                t: 'dustRise',
+                artifactId: a.artifactId,
+                side: a.side,
+                costSlots: s,
+              }),
+            }),
+          ),
+        );
+      }
       continue;
     }
     box.appendChild(button(label, a, ctx.hooks));
@@ -982,6 +1054,171 @@ function gameOverModal(ctx: Ctx): HTMLElement {
   return overlay;
 }
 
+function convertAvailable(state: GameState, payer: PlayerId): boolean {
+  if (!hasActiveSkill(state.players[payer], 'shenhong.sword')) return false;
+  const p = state.players[payer];
+  return p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length >= 2;
+}
+
+function slotRequired(panel: PayPanel, i: number): number {
+  return panel.modes[i] === 'real' ? 1 : 2;
+}
+
+function firstUnfilledSlot(panel: PayPanel): number {
+  for (let i = 0; i < panel.slots.length; i++) {
+    if (panel.slots[i].length < slotRequired(panel, i)) return i;
+  }
+  return -1;
+}
+
+function allSlotsFilled(panel: PayPanel): boolean {
+  return panel.slots.every((_, i) => panel.slots[i].length >= slotRequired(panel, i));
+}
+
+function usedDieIds(panel: PayPanel): Set<string> {
+  return new Set(panel.slots.flat());
+}
+
+function slotSummary(state: GameState, panel: PayPanel, i: number): string {
+  const ids = panel.slots[i];
+  if (ids.length === 0) return '（未填）';
+  const kindShort = KIND_SHORT[panel.kinds[i]];
+  const dice = ids.map((id) => findDie(state, id)).filter((d): d is Die => d !== undefined);
+  if (panel.modes[i] === 'real') {
+    const d = dice[0];
+    return d ? `${KIND_SHORT[d.kind]}${d.value}（真骰）` : '（真骰）';
+  }
+  const parts = dice.map((d) => `${KIND_SHORT[d.kind]}${d.value}`);
+  const arrow = dice.length >= 2 ? ` → 视为${kindShort}5` : '';
+  return `折算：${parts.join('+')}${arrow}`;
+}
+
+function assignPayDie(ctx: Ctx, d: Die): void {
+  const panel = ctx.hooks.ui.payPanel;
+  if (!panel) return;
+  const i = firstUnfilledSlot(panel);
+  if (i < 0) return;
+  if (panel.modes[i] === 'real' && d.kind !== panel.kinds[i]) return;
+  if (usedDieIds(panel).has(d.id)) return;
+  panel.slots[i].push(d.id);
+  ctx.hooks.requestRender();
+}
+
+function payPanelView(ctx: Ctx): HTMLElement {
+  const panel = ctx.hooks.ui.payPanel as PayPanel;
+  const box = el('div', 'paypanel');
+
+  const title = el('div', 'paypanel-title');
+  title.textContent = `折算支付：${panel.label}`;
+  box.appendChild(title);
+
+  for (let i = 0; i < panel.kinds.length; i++) {
+    const row = el('div', 'slot-row');
+    row.dataset.slot = String(i);
+
+    const head = el('div', 'slot-head');
+    const kindName = KIND_NAMES[panel.kinds[i]];
+    const name = el('span', 'slot-name');
+    name.textContent = `格${i + 1}（${kindName}）`;
+    head.appendChild(name);
+
+    const modeDefs: { mode: 'real' | 'convert'; text: string }[] = [
+      { mode: 'real', text: `用 1 颗${kindName}` },
+      { mode: 'convert', text: '折算 2 颗任意' },
+    ];
+    for (const m of modeDefs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `btn slot-btn${panel.modes[i] === m.mode ? ' slot-btn--on' : ''}`;
+      b.dataset.mode = m.mode;
+      b.textContent = m.text;
+      b.addEventListener('click', () => {
+        if (panel.modes[i] === m.mode) return;
+        panel.modes[i] = m.mode;
+        panel.slots[i] = [];
+        ctx.hooks.requestRender();
+      });
+      head.appendChild(b);
+    }
+
+    const summary = el('span', 'slot-summary');
+    summary.textContent = slotSummary(ctx.state, panel, i);
+    head.appendChild(summary);
+
+    row.appendChild(head);
+    box.appendChild(row);
+  }
+
+  const payer = ctx.state.players[panel.payer];
+  const current = firstUnfilledSlot(panel);
+  const used = usedDieIds(panel);
+  const diceBox = el('div', 'pay-dice');
+  for (const k of AREA_ORDER) {
+    for (const d of payer.areas[k]) {
+      const die = el('span', 'pay-die');
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (used.has(d.id)) {
+        die.classList.add('pay-die--used');
+      } else if (current >= 0) {
+        const allowed = panel.modes[current] === 'convert' || d.kind === panel.kinds[current];
+        if (allowed) {
+          die.classList.add('clickable');
+          die.addEventListener('click', () => assignPayDie(ctx, d));
+        }
+      }
+      diceBox.appendChild(die);
+    }
+  }
+  box.appendChild(diceBox);
+
+  const actions = el('div', 'pay-actions');
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    ctx.hooks.ui.payPanel = null;
+    ctx.hooks.requestRender();
+  });
+  actions.appendChild(cancel);
+
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'btn btn-confirm';
+  ok.textContent = '确认';
+  ok.disabled = !allSlotsFilled(panel);
+  ok.addEventListener('click', () => {
+    const p = ctx.hooks.ui.payPanel;
+    if (!p || !allSlotsFilled(p)) return;
+    const fills = p.slots.map((ids) => ({ dieIds: [...ids] }));
+    ctx.hooks.ui.payPanel = null;
+    ctx.hooks.onAction(p.build(fills));
+  });
+  actions.appendChild(ok);
+  box.appendChild(actions);
+
+  return box;
+}
+
+function convertButton(label: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn btn-convert';
+  b.dataset.act = 'convert';
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function openPayPanel(ctx: Ctx, panel: PayPanel): void {
+  ctx.hooks.ui.payPanel = panel;
+  ctx.hooks.requestRender();
+}
+
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   const legal = getLegalActions(state);
   const selfId: PlayerId = state.activePlayer;
@@ -1007,7 +1244,15 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     }
   }
 
-  const ctx: Ctx = { state, legal, hooks, maxReroll, selectionStep, selectionOwner };
+  const ctx: Ctx = {
+    state,
+    legal,
+    hooks,
+    maxReroll,
+    selectionStep,
+    selectionOwner,
+    payPanelOpen: hooks.ui.payPanel != null,
+  };
 
   root.innerHTML = '';
   const app = el('div', 'app');
@@ -1028,14 +1273,18 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const left = el('div', 'centerband-left');
   left.appendChild(hintBox(ctx));
 
-  const confirm = confirmRow(ctx);
-  if (confirm) {
-    left.appendChild(confirm);
-  } else if (hooks.ui.selection) {
-    const chooser = chooserPanel(ctx);
-    if (chooser) left.appendChild(chooser);
+  if (hooks.ui.payPanel) {
+    left.appendChild(payPanelView(ctx));
   } else {
-    left.appendChild(operationList(ctx));
+    const confirm = confirmRow(ctx);
+    if (confirm) {
+      left.appendChild(confirm);
+    } else if (hooks.ui.selection) {
+      const chooser = chooserPanel(ctx);
+      if (chooser) left.appendChild(chooser);
+    } else {
+      left.appendChild(operationList(ctx));
+    }
   }
   centerband.appendChild(left);
 

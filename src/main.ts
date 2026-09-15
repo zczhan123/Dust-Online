@@ -8,7 +8,7 @@ const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
 
 let state: GameState | null = null;
-const ui: UiState = { rerollSelected: new Set(), selection: null, pendingConfirm: null };
+const ui: UiState = { rerollSelected: new Set(), selection: null, pendingConfirm: null, payPanel: null };
 let lastError = '';
 
 const render = () => {
@@ -26,6 +26,7 @@ const render = () => {
         ui.rerollSelected.clear();
         ui.selection = null;
         ui.pendingConfirm = null;
+        ui.payPanel = null;
       }
       catch (e) { lastError = e instanceof Error ? e.message : String(e); }
       if (lastError) state.log.push({ turn: state.turnIndex, phase: state.phase, text: `非法操作：${lastError}` });
@@ -40,6 +41,7 @@ const showSetup = () => {
     ui.rerollSelected.clear();
     ui.selection = null;
     ui.pendingConfirm = null;
+    ui.payPanel = null;
     render();
   });
 };
