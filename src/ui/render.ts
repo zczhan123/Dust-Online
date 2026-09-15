@@ -795,7 +795,12 @@ function chipDieId(a: Action): string | undefined {
 }
 
 /** 攻击/抵挡的紧凑呈现：标签 + 骰片（与「选择冥想骰」同款），节省纵向空间 */
-function actionChipRow(ctx: Ctx, labelText: string, actions: Action[]): HTMLElement {
+function actionChipRow(
+  ctx: Ctx,
+  labelText: string,
+  actions: Action[],
+  owner: PlayerId,
+): HTMLElement {
   const row = el('div', 'actionlist-chips');
   const lab = el('span', 'chip-label');
   lab.textContent = labelText;
@@ -806,7 +811,7 @@ function actionChipRow(ctx: Ctx, labelText: string, actions: Action[]): HTMLElem
     if (!d) continue;
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'pay-die clickable';
+    chip.className = `pay-die clickable die-${owner}`;
     chip.dataset.id = d.id;
     chip.dataset.act = a.t === 'attack' ? 'attack' : 'block';
     chip.textContent = String(d.value);
@@ -861,9 +866,18 @@ function operationList(ctx: Ctx): HTMLElement {
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
   const attackChips = ctx.legal.filter((a) => a.t === 'attack');
-  if (attackChips.length > 0) box.appendChild(actionChipRow(ctx, '攻击', attackChips));
+  if (attackChips.length > 0) {
+    box.appendChild(actionChipRow(ctx, '攻击', attackChips, state.activePlayer));
+  }
   const blockChips = ctx.legal.filter((a) => a.t === 'block' && chipDieId(a));
-  if (blockChips.length > 0) box.appendChild(actionChipRow(ctx, '抵挡', blockChips));
+  if (blockChips.length > 0) {
+    const defender: PlayerId = state.pendingAttack
+      ? state.pendingAttack.attacker === 'A'
+        ? 'B'
+        : 'A'
+      : state.activePlayer;
+    box.appendChild(actionChipRow(ctx, '抵挡', blockChips, defender));
+  }
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
     if (a.t === 'attack') continue;

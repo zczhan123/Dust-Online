@@ -271,6 +271,7 @@ describe('renderGame (interaction)', () => {
       '.actionlist-chips .pay-die[data-act="attack"]',
     );
     expect(chips.length).toBeGreaterThan(0);
+    expect(chips[0].classList.contains('die-A')).toBe(true);
     expect(root.querySelector('.actionlist-chips .chip-label')!.textContent).toBe('攻击');
     const textBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find(
       (b) => (b.textContent ?? '').includes('点攻击骰'),

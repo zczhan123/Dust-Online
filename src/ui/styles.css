@@ -706,6 +706,12 @@ button.pay-die {
   font-weight: 700;
   font-size: 12px;
 }
+.pay-die.die-A {
+  background: #2563eb;
+}
+.pay-die.die-B {
+  background: #dc2626;
+}
 .pay-die.clickable {
   cursor: pointer;
 }
