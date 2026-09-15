@@ -61,14 +61,20 @@ describe('renderGame (read-only snapshot)', () => {
     expect(panels[1].classList.contains('player--self')).toBe(true);
   });
 
-  it('mirrors the enemy area order (attack <-> meditation)', () => {
+  it('mirrors the enemy area order (reverse of the self order)', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const enemyAreas = root.querySelectorAll<HTMLElement>('.player--enemy .area');
     const selfAreas = root.querySelectorAll<HTMLElement>('.player--self .area');
-    expect(enemyAreas[0].dataset.kind).toBe('meditation');
-    expect(enemyAreas[2].dataset.kind).toBe('attack');
-    expect(selfAreas[0].dataset.kind).toBe('attack');
-    expect(selfAreas[2].dataset.kind).toBe('meditation');
+    expect(Array.from(enemyAreas).map((e) => e.dataset.kind)).toEqual([
+      'meditation',
+      'attack',
+      'defense',
+    ]);
+    expect(Array.from(selfAreas).map((e) => e.dataset.kind)).toEqual([
+      'defense',
+      'attack',
+      'meditation',
+    ]);
   });
 
   it('puts self dice areas above the life header', () => {
@@ -236,6 +242,26 @@ describe('renderGame (interaction)', () => {
     const band = root.querySelector('.centerband')!;
     expect(band.querySelector('.centerband-left .actionlist')).not.toBeNull();
     expect(band.querySelector('.centerband-right .dustfall')).not.toBeNull();
+  });
+
+  it('orders dice areas as 防御/攻击/冥想 so the attack area sits in the middle', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    const kinds = Array.from(root.querySelectorAll<HTMLElement>('.player--self .area')).map(
+      (e) => e.dataset.kind,
+    );
+    expect(kinds).toEqual(['defense', 'attack', 'meditation']);
+  });
+
+  it('renders every skill type inline with its effect text in the same head row', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    const heads = Array.from(root.querySelectorAll('.skill-part-head'));
+    expect(heads.length).toBeGreaterThan(0);
+    for (const h of heads) {
+      expect(h.querySelector('.skill-type')).not.toBeNull();
+      expect(h.querySelector('.skill-text')).not.toBeNull();
+    }
   });
 
   it('clicking a legal attack die proposes a confirm, and 确认 dispatches it', () => {

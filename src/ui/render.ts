@@ -20,9 +20,9 @@ const AREA_LABEL: Record<DiceKind, string> = {
   meditation: '冥想骰区',
 };
 
-const AREA_ORDER: DiceKind[] = ['attack', 'defense', 'meditation'];
-// 敌方区域镜像：攻击骰区与冥想骰区对调
-const AREA_ORDER_MIRRORED: DiceKind[] = ['meditation', 'defense', 'attack'];
+const AREA_ORDER: DiceKind[] = ['defense', 'attack', 'meditation'];
+// 敌方区域镜像：为贴合中央战场做上下翻转（与 AREA_ORDER 相反）
+const AREA_ORDER_MIRRORED: DiceKind[] = ['meditation', 'attack', 'defense'];
 
 const PHASE_LABEL: Record<Phase, string> = {
   setup: '准备',

@@ -182,17 +182,18 @@ body {
 .skill:has(.skill-part--full) .skill-name { color: #8a2b2b; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
-.skill-part-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.skill-part-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; }
 .skill-type {
   flex: 0 0 auto;
   font-size: 11px;
+  font-weight: 700;
   background: #e3e7ee;
-  color: #3a4658;
+  color: #2f3a49;
   border-radius: 4px;
   padding: 0 6px;
 }
 .skill-part-head .badge { flex: 0 0 auto; }
-.skill-text { flex: 1 1 auto; min-width: 0; font-size: 12px; color: #4b5563; line-height: 1.55; }
+.skill-text { flex: 1 1 0%; min-width: 0; font-size: 12px; color: #4b5563; line-height: 1.55; }
 
 .areas { display: flex; gap: 8px; margin: 6px 0; }
 .area {
