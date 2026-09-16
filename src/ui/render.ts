@@ -66,6 +66,11 @@ export interface UiState {
     kind: 'attack' | 'block';
     dieIds: string[];
   };
+  /** 锋芒（触发）：选择消耗的 1 颗攻击骰 + 1 颗冥想骰 */
+  fengmangPick: null | {
+    attackDieId?: string;
+    meditationDieId?: string;
+  };
 }
 
 export interface RenderHooks {
@@ -89,12 +94,18 @@ interface Ctx {
   maxReroll: number;
   selectionStep: SelectStep | null;
   selectionOwner: PlayerId | null;
-  /** 「真实之剑」置换选骰面板开启时禁用区域骰点击，避免歧义 */
-  convertPickOpen: boolean;
   /** 技能选择器处于「slots」步骤时，区域骰由选择器内部处理，禁用区域骰点击 */
   slotsStepOpen: boolean;
   /** 尘起流程开启时禁用区域骰点击，避免与流程内选骰冲突 */
   dustFlowOpen: boolean;
+  /** 当前“可选骰集合已确定”的区域选骰（双入口：骰区与面板骰片共享同一状态） */
+  areaPick: {
+    owner: PlayerId;
+    kinds: DiceKind[];
+    isSelected: (id: string) => boolean;
+    toggle: (d: Die) => void;
+    filter?: (d: Die) => boolean;
+  } | null;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -504,13 +515,8 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
   box.appendChild(label);
 
   const dice = el('div', 'dice');
-  const diceStep: DiceStep | null =
-    ctx.selectionStep &&
-    ctx.selectionStep.kind === 'dice' &&
-    ctx.selectionOwner === player.id &&
-    ctx.selectionStep.areas.includes(kind)
-      ? ctx.selectionStep
-      : null;
+  const ap = ctx.areaPick;
+  const areaPickable = ap != null && ap.owner === player.id && ap.kinds.includes(kind);
 
   for (const d of player.areas[kind]) {
     const die = el('span', `die die-${player.id}`);
@@ -518,23 +524,33 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     die.dataset.value = String(d.value);
     die.textContent = String(d.value);
 
-    if (ctx.convertPickOpen || ctx.slotsStepOpen || ctx.dustFlowOpen) {
-      // 置换支付面板 / 技能代价骰位面板 / 尘起流程开启时，区域骰不可点击
-    } else if (diceStep) {
-      const step = diceStep;
-      const selectable = !step.filter || step.filter(d);
-      if (selectable) {
+    if (ap) {
+      // 选骰面板开启：仅“可选集合已确定”的骰区可点（与面板骰片共享同一选中状态）
+      if (areaPickable && (!ap.filter || ap.filter(d))) {
         die.classList.add('clickable');
         die.title = '点击选择该骰';
-        const sel = ctx.hooks.ui.selection;
-        if (sel?.currentSel.has(d.id)) die.classList.add('selected');
-        die.addEventListener('click', () => {
-          const active = ctx.hooks.ui.selection;
-          if (!active) return;
-          if (active.currentSel.has(d.id)) active.currentSel.delete(d.id);
-          else if (active.currentSel.size < step.max) active.currentSel.add(d.id);
-          ctx.hooks.requestRender();
-        });
+        if (ap.isSelected(d.id)) die.classList.add('selected');
+        die.addEventListener('click', () => ap.toggle(d));
+      }
+    } else if (ctx.slotsStepOpen || ctx.dustFlowOpen) {
+      // 第一列技能分格面板 / 尘起支付面板开启时（可选集合取决于未做的选择），区域骰不可点
+    } else if (ctx.selectionStep) {
+      const step = ctx.selectionStep;
+      if (step.kind === 'dice' && ctx.selectionOwner === player.id && step.areas.includes(kind)) {
+        const selectable = !step.filter || step.filter(d);
+        if (selectable) {
+          die.classList.add('clickable');
+          die.title = '点击选择该骰';
+          const sel = ctx.hooks.ui.selection;
+          if (sel?.currentSel.has(d.id)) die.classList.add('selected');
+          die.addEventListener('click', () => {
+            const active = ctx.hooks.ui.selection;
+            if (!active) return;
+            if (active.currentSel.has(d.id)) active.currentSel.delete(d.id);
+            else if (active.currentSel.size < step.max) active.currentSel.add(d.id);
+            ctx.hooks.requestRender();
+          });
+        }
       }
     } else {
       const attackAction = ctx.legal.find(
@@ -712,26 +728,26 @@ function advanceLabel(phase: Phase): string {
 }
 
 function actionLabel(ctx: Ctx, a: Action): string | null {
+  const segs = actionDieSegments(ctx, a);
+  if (segs) return segsToText(ctx, segs);
   const { state } = ctx;
   switch (a.t) {
     case 'advance':
       return advanceLabel(state.phase);
-    case 'attack': {
-      const v = findDie(state, a.costSlots[0]?.dieIds[0])?.value ?? '?';
-      return `攻击：用 ${v} 点攻击骰`;
-    }
-    case 'block': {
-      const id = a.costSlots?.[0]?.dieIds?.[0];
-      if (!id) return '不抵挡';
-      const v = findDie(state, id)?.value ?? '?';
-      return `抵挡：用 ${v} 点防御骰`;
-    }
+    case 'block':
+      return '不抵挡';
     case 'dustRise': {
       const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
       return art ? dustEntryLabel(art) : '尘起';
     }
     case 'caiyuliu':
       return a.to === 'defense' ? '移到防御骰区' : a.to === 'meditation' ? '移到冥想骰区' : '不移动';
+    case 'guwangCharge':
+      return '不变更';
+    case 'guwangCancel':
+      return '承受伤害';
+    case 'dunwuHalve':
+      return '不减半';
     case 'fengmang': {
       if (!a.accept) return '不发动';
       const pd = state.pending;
@@ -740,29 +756,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       const mv = pp.areas.meditation.find((d) => d.id === a.meditationDieId)?.value ?? '?';
       return `发动（消耗 攻击${av} 与 冥想${mv}）`;
     }
-    case 'guwangCharge': {
-      if (!a.dieId) return '不变更';
-      const pd = state.pending;
-      const opp: PlayerId = pd && pd.kind === 'guwangCharge' ? (pd.player === 'A' ? 'B' : 'A') : state.activePlayer;
-      const v = state.players[opp].areas.attack.find((d) => d.id === a.dieId)?.value ?? '?';
-      return `改为1（${v}点）`;
-    }
-    case 'guwangCancel': {
-      if (!a.cancel || !a.defenseDieId) return '承受伤害';
-      const pd = state.pending;
-      const defender: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
-      const v = state.players[defender].areas.defense.find((d) => d.id === a.defenseDieId)?.value ?? '?';
-      return `取消（消耗 防御${v}）`;
-    }
     case 'shenhongKill':
       return a.accept ? '发动杀意（3 真伤 + 回2）' : '不发动';
-    case 'dunwuHalve': {
-      if (!a.accept) return '不减半';
-      const pd = state.pending;
-      const defender: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
-      const v = state.players[defender].areas.meditation.find((d) => d.id === a.meditationDieId)?.value ?? '?';
-      return `伤害减半（消耗 冥想${v}）`;
-    }
     case 'dunwuPulse': {
       const pd = state.pending;
       const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;
@@ -770,6 +765,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     }
     case 'reroll':
     case 'skill':
+      return null;
+    default:
       return null;
   }
 }
@@ -827,36 +824,93 @@ function dustEntryButton(ctx: Ctx, a: Artifact): HTMLButtonElement {
   return b;
 }
 
-function chipDieId(a: Action): string | undefined {
-  if (a.t === 'attack') return a.costSlots[0]?.dieIds[0];
-  if (a.t === 'block') return a.costSlots?.[0]?.dieIds?.[0];
-  return undefined;
+/** 动作里涉及的一颗骰（供骰片行渲染） */
+interface DieSeg {
+  id: string;
+  owner: PlayerId;
 }
 
-/** 攻击/抵挡的紧凑呈现：标签 + 骰片（与「选择冥想骰」同款），节省纵向空间 */
+/** 动作的“文本片段 + 骰子”分段（parts.length === dice.length + 1）；无骰返回 null。
+ *  统一规则：凡文案指向具体骰子，一律用骰片呈现，不得写成文字。 */
+function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg[] } | null {
+  const { state } = ctx;
+  const opponent = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
+  switch (a.t) {
+    case 'attack':
+      return {
+        parts: ['攻击', ''],
+        dice: (a.costSlots[0]?.dieIds ?? []).map((id) => ({ id, owner: state.activePlayer })),
+      };
+    case 'block': {
+      const ids = a.costSlots?.[0]?.dieIds ?? [];
+      if (ids.length === 0) return null; // 「不抵挡」按文字处理
+      const owner = state.pendingAttack ? opponent(state.pendingAttack.attacker) : state.activePlayer;
+      return { parts: ['抵挡', ''], dice: ids.map((id) => ({ id, owner })) };
+    }
+    case 'guwangCancel': {
+      if (!a.cancel || !a.defenseDieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
+      return { parts: ['取消（消耗 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
+    }
+    case 'dunwuHalve': {
+      if (!a.accept || !a.meditationDieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
+      return { parts: ['伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
+    }
+    case 'guwangCharge': {
+      if (!a.dieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'guwangCharge' ? opponent(pd.player) : state.activePlayer;
+      return { parts: ['改为 1 点 ', ''], dice: [{ id: a.dieId, owner }] };
+    }
+    default:
+      return null;
+  }
+}
+
+/** 骰子的文字形式（如 防6） */
+function segDieText(ctx: Ctx, seg: DieSeg): string {
+  const d = findDie(ctx.state, seg.id);
+  return d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
+}
+
+function segsToText(ctx: Ctx, segs: { parts: string[]; dice: DieSeg[] }): string {
+  let out = segs.parts[0] ?? '';
+  segs.dice.forEach((s, i) => {
+    out += segDieText(ctx, s) + (segs.parts[i + 1] ?? '');
+  });
+  return out;
+}
+
+/** 一行骰片：文本片段 + 可点骰片（每个骰片对应一个动作），节省纵向空间 */
 function actionChipRow(
   ctx: Ctx,
-  labelText: string,
-  actions: Action[],
-  owner: PlayerId,
+  parts: string[],
+  items: { a: Action; die: DieSeg }[],
 ): HTMLElement {
   const row = el('div', 'actionlist-chips');
-  const lab = el('span', 'chip-label');
-  lab.textContent = labelText;
-  row.appendChild(lab);
-  for (const a of actions) {
-    const id = chipDieId(a);
-    const d = id ? findDie(ctx.state, id) : undefined;
-    if (!d) continue;
+  const lead = el('span', 'chip-label');
+  lead.textContent = parts[0] ?? '';
+  row.appendChild(lead);
+  items.forEach(({ a, die }, i) => {
+    const d = findDie(ctx.state, die.id);
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = `pay-die clickable die-${owner}`;
-    chip.dataset.id = d.id;
-    chip.dataset.act = a.t === 'attack' ? 'attack' : 'block';
-    chip.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
-    chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? labelText));
+    chip.className = `pay-die clickable die-${die.owner}`;
+    chip.dataset.id = die.id;
+    chip.dataset.act = a.t;
+    chip.textContent = d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
+    chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? ''));
     row.appendChild(chip);
-  }
+    const tail = parts[i + 1] ?? '';
+    if (tail) {
+      const t = el('span', 'chip-label');
+      t.textContent = tail;
+      row.appendChild(t);
+    }
+  });
   return row;
 }
 
@@ -886,23 +940,11 @@ function operationList(ctx: Ctx): HTMLElement {
 
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
-  const attackChips = ctx.legal.filter((a) => a.t === 'attack');
-  if (attackChips.length > 0) {
-    box.appendChild(actionChipRow(ctx, '攻击', attackChips, state.activePlayer));
-  }
-  const blockChips = ctx.legal.filter((a) => a.t === 'block' && chipDieId(a));
-  if (blockChips.length > 0) {
-    const defender: PlayerId = state.pendingAttack
-      ? state.pendingAttack.attacker === 'A'
-        ? 'B'
-        : 'A'
-      : state.activePlayer;
-    box.appendChild(actionChipRow(ctx, '抵挡', blockChips, defender));
-  }
+  let seenFengmang = false;
+  const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
+  const plain: Action[] = [];
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
-    if (a.t === 'attack') continue;
-    if (a.t === 'block' && chipDieId(a)) continue;
     if (a.t === 'skill') {
       const sig = `${a.artifactId}:${a.side}`;
       if (seenSkill.has(sig)) continue;
@@ -917,6 +959,29 @@ function operationList(ctx: Ctx): HTMLElement {
       if (art) box.appendChild(dustEntryButton(ctx, art));
       continue;
     }
+    if (a.t === 'fengmang') {
+      // 锋芒不再枚举「攻×冥」组合：入口 + 选骰面板
+      if (!a.accept) {
+        plain.push(a);
+      } else if (!seenFengmang) {
+        seenFengmang = true;
+        box.appendChild(fengmangButton(ctx));
+      }
+      continue;
+    }
+    const segs = actionDieSegments(ctx, a);
+    if (segs && segs.dice.length === 1) {
+      const key = `${segs.parts.join('\u0000')}#${segs.parts.length}`;
+      const g = groups.get(key) ?? { parts: segs.parts, items: [] };
+      g.items.push({ a, die: segs.dice[0] });
+      groups.set(key, g);
+      continue;
+    }
+    plain.push(a);
+  }
+  // 骰片行（攻击/抵挡/取消真伤/减半/改点）→ 与技能、尘起、纯文字动作并列
+  for (const g of groups.values()) box.appendChild(actionChipRow(ctx, g.parts, g.items));
+  for (const a of plain) {
     const label = actionLabel(ctx, a);
     if (label === null) continue;
     box.appendChild(button(label, a, ctx.hooks));
@@ -1008,6 +1073,34 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
   return box;
 }
 
+/** 技能选择器「dice」步骤的骰片（与骰区点选共享同一选中状态；双入口） */
+function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLElement {
+  const ownerId = step.owner === 'self' ? ctx.state.activePlayer : oppOf(ctx.state.activePlayer);
+  const owner = ctx.state.players[ownerId];
+  const box = el('div', 'pay-dice');
+  for (const k of AREA_ORDER) {
+    if (!step.areas.includes(k)) continue;
+    for (const d of owner.areas[k]) {
+      const die = el('span', `pay-die die-${owner.id}`);
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (sel.currentSel.has(d.id)) {
+        die.classList.add('selected');
+      }
+      if (!step.filter || step.filter(d)) {
+        die.classList.add('clickable');
+        die.addEventListener('click', () => toggleSelDie(ctx.hooks, step, d));
+      } else {
+        die.classList.add('pay-die--used');
+      }
+      box.appendChild(die);
+    }
+  }
+  return box;
+}
+
 function chooserPanel(ctx: Ctx): HTMLElement | null {
   const sel: ActiveSelection | null = ctx.hooks.ui.selection;
   if (!sel) return null;
@@ -1064,6 +1157,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
 
   if (step.kind === 'slots') {
     panel.appendChild(slotsStepView(ctx, sel, step));
+  } else if (step.kind === 'dice') {
+    panel.appendChild(chooserDiceChips(ctx, sel, step));
   }
 
   const actions = el('div', 'selector-actions');
@@ -1214,20 +1309,51 @@ function openConvertPick(ctx: Ctx, kind: 'attack' | 'block'): void {
 }
 
 /** 选满 2 颗 → 提出待确认的攻击/抵挡动作（走统一确认条） */
-function dispatchConvertPick(ctx: Ctx): void {
-  const cp = ctx.hooks.ui.convertPick;
-  if (!cp || cp.dieIds.length !== 2) return;
+function dispatchConvertPick(hooks: RenderHooks, cp: NonNullable<UiState['convertPick']>): void {
   const isAtk = cp.kind === 'attack';
   const action: Action = isAtk
     ? { t: 'attack', costSlots: [{ dieIds: [...cp.dieIds] }] }
     : { t: 'block', costSlots: [{ dieIds: [...cp.dieIds] }] };
-  ctx.hooks.ui.convertPick = null;
-  ctx.hooks.propose(
+  hooks.ui.convertPick = null;
+  hooks.propose(
     action,
     isAtk
       ? '置换攻击：消耗 2 颗能力骰 → 1 颗攻击骰（点数按 5）'
       : '置换抵挡：消耗 2 颗能力骰 → 1 颗防御骰（点数按 5）',
   );
+}
+
+/** 切换置换选骰（骰区与面板骰片共享同一状态） */
+function toggleConvertDie(hooks: RenderHooks, d: Die): void {
+  const cp = hooks.ui.convertPick;
+  if (!cp) return;
+  const i = cp.dieIds.indexOf(d.id);
+  if (i >= 0) cp.dieIds.splice(i, 1);
+  else if (cp.dieIds.length < 2) cp.dieIds.push(d.id);
+  if (cp.dieIds.length === 2) {
+    dispatchConvertPick(hooks, cp);
+    return;
+  }
+  hooks.requestRender();
+}
+
+/** 切换技能选择器「dice」步骤的选中骰 */
+function toggleSelDie(hooks: RenderHooks, step: DiceStep, d: Die): void {
+  const sel = hooks.ui.selection;
+  if (!sel) return;
+  if (sel.currentSel.has(d.id)) sel.currentSel.delete(d.id);
+  else if (sel.currentSel.size < step.max) sel.currentSel.add(d.id);
+  hooks.requestRender();
+}
+
+/** 切换锋芒选骰 */
+function toggleFengmangDie(hooks: RenderHooks, d: Die): void {
+  const fp = hooks.ui.fengmangPick;
+  if (!fp) return;
+  if (d.kind === 'attack') fp.attackDieId = fp.attackDieId === d.id ? undefined : d.id;
+  else if (d.kind === 'meditation') fp.meditationDieId = fp.meditationDieId === d.id ? undefined : d.id;
+  else return;
+  hooks.requestRender();
 }
 
 function convertPickPanel(ctx: Ctx): HTMLElement {
@@ -1251,16 +1377,7 @@ function convertPickPanel(ctx: Ctx): HTMLElement {
       die.dataset.value = String(d.value);
       die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
       if (cp.dieIds.includes(d.id)) die.classList.add('selected');
-      die.addEventListener('click', () => {
-        const i = cp.dieIds.indexOf(d.id);
-        if (i >= 0) cp.dieIds.splice(i, 1);
-        else if (cp.dieIds.length < 2) cp.dieIds.push(d.id);
-        if (cp.dieIds.length === 2) {
-          dispatchConvertPick(ctx);
-          return;
-        }
-        ctx.hooks.requestRender();
-      });
+      die.addEventListener('click', () => toggleConvertDie(ctx.hooks, d));
       diceBox.appendChild(die);
     }
   }
@@ -1272,6 +1389,84 @@ function convertPickPanel(ctx: Ctx): HTMLElement {
   cancel.textContent = '取消';
   cancel.addEventListener('click', () => {
     ctx.hooks.ui.convertPick = null;
+    ctx.hooks.requestRender();
+  });
+  wrap.appendChild(cancel);
+  return wrap;
+}
+
+/** 锋芒（触发）：操作列表入口按钮 */
+function fengmangButton(ctx: Ctx): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn btn-skill';
+  b.dataset.act = 'fengmangOpen';
+  b.textContent = '发动「锋芒」';
+  b.addEventListener('click', () => {
+    ctx.hooks.ui.fengmangPick = {};
+    ctx.hooks.requestRender();
+  });
+  return b;
+}
+
+/** 锋芒面板：选 1 颗攻击骰 + 1 颗冥想骰（不再枚举组合） */
+function fengmangPanel(ctx: Ctx): HTMLElement {
+  const fp = ctx.hooks.ui.fengmangPick!;
+  const pd = ctx.state.pending;
+  const owner: PlayerId = pd && pd.kind === 'fengmang' ? pd.player : ctx.state.activePlayer;
+  const player = ctx.state.players[owner];
+  const wrap = el('div', 'convertpick');
+  const title = el('span', 'convertpick-title');
+  title.textContent = '锋芒：选择消耗的 1 颗攻击骰与 1 颗冥想骰';
+  wrap.appendChild(title);
+
+  const group = (kind: DiceKind, label: string, chosen: string | undefined): void => {
+    const lab = el('span', 'chip-label');
+    lab.textContent = label;
+    wrap.appendChild(lab);
+    for (const d of player.areas[kind]) {
+      const die = el('span', `pay-die clickable die-${owner}`);
+      die.dataset.id = d.id;
+      die.dataset.kind = d.kind;
+      die.dataset.value = String(d.value);
+      die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (chosen === d.id) die.classList.add('selected');
+      die.addEventListener('click', () => toggleFengmangDie(ctx.hooks, d));
+      wrap.appendChild(die);
+    }
+  };
+  group('attack', '攻击', fp.attackDieId);
+  group('meditation', '冥想', fp.meditationDieId);
+
+  const ready = fp.attackDieId != null && fp.meditationDieId != null;
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'btn btn-confirm';
+  ok.dataset.act = 'fengmangConfirm';
+  ok.textContent = '确认';
+  ok.disabled = !ready;
+  ok.addEventListener('click', () => {
+    if (!ready) return;
+    const action = ctx.legal.find(
+      (x): x is Extract<Action, { t: 'fengmang' }> =>
+        x.t === 'fengmang' &&
+        x.accept &&
+        x.attackDieId === fp.attackDieId &&
+        x.meditationDieId === fp.meditationDieId,
+    );
+    if (!action) return;
+    ctx.hooks.ui.fengmangPick = null;
+    ctx.hooks.propose(action, actionLabel(ctx, action) ?? '发动「锋芒」');
+  });
+  wrap.appendChild(ok);
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.dataset.act = 'fengmangCancel';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    ctx.hooks.ui.fengmangPick = null;
     ctx.hooks.requestRender();
   });
   wrap.appendChild(cancel);
@@ -1557,6 +1752,39 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     }
   }
 
+  const areaPick: Ctx['areaPick'] = (() => {
+    const cp = hooks.ui.convertPick;
+    if (cp) {
+      return {
+        owner: convertPickOwner(state),
+        kinds: ['attack', 'defense', 'meditation'],
+        isSelected: (id: string) => cp.dieIds.includes(id),
+        toggle: (d: Die) => toggleConvertDie(hooks, d),
+      };
+    }
+    const fp = hooks.ui.fengmangPick;
+    if (fp && state.pending && state.pending.kind === 'fengmang') {
+      const owner = state.pending.player;
+      return {
+        owner,
+        kinds: ['attack', 'meditation'],
+        isSelected: (id: string) => fp.attackDieId === id || fp.meditationDieId === id,
+        toggle: (d: Die) => toggleFengmangDie(hooks, d),
+      };
+    }
+    if (selectionStep && selectionStep.kind === 'dice' && selectionOwner) {
+      const step = selectionStep;
+      return {
+        owner: selectionOwner,
+        kinds: step.areas,
+        filter: step.filter ? (d: Die) => step.filter!(d) : undefined,
+        isSelected: (id: string) => hooks.ui.selection?.currentSel.has(id) ?? false,
+        toggle: (d: Die) => toggleSelDie(hooks, step, d),
+      };
+    }
+    return null;
+  })();
+
   const ctx: Ctx = {
     state,
     legal,
@@ -1564,9 +1792,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     maxReroll,
     selectionStep,
     selectionOwner,
-    convertPickOpen: hooks.ui.convertPick != null,
     slotsStepOpen,
     dustFlowOpen: hooks.ui.dustFlow != null,
+    areaPick,
   };
 
   root.innerHTML = '';
@@ -1590,6 +1818,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   if (hooks.ui.convertPick) {
     left.appendChild(convertPickPanel(ctx));
+  } else if (hooks.ui.fengmangPick && hooks.ui.pendingConfirm == null) {
+    left.appendChild(fengmangPanel(ctx));
   } else if (hooks.ui.dustFlow) {
     left.appendChild(dustFlowView(ctx));
   } else {

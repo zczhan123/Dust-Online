@@ -10,6 +10,7 @@ const freshUi = (): UiState => ({
   selection: null,
   pendingConfirm: null,
   convertPick: null,
+  fengmangPick: null,
   dustFlow: null,
 });
 
@@ -703,12 +704,15 @@ describe('renderGame (interaction)', () => {
 
     renderGame(state, root, hooksFor());
     expect(root.querySelector('.hint-phase')?.textContent).toContain('高塔铁幕');
-    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="guwangCharge"]');
-    expect(btns.length).toBe(3); // 2 颗对方攻击骰 + 不变更
-    const labels = Array.from(btns).map((b) => b.textContent);
-    expect(labels).toContain('不变更');
-    expect(labels).toContain('改为1（5点）');
-    expect(labels).toContain('改为1（3点）');
+    // 骰子选项统一用骰片（攻5 / 攻3），「不变更」保持文字按钮
+    const plain = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="guwangCharge"]');
+    expect(plain.length).toBe(1);
+    expect(plain[0].textContent).toBe('不变更');
+    const chips = Array.from(
+      root.querySelectorAll<HTMLButtonElement>('.actionlist-chips .pay-die[data-act="guwangCharge"]'),
+    ).map((c) => c.textContent);
+    expect(chips).toContain('攻5');
+    expect(chips).toContain('攻3');
     expect(state.pending!.kind).toBe('guwangCharge'); // 渲染不应改变状态
   });
 
@@ -723,11 +727,12 @@ describe('renderGame (interaction)', () => {
 
     renderGame(state, root, hooksFor());
     expect(root.querySelector('.hint-phase')?.textContent).toContain('高塔铁幕');
-    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="guwangCancel"]');
-    expect(btns.length).toBe(2); // 承受伤害 + 取消
-    const labels = Array.from(btns).map((b) => b.textContent);
-    expect(labels).toContain('承受伤害');
-    expect(labels).toContain('取消（消耗 防御4）');
+    // 「承受伤害」文字按钮 + 「取消（消耗 防4）」骰片行
+    const take = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="guwangCancel"]');
+    expect(take!.textContent).toBe('承受伤害');
+    const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
+    expect(row.textContent).toContain('取消（消耗');
+    expect(row.querySelector('.pay-die[data-act="guwangCancel"]')!.textContent).toBe('防4');
     expect(state.pending!.kind).toBe('guwangCancel'); // 渲染不应改变状态
   });
 
@@ -865,11 +870,12 @@ describe('renderGame (interaction)', () => {
 
     renderGame(state, root, hooksFor());
     expect(root.querySelector('.hint-phase')?.textContent).toContain('灵能屏障');
-    const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="dunwuHalve"]');
-    expect(btns.length).toBe(2); // 不减半 + 消耗冥想骰
-    const labels = Array.from(btns).map((b) => b.textContent);
-    expect(labels).toContain('不减半');
-    expect(labels).toContain('伤害减半（消耗 冥想3）');
+    // 「不减半」文字按钮 + 「伤害减半（消耗 冥3）」骰片行
+    const decline = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="dunwuHalve"]');
+    expect(decline!.textContent).toBe('不减半');
+    const halveRow = root.querySelector<HTMLElement>('.actionlist-chips')!;
+    expect(halveRow.textContent).toContain('伤害减半（消耗');
+    expect(halveRow.querySelector('.pay-die[data-act="dunwuHalve"]')!.textContent).toBe('冥3');
     expect(state.pending!.kind).toBe('dunwuHalve'); // 渲染不应改变状态
   });
 
@@ -885,6 +891,116 @@ describe('renderGame (interaction)', () => {
     expect(labels).toContain('发动脉冲（2 点真实伤害）');
     expect(labels).toContain('不发动');
     expect(state.pending!.kind).toBe('dunwuPulse'); // 渲染不应改变状态
+  });
+
+  it('锋芒: opens a selection panel instead of enumerating 攻×冥 combos', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    state.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
+    state.players.A.areas.attack = [
+      { id: 'a1', value: 5, kind: 'attack' },
+      { id: 'a2', value: 3, kind: 'attack' },
+    ];
+    state.players.A.areas.meditation = [{ id: 'mm', value: 2, kind: 'meditation' }];
+    state.players.B.areas.defense = [{ id: 'd1', value: 3, kind: 'defense' }];
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    applyAction(state, { t: 'block', costSlots: [{ dieIds: ['d1'] }] });
+    expect(state.pending!.kind).toBe('fengmang');
+
+    const { ui, onAction } = mount(state, root);
+    // 不再逐条枚举「攻×冥」组合
+    const combos = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).filter(
+      (b) => (b.textContent ?? '').includes('发动（消耗'),
+    );
+    expect(combos.length).toBe(0);
+    const open = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="fengmangOpen"]')!;
+    expect(open.textContent).toBe('发动「锋芒」');
+    expect(root.querySelector('.actionlist .btn[data-act="fengmang"]')).not.toBeNull(); // 不发动
+
+    open.click();
+    expect(ui.fengmangPick).not.toBeNull();
+    const chips = Array.from(root.querySelectorAll<HTMLElement>('.convertpick .pay-die')).map(
+      (c) => c.textContent,
+    );
+    expect(chips).toEqual(['攻3', '冥2']);
+
+    root.querySelector<HTMLElement>('.convertpick .pay-die[data-id="a2"]')!.click();
+    root.querySelector<HTMLElement>('.convertpick .pay-die[data-id="mm"]')!.click();
+    const ok = root.querySelector<HTMLButtonElement>('.convertpick .btn-confirm')!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+
+    expect(ui.fengmangPick).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'fengmang',
+      accept: true,
+      attackDieId: 'a2',
+      meditationDieId: 'mm',
+    });
+  });
+
+  it('chooser dice step shows chips mirroring the area dice (dual entry)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    state.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'left';
+    state.players.A.areas.attack = [{ id: 'atk-test', value: 3, kind: 'attack' }];
+
+    const { ui } = mount(state, root);
+    const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('淬炼'),
+    )!;
+    openBtn.click();
+
+    const chip = root.querySelector<HTMLElement>('.selector .pay-die[data-id="atk-test"]')!;
+    expect(chip.textContent).toBe('攻3');
+    chip.click();
+    expect(ui.selection!.currentSel.has('atk-test')).toBe(true);
+    expect(
+      root.querySelector('.player--self .die[data-id="atk-test"]')!.classList.contains('selected'),
+    ).toBe(true);
+
+    // 再从骰区点同一颗 → 取消（两个入口共享同一状态）
+    root.querySelector<HTMLElement>('.player--self .die[data-id="atk-test"]')!.click();
+    expect(ui.selection!.currentSel.has('atk-test')).toBe(false);
+  });
+
+  it('置换攻击 picker also allows clicking the area dice (dual entry)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' });
+    state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    state.players.A.areas = {
+      attack: [],
+      defense: [{ id: 'pd1', value: 2, kind: 'defense' }],
+      meditation: [{ id: 'pm1', value: 3, kind: 'meditation' }],
+    };
+
+    const { ui } = mount(state, root);
+    const openBtn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('使用「真实之剑」置换进行攻击'),
+    )!;
+    openBtn.click();
+    expect(ui.convertPick).not.toBeNull();
+
+    const areaDie = root.querySelector<HTMLElement>('.player--self .die[data-id="pd1"]')!;
+    expect(areaDie.classList.contains('clickable')).toBe(true);
+    areaDie.click();
+    expect(
+      root.querySelector('.player--self .die[data-id="pd1"]')!.classList.contains('selected'),
+    ).toBe(true);
+    expect(
+      root.querySelector('.convertpick .pay-die[data-id="pd1"]')!.classList.contains('selected'),
+    ).toBe(true);
+
+    root.querySelector<HTMLElement>('.player--self .die[data-id="pm1"]')!.click();
+    expect(ui.convertPick).toBeNull();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'attack',
+      costSlots: [{ dieIds: ['pd1', 'pm1'] }],
+    });
   });
 
   it('opens the 012 梦醒时分 chooser and proposes explicit destination + meditation dice params', () => {
