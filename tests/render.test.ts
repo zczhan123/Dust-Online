@@ -278,7 +278,8 @@ describe('renderGame (interaction)', () => {
     renderGame(state, root, hooksFor());
     expect(root.querySelectorAll('.skill-part-head').length).toBeGreaterThan(0);
     expect(root.querySelectorAll('.skill-text').length).toBe(0);
-    // 技能名仍在
+    // 技能名仍在（且与类型徽标同行 → 那一行就是点击发动的目标）
+    expect(root.querySelector('.skill-part-head .skill-name')).not.toBeNull();
     expect((root.textContent ?? '').length).toBeGreaterThan(0);
   });
 

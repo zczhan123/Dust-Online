@@ -177,7 +177,7 @@ body {
   padding: 5px 8px;
 }
 .skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.skill-name { font-weight: 700; font-size: 13px; }
+.skill-name { font-weight: 700; font-size: 13px; flex: 0 0 auto; }
 
 .skill-part {
   border-left: 4px solid #cfc8ba;
@@ -189,9 +189,9 @@ body {
 .skill-part--on { background: var(--on-bg); border-left-color: var(--on); }
 .skill-part--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
 .skill-part--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
-.skill:has(.skill-part--used) .skill-name { text-decoration: line-through; color: #6b7280; }
+.skill-part--used .skill-name { text-decoration: line-through; color: #6b7280; }
 .skill-part--full { background: #f3ecec; border-left-color: #b75b5b; }
-.skill:has(.skill-part--full) .skill-name { color: #8a2b2b; }
+.skill-part--full .skill-name { color: #8a2b2b; }
 /* 不能再激活/不能再使用（充能满、计数满、必杀已用）→ 更深的灰，区别于「未激活」 */
 .skill-part--disabled { background: #cfd4db; border-left-color: #6b7280; opacity: 0.95; }
 .badge-used { background: #d1d5db; color: #4b5563; }

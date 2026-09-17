@@ -447,12 +447,6 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     }
     for (const [groupName, parts] of groups) {
       const box = el('div', 'skill');
-      const sHead = el('div', 'skill-head');
-      const sname = el('span', 'skill-name');
-      sname.textContent = groupName;
-      sHead.appendChild(sname);
-      box.appendChild(sHead);
-
       for (const s of parts) {
         const pstate = skillPartState(ctx, a, s);
         const pcls =
@@ -477,6 +471,10 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         const badge = el('span', 'skill-type');
         badge.textContent = s.type;
         pHead.appendChild(badge);
+        // 技能名与类型徽标同行（隐藏描述时这就是那一行的主体，也是点击发动的目标）
+        const nameEl = el('span', 'skill-name');
+        nameEl.textContent = groupName;
+        pHead.appendChild(nameEl);
         if (isUsedUltimate) {
           const used = el('span', 'badge badge-used');
           used.textContent = '已使用';
