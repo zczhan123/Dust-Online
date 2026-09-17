@@ -2336,20 +2336,31 @@ function applyZoom(stage: HTMLElement, prefs: Prefs): void {
   if (prefs.zoomMode === 'off') {
     stage.style.transform = '';
     stage.style.width = '';
+    delete stage.dataset.zoomStamp;
+    delete stage.dataset.zoomK;
     return;
   }
-  // 先复位再测量，避免以缩放后的尺寸计算
-  stage.style.transform = 'none';
-  stage.style.width = '100%';
-  let k = 1;
-  if (prefs.zoomMode === 'manual') {
-    k = Math.min(1, Math.max(0.5, prefs.zoomPercent / 100));
-  } else {
-    const h = stage.scrollHeight || 0;
-    const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
-    if (h > 0 && vh > 0 && h > vh) k = Math.max(0.8, Math.min(1, vh / h));
-  }
   stage.style.transformOrigin = 'top left';
-  stage.style.transform = `scale(${k})`;
-  stage.style.width = `${100 / k}%`;
+  if (prefs.zoomMode === 'manual') {
+    const k = Math.min(1, Math.max(0.5, prefs.zoomPercent / 100));
+    stage.style.transform = k === 1 ? '' : `scale(${k})`;
+    stage.style.width = k === 1 ? '' : `${100 / k}%`;
+    return;
+  }
+  // 自动：只在「视口尺寸 / 密度」变化时重算，避免内容一变（如确认条出现/消失）就来回抖动
+  const vw = typeof window !== 'undefined' ? window.innerWidth || 0 : 0;
+  const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
+  const stamp = `${vw}x${vh}:${prefs.density}`;
+  if (stage.dataset.zoomStamp !== stamp) {
+    stage.style.transform = 'none';
+    stage.style.width = '100%';
+    const h = stage.scrollHeight || 0;
+    let k = 1;
+    if (h > 0 && vh > 0 && h > vh) k = Math.max(0.8, Math.min(1, vh / h));
+    stage.dataset.zoomStamp = stamp;
+    stage.dataset.zoomK = String(k);
+  }
+  const k = Number(stage.dataset.zoomK ?? '1') || 1;
+  stage.style.transform = k === 1 ? '' : `scale(${k})`;
+  stage.style.width = k === 1 ? '' : `${100 / k}%`;
 }

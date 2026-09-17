@@ -1024,3 +1024,13 @@ button.pay-die {
 
 /* 整屏缩放容器（transform 施加在 .stage 上；浮层不受影响） */
 .stage { width: 100%; }
+
+/* 中央操作区宽度稳定：避免“确认条出现/消失”时栏位宽度跳动 */
+.centerband > * { min-width: 0; }
+.actionzone { width: 100%; min-width: 0; box-sizing: border-box; }
+.actionzone .hint,
+.actionzone .actionlist,
+.actionzone .confirm-row { min-width: 0; }
+.confirm-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.confirm-row .btn { flex: 0 0 auto; }
+.vitals { width: 168px; flex: 0 0 auto; }
