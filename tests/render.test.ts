@@ -12,8 +12,9 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   convertPick: null,
   fengmangPick: null,
   dustFlow: null,
-  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, ...prefs },
+  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, ...prefs },
   settingsOpen: false,
+  logOpen: false,
   detail: null,
 });
 
@@ -262,6 +263,93 @@ describe('renderGame (read-only snapshot)', () => {
     expect(tag('.player--enemy')).toBe('A');
   });
 
+  it('collapses the log into an edge-button drawer when 战报栏 = 收起', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const ui = freshUi({ logCollapsed: true });
+    let hooks: RenderHooks;
+    hooks = {
+      ui,
+      onAction: () => {},
+      propose: () => {},
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+    };
+    renderGame(state, root, hooks);
+
+    expect(root.querySelector('.app')!.classList.contains('log-collapsed')).toBe(true);
+    expect(root.querySelector('.log-edge')).not.toBeNull();
+    expect(root.querySelector('.log-drawer')).toBeNull();
+
+    root.querySelector<HTMLButtonElement>('.log-edge')!.click();
+    expect(ui.logOpen).toBe(true);
+    expect(root.querySelector('.log-drawer .log')).not.toBeNull();
+
+    // 点空白处关闭
+    root.querySelector<HTMLElement>('.log-overlay')!.click();
+    expect(ui.logOpen).toBe(false);
+    expect(root.querySelector('.log-drawer')).toBeNull();
+  });
+
+  it('applies preset combos and switches to 自定义 when a single item is changed', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const ui = freshUi();
+    let hooks: RenderHooks;
+    hooks = {
+      ui,
+      onAction: () => {},
+      propose: () => {},
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+    };
+    renderGame(state, root, hooks);
+    root.querySelector<HTMLButtonElement>('.btn-settings')!.click();
+
+    const rowBtn = (label: string, text: string) => {
+      const row = Array.from(root.querySelectorAll<HTMLElement>('.settings-row')).find(
+        (r) => r.querySelector('.settings-label')!.textContent === label,
+      )!;
+      return Array.from(row.querySelectorAll<HTMLButtonElement>('.settings-opt')).find(
+        (b) => b.textContent === text,
+      )!;
+    };
+
+    // 触屏模式：密度=舒适、战报收起
+    rowBtn('预设组合', '触屏模式').click();
+    expect(ui.prefs.preset).toBe('touch');
+    expect(ui.prefs.density).toBe('comfortable');
+    expect(ui.prefs.logCollapsed).toBe(true);
+
+    // 手动改单项 → 自定义
+    rowBtn('卡图', '完整').click();
+    expect(ui.prefs.preset).toBe('custom');
+    expect(root.querySelector('.settings-row .settings-opt')!.textContent).toBeDefined();
+
+    // 电脑模式：密度=紧凑、战报显示
+    rowBtn('预设组合', '电脑模式').click();
+    expect(ui.prefs.preset).toBe('desktop');
+    expect(ui.prefs.density).toBe('compact');
+    expect(ui.prefs.logCollapsed).toBe(false);
+  });
+
+  it('uses the bottom-sheet form of the detail popover on narrow screens', () => {
+    const prev = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { value: 600, configurable: true, writable: true });
+    try {
+      const state = createGame({ seed: 1, firstPlayer: 'A' });
+      const { ui } = mount(state, root);
+      root
+        .querySelector<HTMLElement>('.player--self .card[data-artifact="001"] .card-art')!
+        .click();
+      expect(ui.detail).not.toBeNull();
+      const pop = root.querySelector<HTMLElement>('.detail-popover')!;
+      expect(pop.classList.contains('detail-popover--sheet')).toBe(true);
+      // 窄屏下不写死内联定位（交由 CSS 底部抽屉定位）
+      expect(pop.style.left).toBe('');
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { value: prev, configurable: true, writable: true });
+    }
+  });
+
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
     const state = createGame({
       seed: 1,
@@ -504,6 +592,8 @@ describe('renderGame (interaction)', () => {
       cardArt: 'thumb',
       density: 'compact',
       mirrorEnemy: false,
+      preset: 'desktop',
+      logCollapsed: false,
     });
     expect(root.querySelectorAll('.skill-text').length).toBe(0);
 

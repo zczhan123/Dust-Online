@@ -18,6 +18,7 @@ const ui: UiState = {
   dustFlow: null,
   prefs: loadPrefs(),
   settingsOpen: false,
+  logOpen: false,
   detail: null,
 };
 let lastError = '';

@@ -831,7 +831,13 @@ button.pay-die {
 .density-compact .skill { padding: 4px 6px; }
 .density-compact .skill-part { padding: 3px 5px; margin-top: 3px; }
 .density-compact .areas { margin: 3px 0; }
-.density-compact .player-header { margin: 2px 0; }
+.density-compact .area { padding: 4px 6px; gap: 6px; }
+.density-compact .actionzone { padding: 6px 8px; gap: 4px; }
+.density-compact .vitals { padding: 6px 8px; gap: 4px; min-width: 150px; }
+.density-compact .vitals-life { font-size: 14px; }
+.density-compact .convertpick { padding: 6px 8px; gap: 6px; }
+.density-compact .skills--inline .skill { padding: 2px 5px; }
+.density-compact .skill-part-head { gap: 5px; }
 
 /* ===== 侧栏头部（左上角设置） ===== */
 .sidebar-head { display: flex; align-items: center; gap: 8px; }
@@ -961,3 +967,55 @@ button.pay-die {
 .detail-popover .skill-type { font-size: 12px; }
 .detail-popover .skill-text { font-size: 13px; line-height: 1.65; color: #374151; }
 .detail-title { font-size: 16px; }
+
+/* ===== 二期：响应式 + 战报抽屉 ===== */
+/* 贴边按钮：战报收起 / 窄屏时可见 */
+.log-edge { display: none; align-self: flex-start; position: sticky; top: 8px; }
+.app.log-collapsed .sidebar { display: none; }
+.app.log-collapsed .log-edge { display: inline-flex; }
+
+.log-overlay { position: fixed; inset: 0; background: rgba(20, 24, 30, 0.35); z-index: 45; }
+.log-drawer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(340px, 86vw);
+  background: #fffdf8;
+  border-right: 1px solid var(--line);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.log-drawer .log { max-height: none; flex: 1; }
+
+/* 技能详情浮窗：窄屏 → 底部抽屉 */
+.detail-popover--sheet {
+  left: 8px;
+  right: 8px;
+  width: auto;
+  top: auto;
+  bottom: 8px;
+  max-height: 70vh;
+}
+
+/* 中屏（720–1279）：战报栏默认收起（改由贴边按钮拉出）；卡片允许换行 */
+@media (max-width: 1279px) {
+  .sidebar { display: none; }
+  .log-edge { display: inline-flex; }
+  .card { min-width: 180px; }
+}
+
+/* 窄屏 / 手机竖屏（<720）：单列堆叠，骰区横排可滑 */
+@media (max-width: 719px) {
+  .app { flex-direction: column; }
+  .centerband { flex-direction: column; }
+  .vitals { min-width: 0; }
+  .areas { overflow-x: auto; }
+  .card { min-width: 150px; }
+  .sidebar-head { display: none; }
+  .detail-popover { font-size: 14px; }
+}

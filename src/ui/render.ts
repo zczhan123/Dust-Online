@@ -13,7 +13,7 @@ import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
-import { DEFAULT_PREFS, clonePrefs, type Prefs } from './prefs';
+import { DEFAULT_PREFS, applyPreset, clonePrefs, type Prefs } from './prefs';
 
 const AREA_LABEL: Record<DiceKind, string> = {
   attack: '攻击骰区',
@@ -76,6 +76,8 @@ export interface UiState {
   prefs: Prefs;
   /** 设置面板是否打开 */
   settingsOpen: boolean;
+  /** 战报抽屉是否打开（战报栏收起时用） */
+  logOpen: boolean;
   /** 技能详情浮窗（只读）：锚定触发卡片的屏幕矩形 */
   detail: null | {
     artifactId: string;
@@ -1451,7 +1453,12 @@ function applyPrefs(ctx: Ctx, next: Prefs): void {
 }
 
 function setPref<K extends keyof Prefs>(ctx: Ctx, key: K, value: Prefs[K]): void {
-  applyPrefs(ctx, { ...ctx.hooks.ui.prefs, [key]: value });
+  // 手动改动任一项 → 预设转为「自定义」
+  applyPrefs(ctx, { ...ctx.hooks.ui.prefs, [key]: value, preset: 'custom' });
+}
+
+function usePreset(ctx: Ctx, id: 'desktop' | 'touch'): void {
+  applyPrefs(ctx, applyPreset(id));
 }
 
 function resetPrefs(ctx: Ctx): void {
@@ -1514,6 +1521,19 @@ function settingsPanel(ctx: Ctx): HTMLElement {
     { text: '正常', on: !ui.prefs.mirrorEnemy, onClick: () => setPref(ctx, 'mirrorEnemy', false) },
     { text: '镜像', on: ui.prefs.mirrorEnemy, onClick: () => setPref(ctx, 'mirrorEnemy', true) },
   ]);
+  // 预设组合：一键套用一组建议值
+  const presetOpts: { text: string; on: boolean; onClick: () => void }[] = [
+    { text: '电脑模式', on: ui.prefs.preset === 'desktop', onClick: () => usePreset(ctx, 'desktop') },
+    { text: '触屏模式', on: ui.prefs.preset === 'touch', onClick: () => usePreset(ctx, 'touch') },
+  ];
+  if (ui.prefs.preset === 'custom') {
+    presetOpts.push({ text: '自定义', on: true, onClick: () => {} });
+  }
+  row('预设组合', presetOpts);
+  row('战报栏', [
+    { text: '显示', on: !ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', false) },
+    { text: '收起', on: ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', true) },
+  ]);
 
   const actions = el('div', 'settings-actions');
   const reset = document.createElement('button');
@@ -1532,6 +1552,21 @@ function settingsPanel(ctx: Ctx): HTMLElement {
     }
   });
   overlay.appendChild(box);
+  return overlay;
+}
+
+/** 战报抽屉：从左侧滑出，点空白处关闭（窄屏或战报收起时使用） */
+function logDrawer(ctx: Ctx): HTMLElement {
+  const overlay = el('div', 'log-overlay');
+  const panel = el('div', 'log-drawer');
+  panel.appendChild(logPanel(ctx));
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ctx.hooks.ui.logOpen = false;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(panel);
   return overlay;
 }
 
@@ -1598,15 +1633,21 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
 
   const vw = window.innerWidth || 1280;
   const vh = window.innerHeight || 800;
-  const W = Math.min(340, Math.max(220, vw - 24));
-  let left = d.rect.left + d.rect.width + 8;
-  if (left + W > vw - 8) left = d.rect.left - W - 8;
-  left = Math.max(8, Math.min(left, vw - W - 8));
-  const top = Math.max(8, Math.min(d.rect.top, vh - 120));
-  box.style.left = `${left}px`;
-  box.style.top = `${top}px`;
-  box.style.width = `${W}px`;
-  box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
+  // 窄屏（手机）：改为底部抽屉形态，交由 CSS 定位
+  const narrow = vw > 0 && vw < 720;
+  if (narrow) {
+    box.classList.add('detail-popover--sheet');
+  } else {
+    const W = Math.min(340, Math.max(220, vw - 24));
+    let left = d.rect.left + d.rect.width + 8;
+    if (left + W > vw - 8) left = d.rect.left - W - 8;
+    left = Math.max(8, Math.min(left, vw - W - 8));
+    const top = Math.max(8, Math.min(d.rect.top, vh - 120));
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${W}px`;
+    box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
+  }
 
   const head = el('div', 'detail-head');
   const title = el('div', 'detail-title');
@@ -2155,9 +2196,24 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   };
 
   root.innerHTML = '';
-  const app = el('div', `app density-${hooks.ui.prefs.density}`);
+  const app = el(
+    'div',
+    `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}`,
+  );
 
-  // 左栏：战报
+  // 战报贴边按钮（战报栏收起 / 窄屏时可见；点击拉出抽屉）
+  const logEdge = document.createElement('button');
+  logEdge.type = 'button';
+  logEdge.className = 'btn log-edge';
+  logEdge.dataset.act = 'logOpen';
+  logEdge.textContent = '战报';
+  logEdge.addEventListener('click', () => {
+    hooks.ui.logOpen = true;
+    hooks.requestRender();
+  });
+  app.appendChild(logEdge);
+
+  // 左栏：设置 + 战报
   const sidebar = el('div', 'sidebar');
   const sidebarHead = el('div', 'sidebar-head');
   const settingsBtn = document.createElement('button');
@@ -2198,6 +2254,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   if (hooks.ui.settingsOpen) {
     root.appendChild(settingsPanel(ctx));
+  }
+  if (hooks.ui.logOpen) {
+    root.appendChild(logDrawer(ctx));
   }
   if (hooks.ui.detail) {
     const pop = detailPopover(ctx);
