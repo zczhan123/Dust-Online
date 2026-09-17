@@ -30,14 +30,6 @@ const toMain = (g: GameState): void => {
   }
 };
 
-/** 推进到「尘起阶段」 */
-const toDustRise = (g: GameState): void => {
-  let guard = 0;
-  while (g.phase !== 'dustRise' && g.phase !== 'gameOver' && guard++ < 10) {
-    applyAction(g, { t: 'advance' });
-  }
-};
-
 /** 在当前回合的尘起阶段，为指定神器支付 1 颗冥想骰完成 激活/切换 */
 const dustRise = (g: GameState, artifactId: string, side?: 'left' | 'right'): void => {
   const player: PlayerId = g.activePlayer;
@@ -159,5 +151,95 @@ describe('014 惩戒（激活类规则）', () => {
     expect(art(s, '014').activeMarkerSide).toBe('left');
     until(s, atA(s, 'main'));
     expect(available(s)).toEqual(['left']);
+  });
+
+  it('「净化」：把对方 1 点骰变 6 点并按其分布落区；≥1 变更 → 自己得 2 冥想并受 2 真伤', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['013', '014', '015'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '014', 'left');
+    until(g, atA(g, 'main'));
+
+    // 对方（B）第二列 = 002，分布 防{1,6} 攻{3,4} 冥{2,5} → 6 点落到「防御区」
+    g.players.B.areas.attack = [
+      { id: 'b1', value: 1, kind: 'attack' },
+      { id: 'b2', value: 2, kind: 'attack' },
+    ];
+    g.players.B.areas.meditation.push({ id: 'bm1', value: 1, kind: 'meditation' });
+    const lifeBefore = g.players.A.life;
+    const medBefore = g.players.A.areas.meditation.length;
+
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '014',
+      side: 'left',
+      params: { targetDieIds: ['b1', 'bm1'] },
+    });
+
+    expect(g.players.B.areas.defense.some((d) => d.id === 'b1' && d.value === 6)).toBe(true);
+    expect(g.players.B.areas.defense.some((d) => d.id === 'bm1' && d.value === 6)).toBe(true);
+    expect(g.players.A.life).toBe(lifeBefore - 2); // 受到 2 点真实伤害
+    expect(g.players.A.areas.meditation.length).toBe(medBefore + 2); // 获得 2 个随机冥想骰
+  });
+
+  it('「净化」：选 0 个 → 不受伤、不得冥想骰（也校验只能改 1 点骰）', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['013', '014', '015'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '014', 'left');
+    until(g, atA(g, 'main'));
+
+    g.players.B.areas.attack = [{ id: 'b9', value: 3, kind: 'attack' }];
+    const lifeBefore = g.players.A.life;
+    const medBefore = g.players.A.areas.meditation.length;
+
+    applyAction(g, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
+    expect(g.players.A.life).toBe(lifeBefore);
+    expect(g.players.A.areas.meditation.length).toBe(medBefore);
+
+    // 非 1 点骰不可变更（引擎抛错，不静默）
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '014',
+        side: 'left',
+        params: { targetDieIds: ['b9'] },
+      }),
+    ).toThrow();
+  });
+
+  it('「数罪并罚」：改自己的 1 点骰为 6 点并按 014 分布（6 → 攻击区）落区', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'] });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '014', 'left'); // 先激活左侧
+    until(g, atA(g, 'main'));
+    applyAction(g, { t: 'advance' }); // 结束回合
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '014'); // 切换 → 右侧（数罪并罚）
+    expect(art(g, '014').activeMarkerSide).toBe('right');
+    until(g, atA(g, 'main'));
+
+    g.players.A.areas.meditation.push({ id: 'a1', value: 1, kind: 'meditation' });
+    const lifeBefore = g.players.A.life;
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '014',
+      side: 'right',
+      params: { targetDieIds: ['a1'] },
+    });
+    // 014 分布 防{1,4} 攻{2,6} 冥{3,5} → 6 点 → 攻击区
+    expect(g.players.A.areas.attack.some((d) => d.id === 'a1' && d.value === 6)).toBe(true);
+    expect(g.players.A.life).toBe(lifeBefore - 2);
   });
 });

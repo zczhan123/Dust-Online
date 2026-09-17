@@ -2,10 +2,57 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
-import { moveDice, paySlots, type SlotFill, type SlotSpec } from './effects';
-import { effectiveWill, totalDice } from './derive';
+import { moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
+import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
+
+const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
+
+/**
+ * 014 净化 / 数罪并罚 共用效果：
+ * 把 `owner` 的最多 2 个「1 点」能力骰变更为 6 点，并按 `owner` 第二列神器的分布移到对应区域；
+ * 若至少变更 1 个：技能使用者 `self` 获得 2 个随机冥想骰，然后受到 2 点真实伤害。
+ * 返回实际变更数量（可为 0）。
+ */
+export function changeOnePointDice(
+  g: GameState,
+  owner: PlayerId,
+  ids: string[],
+  self: PlayerId,
+  rng: { rollDie(): number },
+): number {
+  if (ids.length > 2) throw new Error('at most 2 dice can be changed');
+  if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+  const p = g.players[owner];
+  const dist = emptyDistribution(p);
+  if (!dist) throw new Error(`player ${owner} has no distribution`);
+  for (const id of ids) {
+    const die = KINDS.flatMap((k) => p.areas[k]).find((d) => d.id === id);
+    if (!die) throw new Error(`not ${owner}'s die: ${id}`);
+    if (die.value !== 1) throw new Error('only 1-point dice can be changed');
+  }
+  for (const id of ids) {
+    setDieValue(g, owner, id, 6);
+    moveDice(g, owner, [id], areaOf(6, dist));
+  }
+  const changed = ids.length;
+  if (changed >= 1) {
+    const me = g.players[self];
+    const gained: Die[] = [];
+    for (let i = 0; i < 2; i++) {
+      const d = createDie(newDieId(`${self}-`), rng.rollDie(), 'meditation');
+      me.areas.meditation.push(d);
+      gained.push(d);
+    }
+    logLine(
+      g,
+      `${pname(self)} 获得 2 个随机点数的冥想骰（${vals(gained)}），随后受到 2 点真实伤害`,
+    );
+    dealTrueDamage(g, self, 2);
+  }
+  return changed;
+}
 
 export interface SkillCtx {
   g: GameState;
@@ -414,6 +461,23 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       for (const id of ids) if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
       moveDice(g, player, ids, to);
       logLine(g, `${pname(player)} 发动必杀「梦醒时分」：将 ${ids.length} 颗冥想骰移动到「${to === 'attack' ? '攻击' : '防御'}骰区」（保留点数）`);
+    },
+  },
+  // 014 净化（激活）：将对方最多 2 个「1 点」能力骰变更为 6 点并移动到对应区域
+  'chengjie.jinghua': {
+    run({ g, player, rng, params }) {
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const ids = (params.targetDieIds as string[]) ?? [];
+      const changed = changeOnePointDice(g, opp, ids, player, rng);
+      logLine(g, `${pname(player)} 发动「净化」：变更对方 ${changed} 个能力骰（1 点 → 6 点）`);
+    },
+  },
+  // 014 数罪并罚（激活）：同上，但对象是自己的能力骰
+  'chengjie.shuzui': {
+    run({ g, player, rng, params }) {
+      const ids = (params.targetDieIds as string[]) ?? [];
+      const changed = changeOnePointDice(g, player, ids, player, rng);
+      logLine(g, `${pname(player)} 发动「数罪并罚」：变更自己 ${changed} 个能力骰（1 点 → 6 点）`);
     },
   },
   // 015 残响·必杀 绝境天神：当前生命每比初始生命低 10 点，计数 +1（向下取整，最高 4 层）

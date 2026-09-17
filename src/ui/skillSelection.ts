@@ -446,6 +446,36 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ chosenDice, options }) => ({ to: options[0], meditationDieIds: chosenDice[1] ?? [] }),
   },
+  // 014 净化（激活）：选择对方最多 2 个「1 点」能力骰（可不选）
+  'chengjie.jinghua': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要变更的对方「1 点」能力骰（0–2 颗，可不选）',
+        owner: 'opponent',
+        areas: KINDS,
+        min: 0,
+        max: 2,
+        filter: (d) => d.value === 1,
+      },
+    ],
+    buildParams: ({ chosenDice }) => ({ targetDieIds: chosenDice[0] ?? [] }),
+  },
+  // 014 数罪并罚（激活）：同上，对象为自己
+  'chengjie.shuzui': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要变更的己方「1 点」能力骰（0–2 颗，可不选）',
+        owner: 'self',
+        areas: KINDS,
+        min: 0,
+        max: 2,
+        filter: (d) => d.value === 1,
+      },
+    ],
+    buildParams: ({ chosenDice }) => ({ targetDieIds: chosenDice[0] ?? [] }),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [
