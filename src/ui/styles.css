@@ -1062,7 +1062,9 @@ button.pay-die {
 .selector { min-height: 40px; }
 .confirm-label { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .confirm-row .btn { flex: 0 0 auto; }
-.vitals { width: 168px; flex: 0 0 auto; }
+/* 生命值栏：宽度固定（不影响左侧），高度拉伸到与「快速操作栏」齐平；内容垂直居中 */
+.vitals { width: 168px; flex: 1 1 auto; gap: 8px; }
+.vitals-life { font-size: 16px; }
 /* 窄屏允许生命值栏收缩 */
 @media (max-width: 719px) {
   .vitals { width: auto; }
