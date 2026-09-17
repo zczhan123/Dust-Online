@@ -5,17 +5,23 @@ import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
 
-const freshUi = (): UiState => ({
+const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   rerollSelected: new Set(),
   selection: null,
   pendingConfirm: null,
   convertPick: null,
   fengmangPick: null,
   dustFlow: null,
+  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', ...prefs },
+  settingsOpen: false,
+  detail: null,
 });
 
-const hooksFor = (onAction: (a: Action) => void = () => {}): RenderHooks => {
-  const ui = freshUi();
+const hooksFor = (
+  onAction: (a: Action) => void = () => {},
+  prefs?: Partial<UiState['prefs']>,
+): RenderHooks => {
+  const ui = freshUi(prefs);
   return {
     onAction,
     ui,
@@ -256,15 +262,114 @@ describe('renderGame (interaction)', () => {
     expect(kinds).toEqual(['defense', 'attack', 'meditation']);
   });
 
-  it('renders every skill type inline with its effect text in the same head row', () => {
+  it('renders every skill type inline with its effect text when descriptions are shown', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
-    renderGame(state, root, hooksFor());
+    renderGame(state, root, hooksFor(() => {}, { showSkillText: true }));
     const heads = Array.from(root.querySelectorAll('.skill-part-head'));
     expect(heads.length).toBeGreaterThan(0);
     for (const h of heads) {
       expect(h.querySelector('.skill-type')).not.toBeNull();
       expect(h.querySelector('.skill-text')).not.toBeNull();
     }
+  });
+
+  it('hides skill descriptions by default (name + type badge only)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    expect(root.querySelectorAll('.skill-part-head').length).toBeGreaterThan(0);
+    expect(root.querySelectorAll('.skill-text').length).toBe(0);
+    // 技能名仍在
+    expect((root.textContent ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('opens a read-only skill detail popover by clicking the card art', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'] });
+    const { ui } = mount(state, root);
+    expect(root.querySelector('.detail-popover')).toBeNull();
+
+    const art = root.querySelector<HTMLElement>(
+      '.player--self .card[data-artifact="001"] .card-art',
+    )!;
+    expect(art.classList.contains('detail-trigger')).toBe(true);
+    art.click();
+    expect(ui.detail!.artifactId).toBe('001');
+
+    const pop = root.querySelector<HTMLElement>('.detail-popover')!;
+    expect(pop.dataset.artifact).toBe('001');
+    // 浮窗内始终有完整描述
+    expect(pop.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
+    expect(pop.textContent).toContain('中央突破');
+
+    // 关闭
+    root.querySelector<HTMLButtonElement>('.detail-popover .detail-close')!.click();
+    expect(ui.detail).toBeNull();
+    expect(root.querySelector('.detail-popover')).toBeNull();
+  });
+
+  it('uses thumbnail card art by default and full art when configured', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    expect(root.querySelectorAll('.card-art--thumb').length).toBeGreaterThan(0);
+
+    renderGame(state, root, hooksFor(() => {}, { cardArt: 'full' }));
+    expect(root.querySelectorAll('.card-art--thumb').length).toBe(0);
+  });
+
+  it('applies the density class from prefs', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.app')!.classList.contains('density-compact')).toBe(true);
+    renderGame(state, root, hooksFor(() => {}, { density: 'comfortable' }));
+    expect(root.querySelector('.app')!.classList.contains('density-comfortable')).toBe(true);
+  });
+
+  it('opens the settings panel and persists pref changes via onPrefsChange', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const ui = freshUi();
+    const saved: Array<UiState['prefs']> = [];
+    const hooks: RenderHooks = {
+      ui,
+      onAction: () => {},
+      propose: () => {},
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+      onPrefsChange: (p) => saved.push(p),
+    };
+    renderGame(state, root, hooks);
+
+    const openBtn = root.querySelector<HTMLButtonElement>('.btn-settings')!;
+    expect(openBtn).not.toBeNull();
+    openBtn.click();
+    expect(ui.settingsOpen).toBe(true);
+    expect(root.querySelector('.settings-panel')).not.toBeNull();
+
+    // 「显示技能描述 → 显示」
+    const showOpt = Array.from(
+      root.querySelectorAll<HTMLButtonElement>('.settings-row .settings-opt'),
+    ).find((b) => b.textContent === '显示')!;
+    showOpt.click();
+    expect(ui.prefs.showSkillText).toBe(true);
+    expect(saved[saved.length - 1].showSkillText).toBe(true);
+    expect(root.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
+
+    // 「卡图 → 完整」
+    const fullOpt = Array.from(
+      root.querySelectorAll<HTMLButtonElement>('.settings-row .settings-opt'),
+    ).find((b) => b.textContent === '完整')!;
+    fullOpt.click();
+    expect(ui.prefs.cardArt).toBe('full');
+    expect(root.querySelectorAll('.card-art--thumb').length).toBe(0);
+
+    // 恢复默认
+    const reset = root.querySelector<HTMLButtonElement>('[data-act="settingsReset"]')!;
+    reset.click();
+    expect(ui.prefs).toEqual({ showSkillText: false, cardArt: 'thumb', density: 'compact' });
+    expect(root.querySelectorAll('.skill-text').length).toBe(0);
+
+    // 关闭
+    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+    expect(ui.settingsOpen).toBe(false);
+    expect(root.querySelector('.settings-panel')).toBeNull();
   });
 
   it('never renders an internal skill key (e.g. wansha.ultimate) in the UI', () => {

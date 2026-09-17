@@ -13,6 +13,7 @@ import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
+import { DEFAULT_PREFS, clonePrefs, type Prefs } from './prefs';
 
 const AREA_LABEL: Record<DiceKind, string> = {
   attack: '攻击骰区',
@@ -71,6 +72,15 @@ export interface UiState {
     attackDieId?: string;
     meditationDieId?: string;
   };
+  /** 界面偏好（与对局状态解耦；由宿主负责持久化） */
+  prefs: Prefs;
+  /** 设置面板是否打开 */
+  settingsOpen: boolean;
+  /** 技能详情浮窗（只读）：锚定触发卡片的屏幕矩形 */
+  detail: null | {
+    artifactId: string;
+    rect: { left: number; top: number; width: number; height: number };
+  };
 }
 
 export interface RenderHooks {
@@ -80,6 +90,8 @@ export interface RenderHooks {
   ui: UiState;
   requestRender: () => void;
   onRestart: () => void;
+  /** 偏好变化时回调（宿主负责写入 localStorage） */
+  onPrefsChange?: (p: Prefs) => void;
 }
 
 type ActiveSelection = NonNullable<UiState['selection']>;
@@ -106,6 +118,8 @@ interface Ctx {
     toggle: (d: Die) => void;
     filter?: (d: Die) => boolean;
   } | null;
+  /** 界面偏好 */
+  prefs: Prefs;
 }
 
 function el(tag: string, className: string): HTMLElement {
@@ -409,7 +423,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   }
   card.appendChild(head);
 
-  const art = el('div', 'card-art');
+  const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
   const artImg = document.createElement('img');
   artImg.className = 'card-art-img';
   artImg.src = `/cards/${a.id}.jpg`;
@@ -419,6 +433,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     art.textContent = '（卡图占位）';
   });
   art.appendChild(artImg);
+  attachDetailTrigger(art, ctx, a.id);
   card.appendChild(art);
 
   const text = ARTIFACT_TEXT[a.id];
@@ -472,9 +487,11 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
           full.textContent = '已满';
           pHead.appendChild(full);
         }
-        const body = el('div', 'skill-text');
-        body.textContent = s.text;
-        pHead.appendChild(body);
+        if (ctx.prefs.showSkillText) {
+          const body = el('div', 'skill-text');
+          body.textContent = s.text;
+          pHead.appendChild(body);
+        }
         part.appendChild(pHead);
 
         const skillAction = ctx.legal.find(
@@ -1291,6 +1308,246 @@ function gameOverModal(ctx: Ctx): HTMLElement {
   return overlay;
 }
 
+/** 在任意玩家处查找神器 */
+function findArtifactAnywhere(state: GameState, id: string): { art: Artifact; owner: PlayerId } | null {
+  for (const pid of ['A', 'B'] as PlayerId[]) {
+    const art = state.players[pid].artifacts.find((a) => a.id === id);
+    if (art) return { art, owner: pid };
+  }
+  return null;
+}
+
+/** 卡图上的“查看技能详情”触发：点击 或 长按（手机友好） */
+function attachDetailTrigger(node: HTMLElement, ctx: Ctx, artifactId: string): void {
+  node.classList.add('detail-trigger');
+  node.title = '点击 / 长按查看技能详情';
+  const open = (): void => {
+    const r = node.getBoundingClientRect();
+    ctx.hooks.ui.detail = {
+      artifactId,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+    };
+    ctx.hooks.requestRender();
+  };
+  let timer: number | null = null;
+  const cancel = (): void => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+  node.addEventListener('click', open);
+  node.addEventListener('pointerdown', () => {
+    cancel();
+    timer = window.setTimeout(() => {
+      timer = null;
+      open();
+    }, 500);
+  });
+  node.addEventListener('pointerup', cancel);
+  node.addEventListener('pointerleave', cancel);
+  node.addEventListener('pointercancel', cancel);
+}
+
+function applyPrefs(ctx: Ctx, next: Prefs): void {
+  ctx.hooks.ui.prefs = next;
+  ctx.hooks.onPrefsChange?.(clonePrefs(next));
+  ctx.hooks.requestRender();
+}
+
+function setPref<K extends keyof Prefs>(ctx: Ctx, key: K, value: Prefs[K]): void {
+  applyPrefs(ctx, { ...ctx.hooks.ui.prefs, [key]: value });
+}
+
+function resetPrefs(ctx: Ctx): void {
+  applyPrefs(ctx, clonePrefs(DEFAULT_PREFS));
+}
+
+/** 设置面板（左上角 ⚙ 打开） */
+function settingsPanel(ctx: Ctx): HTMLElement {
+  const ui = ctx.hooks.ui;
+  const overlay = el('div', 'settings-overlay');
+  const box = el('div', 'settings-panel');
+
+  const head = el('div', 'settings-head');
+  const title = el('div', 'settings-title');
+  title.textContent = '设置';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel settings-close';
+  close.dataset.act = 'settingsClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ui.settingsOpen = false;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const row = (label: string, opts: { text: string; on: boolean; onClick: () => void }[]): void => {
+    const r = el('div', 'settings-row');
+    const lab = el('span', 'settings-label');
+    lab.textContent = label;
+    r.appendChild(lab);
+    const wrap = el('div', 'settings-opts');
+    for (const o of opts) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `btn settings-opt${o.on ? ' settings-opt--on' : ''}`;
+      b.textContent = o.text;
+      b.addEventListener('click', o.onClick);
+      wrap.appendChild(b);
+    }
+    r.appendChild(wrap);
+    box.appendChild(r);
+  };
+
+  row('显示技能描述', [
+    { text: '隐藏', on: !ui.prefs.showSkillText, onClick: () => setPref(ctx, 'showSkillText', false) },
+    { text: '显示', on: ui.prefs.showSkillText, onClick: () => setPref(ctx, 'showSkillText', true) },
+  ]);
+  row('卡图', [
+    { text: '缩略', on: ui.prefs.cardArt === 'thumb', onClick: () => setPref(ctx, 'cardArt', 'thumb') },
+    { text: '完整', on: ui.prefs.cardArt === 'full', onClick: () => setPref(ctx, 'cardArt', 'full') },
+  ]);
+  row('界面密度', [
+    { text: '紧凑', on: ui.prefs.density === 'compact', onClick: () => setPref(ctx, 'density', 'compact') },
+    { text: '舒适', on: ui.prefs.density === 'comfortable', onClick: () => setPref(ctx, 'density', 'comfortable') },
+  ]);
+
+  const actions = el('div', 'settings-actions');
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'btn btn-cancel';
+  reset.dataset.act = 'settingsReset';
+  reset.textContent = '恢复默认';
+  reset.addEventListener('click', () => resetPrefs(ctx));
+  actions.appendChild(reset);
+  box.appendChild(actions);
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ui.settingsOpen = false;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(box);
+  return overlay;
+}
+
+function detailSummary(art: Artifact): string {
+  const parts: string[] = [`第${art.column}列`];
+  if (art.speed !== undefined) parts.push(`速度 ${art.speed}`);
+  if (art.will !== undefined) parts.push(`意志 ${art.will}`);
+  if (art.life !== undefined) parts.push(`生命 ${art.life}`);
+  if (art.chargeReq !== undefined) parts.push(`充能 ${art.chargeLayer}/${art.chargeReq}`);
+  if (art.count > 0) parts.push(`计数 ${art.count}`);
+  return parts.join('　');
+}
+
+/** 浮窗里的技能全文（始终显示描述） */
+function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
+  const box = el('div', 'skills');
+  const text = ARTIFACT_TEXT[art.id];
+  if (!text) return box;
+  const groups = new Map<string, typeof text.skills>();
+  for (const s of text.skills) {
+    const exists = groups.get(s.name);
+    if (exists) exists.push(s);
+    else groups.set(s.name, [s]);
+  }
+  for (const [groupName, parts] of groups) {
+    const wrap = el('div', 'skill');
+    const head = el('div', 'skill-head');
+    const name = el('span', 'skill-name');
+    name.textContent = groupName;
+    head.appendChild(name);
+    wrap.appendChild(head);
+    for (const s of parts) {
+      const st = skillPartState(ctx, art, s);
+      const cls =
+        st === 'on' ? 'skill-part--on' : st === 'disabled' ? 'skill-part--disabled' : 'skill-part--off';
+      const part = el('div', `skill-part ${cls}`);
+      const pHead = el('div', 'skill-part-head');
+      const badge = el('span', 'skill-type');
+      badge.textContent = s.type;
+      pHead.appendChild(badge);
+      const body = el('div', 'skill-text');
+      body.textContent = s.text;
+      pHead.appendChild(body);
+      part.appendChild(pHead);
+      wrap.appendChild(part);
+    }
+    box.appendChild(wrap);
+  }
+  return box;
+}
+
+/** 只读技能详情浮窗：锚定触发卡片，内部可滚动 */
+function detailPopover(ctx: Ctx): HTMLElement | null {
+  const d = ctx.hooks.ui.detail;
+  if (!d) return null;
+  const found = findArtifactAnywhere(ctx.state, d.artifactId);
+  if (!found) return null;
+  const { art } = found;
+  const ui = ctx.hooks.ui;
+
+  const overlay = el('div', 'detail-overlay');
+  const box = el('div', 'detail-popover');
+  box.dataset.artifact = art.id;
+
+  const vw = window.innerWidth || 1280;
+  const vh = window.innerHeight || 800;
+  const W = Math.min(340, Math.max(220, vw - 24));
+  let left = d.rect.left + d.rect.width + 8;
+  if (left + W > vw - 8) left = d.rect.left - W - 8;
+  left = Math.max(8, Math.min(left, vw - W - 8));
+  const top = Math.max(8, Math.min(d.rect.top, vh - 120));
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+  box.style.width = `${W}px`;
+  box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
+
+  const head = el('div', 'detail-head');
+  const title = el('div', 'detail-title');
+  title.textContent = `${art.name}${art.weapon ? `（${art.weapon}）` : ''}`;
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel detail-close';
+  close.dataset.act = 'detailClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ui.detail = null;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const sub = el('div', 'detail-sub');
+  sub.textContent = detailSummary(art);
+  box.appendChild(sub);
+
+  if (art.activeMarkerSide) {
+    const act = el('span', 'badge badge-active');
+    act.textContent = `已激活·${
+      sideDisplayName(art, art.activeMarkerSide) ?? sideDisplayName(art, 'only') ?? art.name
+    }`;
+    box.appendChild(act);
+  }
+  box.appendChild(detailSkillList(ctx, art));
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ui.detail = null;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(box);
+  return overlay;
+}
+
 function convertAvailable(state: GameState, payer: PlayerId): boolean {
   if (!hasActiveSkill(state.players[payer], 'shenhong.sword')) return false;
   const p = state.players[payer];
@@ -1795,13 +2052,26 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     slotsStepOpen,
     dustFlowOpen: hooks.ui.dustFlow != null,
     areaPick,
+    prefs: hooks.ui.prefs,
   };
 
   root.innerHTML = '';
-  const app = el('div', 'app');
+  const app = el('div', `app density-${hooks.ui.prefs.density}`);
 
   // 左栏：战报
   const sidebar = el('div', 'sidebar');
+  const sidebarHead = el('div', 'sidebar-head');
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.className = 'btn btn-settings';
+  settingsBtn.dataset.act = 'settingsOpen';
+  settingsBtn.textContent = '⚙ 设置';
+  settingsBtn.addEventListener('click', () => {
+    hooks.ui.settingsOpen = true;
+    hooks.requestRender();
+  });
+  sidebarHead.appendChild(settingsBtn);
+  sidebar.appendChild(sidebarHead);
   const logTitle = el('div', 'log-title');
   logTitle.textContent = '战报';
   sidebar.appendChild(logTitle);
@@ -1857,5 +2127,12 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   if (state.phase === 'gameOver') {
     root.appendChild(gameOverModal(ctx));
+  }
+  if (hooks.ui.settingsOpen) {
+    root.appendChild(settingsPanel(ctx));
+  }
+  if (hooks.ui.detail) {
+    const pop = detailPopover(ctx);
+    if (pop) root.appendChild(pop);
   }
 }
