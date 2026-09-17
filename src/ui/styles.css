@@ -1060,7 +1060,7 @@ button.pay-die {
 .actionlist,
 .confirm-row,
 .selector { min-height: 40px; }
-.confirm-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.confirm-label { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .confirm-row .btn { flex: 0 0 auto; }
 .vitals { width: 168px; flex: 0 0 auto; }
 /* 窄屏允许生命值栏收缩 */
