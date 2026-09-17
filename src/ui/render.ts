@@ -719,6 +719,12 @@ function phaseHint(ctx: Ctx): HintPart[] {
       { text: `：可造成 ${pd.amount} 点真实伤害（本回合消耗 ${pd.amount} 颗能力骰）。` },
     ];
   }
+  if (state.pending && state.pending.kind === 'leibaoReroll') {
+    return [
+      { text: '雷暴', color: state.pending.player },
+      { text: '：对方重掷阶段结束，可插入一个你的重掷阶段（重掷 1 次、骰数 ≤ 速度）。' },
+    ];
+  }
   if (state.pendingAttack) {
     return [{ text: '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。' }];
   }
@@ -898,6 +904,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     }
     case 'shenhongKill':
       return a.accept ? '发动杀意（3 真伤 + 回2）' : '不发动';
+    case 'leibaoReroll':
+      return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dunwuPulse': {
       const pd = state.pending;
       const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;

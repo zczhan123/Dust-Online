@@ -99,6 +99,7 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   if (g.phase === 'gameOver') return;
 
   if (blocked) {
+    g.attackBlockedThisTurn = true;
     // 锋芒·触发：你的攻击被防御骰抵挡后
     if (hasActiveSkill(g.players[pa.attacker], 'buxiang.fengmang.trigger')) {
       g.pending = { kind: 'fengmang', player: pa.attacker, defenderId, value: pa.value };
@@ -109,6 +110,18 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
       g.pending = { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue };
     }
   }
+  // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
+  pumpAttackQueue(g);
+}
+
+/** 若存在多段攻击队列且当前无待决策/待抵挡，则发起下一段虚拟攻击 */
+export function pumpAttackQueue(g: GameState): void {
+  const q = g.attackQueue;
+  if (!q || g.pendingAttack || g.pending || g.phase === 'gameOver') return;
+  const value = q.values.shift()!;
+  if (q.values.length === 0) g.attackQueue = null;
+  logLine(g, `${pname(q.player)} 「电刑」第 ${value} 点攻击（依次结算）`);
+  virtualAttack(g, q.player, value);
 }
 
 /** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消） */

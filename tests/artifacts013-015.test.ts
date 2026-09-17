@@ -6,7 +6,7 @@ import type { GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 013/014/015（佐雷），并跳过初始重掷进入第一回合 */
 const zorayGame = (): GameState => {
-  const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'] });
+  const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
   skipInitialReroll(g);
   return g;
 };
@@ -219,7 +219,7 @@ describe('014 惩戒（激活类规则）', () => {
   });
 
   it('「数罪并罚」：改自己的 1 点骰为 6 点并按 014 分布（6 → 攻击区）落区', () => {
-    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'] });
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
     skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
     dustRise(g, '014', 'left'); // 先激活左侧
@@ -241,5 +241,122 @@ describe('014 惩戒（激活类规则）', () => {
     // 014 分布 防{1,4} 攻{2,6} 冥{3,5} → 6 点 → 攻击区
     expect(g.players.A.areas.attack.some((d) => d.id === 'a1' && d.value === 6)).toBe(true);
     expect(g.players.A.life).toBe(lifeBefore - 2);
+  });
+});
+
+describe('013 鸣雷（电刑 / 雷暴）', () => {
+  it('「电刑」：使用攻击骰后可用；消耗 2 冥想骰 → 依次以 1、2、3 点攻击（逐段独立结算）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    // 激活 013 左侧（电刑）
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'left');
+    until(g, atA(g, 'main'));
+
+    // 未使用攻击骰前：不提供「电刑」
+    const skillActions = () =>
+      getLegalActions(g).filter((a) => a.t === 'skill' && a.artifactId === '013');
+    expect(skillActions()).toEqual([]);
+
+    // 使用 1 个攻击骰（B 不抵挡）
+    g.players.A.areas.attack.push({ id: 'a-atk', value: 2, kind: 'attack' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
+    applyAction(g, { t: 'block' }); // 不抵挡 → 造成伤害
+    expect(g.attackedThisTurn).toBe(true);
+
+    // 提供「电刑」（需 2 个冥想骰）
+    const g2 = g;
+    g2.players.A.areas.meditation.push({ id: 'm1', value: 3, kind: 'meditation' });
+    g2.players.A.areas.meditation.push({ id: 'm2', value: 5, kind: 'meditation' });
+    expect(skillActions().length).toBe(1);
+
+    applyAction(g2, {
+      t: 'skill',
+      artifactId: '013',
+      side: 'left',
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }] },
+    });
+    // 第一段（1 点）待抵挡
+    expect(g2.pendingAttack?.value).toBe(1);
+    applyAction(g2, { t: 'block' }); // 不抵挡 → 扣血
+    expect(g2.pendingAttack?.value).toBe(2); // 第二段
+    applyAction(g2, { t: 'block' });
+    expect(g2.pendingAttack?.value).toBe(3); // 第三段
+    applyAction(g2, { t: 'block' });
+    expect(g2.pendingAttack).toBeNull();
+    expect(g2.attackQueue).toBeNull();
+    void skillActions;
+  });
+
+  it('「雷暴·触发」：攻击被抵挡后可把最多 2 个冥想骰移到攻击骰区（保留点数）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'right'); // 雷暴在右侧
+    until(g, atA(g, 'main'));
+
+    g.players.A.areas.attack.push({ id: 'a-atk', value: 4, kind: 'attack' });
+    g.players.A.areas.meditation.push({ id: 'm1', value: 2, kind: 'meditation' });
+    g.players.B.areas.defense.push({ id: 'b-def', value: 3, kind: 'defense' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['b-def'] }] }); // 被抵挡
+    expect(g.attackBlockedThisTurn).toBe(true);
+
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '013',
+      side: 'right',
+      params: { moveIds: ['m1'] },
+    });
+    expect(g.players.A.areas.attack.some((d) => d.id === 'm1' && d.value === 2)).toBe(true);
+    expect(g.players.A.areas.meditation.some((d) => d.id === 'm1')).toBe(false);
+    expect(g.attackBlockedThisTurn).toBe(false); // 每次被抵挡后至多发动一次
+  });
+
+  it('「雷暴·持续」：对方重掷阶段结束时询问；接受 → 插入额外重掷阶段（重掷 1 次后恢复原流程）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    // A 激活 013 右侧（雷暴触发 + 持续）
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'right');
+    until(g, atA(g, 'main'));
+    applyAction(g, { t: 'advance' }); // 结束 A 回合 → B 回合
+
+    // B 的重掷阶段结束时 → 询问 A
+    until(g, () => g.activePlayer === 'B' && g.phase === 'reroll');
+    applyAction(g, { t: 'advance' }); // 结束 B 的重掷阶段
+    expect(g.pending?.kind).toBe('leibaoReroll');
+    expect(getLegalActions(g).map((a) => a.t)).toEqual(['leibaoReroll', 'leibaoReroll']);
+
+    applyAction(g, { t: 'leibaoReroll', accept: true });
+    expect(g.extraReroll).toEqual({ player: 'A', resume: 'B' });
+    expect(g.activePlayer).toBe('A');
+    expect(g.phase).toBe('reroll');
+    // 额外重掷阶段：allowance = 1（游龙不叠加），速度限制照常
+    const rr = getLegalActions(g).filter((a) => a.t === 'reroll');
+    expect(rr.length).toBeGreaterThan(0);
+    applyAction(g, rr[0]);
+    expect(g.rerollUsed).toBe(1);
+    expect(getLegalActions(g).some((a) => a.t === 'reroll')).toBe(false); // 只允许 1 次
+
+    applyAction(g, { t: 'advance' }); // 结束额外重掷阶段
+    expect(g.extraReroll).toBeNull();
+    expect(g.activePlayer).toBe('B'); // 交还原玩家
+    expect(g.phase).toBe('dustRise');
+  });
+
+  it('「雷暴·持续」：放弃时不改变流程', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'right');
+    until(g, atA(g, 'main'));
+    applyAction(g, { t: 'advance' });
+    until(g, () => g.activePlayer === 'B' && g.phase === 'reroll');
+    applyAction(g, { t: 'advance' });
+    applyAction(g, { t: 'leibaoReroll', accept: false });
+    expect(g.extraReroll).toBeNull();
+    expect(g.activePlayer).toBe('B');
+    expect(g.phase).toBe('dustRise');
   });
 });

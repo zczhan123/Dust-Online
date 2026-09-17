@@ -476,6 +476,34 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ chosenDice }) => ({ targetDieIds: chosenDice[0] ?? [] }),
   },
+  // 013 电刑（触发）：消耗 2 个冥想骰 → 依次以 1/2/3 点攻击
+  'minglei.dianxing': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择消耗的 2 个冥想骰（电刑）',
+        owner: 'self',
+        areas: ['meditation'],
+        min: 2,
+        max: 2,
+      },
+    ],
+    buildParams: ({ chosenDice }) => ({ costSlots: realSlots(chosenDice[0]) }),
+  },
+  // 013 雷暴·触发：移动最多 2 个冥想骰到攻击骰区
+  'minglei.leibao.trigger': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要移动到攻击骰区的冥想骰（0–2 颗，保留点数）',
+        owner: 'self',
+        areas: ['meditation'],
+        min: 0,
+        max: 2,
+      },
+    ],
+    buildParams: ({ chosenDice }) => ({ moveIds: chosenDice[0] ?? [] }),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [

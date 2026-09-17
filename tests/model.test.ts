@@ -45,6 +45,10 @@ describe('model types', () => {
       winner: null,
       skillConsumedThisAction: 0,
       dunwuPulseUsedThisTurn: false,
+      attackedThisTurn: false,
+      attackBlockedThisTurn: false,
+      attackQueue: null,
+      extraReroll: null,
     };
     expect(g.players.A.life).toBe(50);
     expect(g.skillConsumedThisAction).toBe(0);
