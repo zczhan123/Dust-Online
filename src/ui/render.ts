@@ -625,8 +625,6 @@ function playerPanel(
   panel.dataset.player = player.id;
 
   const header = el('div', 'player-header');
-  const dot = el('span', `dot dot-${player.id}`);
-  header.appendChild(dot);
   const title = el('span', 'player-title');
   title.textContent = `玩家${player.id}`;
   header.appendChild(title);
@@ -720,6 +718,7 @@ function actorOf(state: GameState): PlayerId {
 
 function hintBox(ctx: Ctx): HTMLElement {
   const hint = el('div', 'hint');
+  const left = el('div', 'hint-left');
   const actor = actorOf(ctx.state);
   const turn = el('span', 'hint-turn');
   turn.appendChild(document.createTextNode('轮到 '));
@@ -727,7 +726,7 @@ function hintBox(ctx: Ctx): HTMLElement {
   who.textContent = `玩家${actor}`;
   turn.appendChild(who);
   turn.appendChild(document.createTextNode(' 操作'));
-  hint.appendChild(turn);
+  left.appendChild(turn);
   const phase = el('span', 'hint-phase');
   for (const part of phaseHint(ctx)) {
     if (part.color) {
@@ -738,7 +737,12 @@ function hintBox(ctx: Ctx): HTMLElement {
       phase.appendChild(document.createTextNode(part.text));
     }
   }
-  hint.appendChild(phase);
+  left.appendChild(phase);
+  hint.appendChild(left);
+  // 尘落计数：操作栏右上角（零额外高度）
+  const dust = el('span', 'hint-dust');
+  dust.textContent = `尘落 ${ctx.state.dustfall} / 10`;
+  hint.appendChild(dust);
   return hint;
 }
 
@@ -767,13 +771,17 @@ function actionZone(ctx: Ctx): HTMLElement {
   return zone;
 }
 
-/** 双方生命 + 尘落（替代旧的“重开/尘落”区） */
+/** 双方生命（两行；顺序与面板一致：上=敌方、下=自己 → 回合切换时上下掉转） */
 function vitalsBar(ctx: Ctx): HTMLElement {
   const { state } = ctx;
+  const selfId: PlayerId = state.activePlayer;
+  const enemyId: PlayerId = selfId === 'A' ? 'B' : 'A';
   const bar = el('div', 'vitals');
-  for (const pid of ['A', 'B'] as PlayerId[]) {
+  for (const pid of [enemyId, selfId]) {
     const p = state.players[pid];
     const item = el('div', `vitals-item vitals-${pid}`);
+    const dot = el('span', `dot dot-${pid}`);
+    item.appendChild(dot);
     const who = el('span', 'vitals-who');
     who.textContent = `玩家${pid}`;
     item.appendChild(who);
@@ -782,9 +790,6 @@ function vitalsBar(ctx: Ctx): HTMLElement {
     item.appendChild(hp);
     bar.appendChild(item);
   }
-  const dust = el('div', 'vitals-dust');
-  dust.textContent = `尘落 ${state.dustfall} / 10`;
-  bar.appendChild(dust);
   return bar;
 }
 

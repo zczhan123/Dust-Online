@@ -162,7 +162,7 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const band = root.querySelector('.centerband');
     expect(band).not.toBeNull();
-    expect(band!.querySelector('.vitals-dust')?.textContent).toContain('尘落');
+    expect(band!.querySelector('.hint-dust')?.textContent).toContain('尘落');
     expect(root.querySelector('.sidebar .log')).not.toBeNull();
   });
 
@@ -180,6 +180,26 @@ describe('renderGame (read-only snapshot)', () => {
     expect(lifeA!.textContent).toContain('生命');
     // 原来的玩家头部生命显示已移除
     expect(root.querySelector('.player-life')).toBeNull();
+    // 颜色圆圈：从玩家头部移到生命值栏
+    expect(root.querySelector('.player-header .dot')).toBeNull();
+    expect(root.querySelector('.vitals .dot-A')).not.toBeNull();
+    expect(root.querySelector('.vitals .dot-B')).not.toBeNull();
+  });
+
+  it('orders the two life rows as [enemy, self] so they flip with the active player', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const rowIds = () =>
+      Array.from(root.querySelectorAll<HTMLElement>('.vitals .vitals-item')).map((e) =>
+        e.classList.contains('vitals-A') ? 'A' : 'B',
+      );
+
+    renderGame(state, root, hooksFor());
+    // A 行动 → 自己=A 在下、敌人=B 在上
+    expect(rowIds()).toEqual(['B', 'A']);
+
+    state.activePlayer = 'B';
+    renderGame(state, root, hooksFor());
+    expect(rowIds()).toEqual(['A', 'B']);
   });
 
   it('highlights the pending skill name in the hint with the acting player color', () => {
@@ -297,7 +317,9 @@ describe('renderGame (interaction)', () => {
     // 提示栏与操作栏合并进同一块
     expect(zone.querySelector('.hint')).not.toBeNull();
     expect(zone.querySelector('.actionlist')).not.toBeNull();
-    expect(band.querySelector('.centerband-right .vitals-dust')).not.toBeNull();
+    // 尘落在操作栏提示行右上角
+    expect(zone.querySelector('.hint .hint-dust')?.textContent).toContain('尘落');
+    expect(band.querySelector('.centerband-right .vitals')).not.toBeNull();
   });
 
   it('orders dice areas as 防御/攻击/冥想 so the attack area sits in the middle', () => {
