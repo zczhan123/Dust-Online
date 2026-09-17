@@ -433,8 +433,14 @@ button.pay-die {
   gap: 10px;
   flex-wrap: wrap;
 }
+/* 长文本（标题/提示）必须可收缩、可断行，否则会把面板顶出容器（表现为“操作栏变宽”） */
 .selector-head .selector-title,
-.selector-head .selector-info,
+.selector-head .selector-info {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* 数字/选项行保持不收缩（内容本来就短） */
 .selector-head .option-row,
 .selector-head .number-row {
   flex: 0 0 auto;
@@ -667,10 +673,13 @@ button.pay-die {
   flex-wrap: wrap;
 }
 .paypanel-head .paypanel-title {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .paypanel-head .slot-row {
-  flex: 1 1 240px;
+  flex: 1 1 160px;
+  min-width: 0;
 }
 .paypanel-title {
   font-size: 14px;
@@ -1088,3 +1097,9 @@ button.pay-die {
 .actionzone .dustflow {
   min-height: 44px;
 }
+
+/* 其他含动态长文案的控件：可收缩 + 可断行 */
+.convertpick-title,
+.convertpick-hint { min-width: 0; overflow-wrap: anywhere; }
+/* 安全网：操作区裁剪溢出，任何内容都不会再把「快速操作栏」顶宽 */
+.actionzone { overflow: hidden; }
