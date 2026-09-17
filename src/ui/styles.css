@@ -1109,3 +1109,8 @@ button.pay-die {
 
 
 
+
+/* 快捷操作栏高度下限 = “两行”所需高度：显示 1 行或 2 行都不变（随密度/预设分档；用 min-height 不裁内容） */
+.app.density-compact { --actionzone-min-h: 104px; }     /* 电脑模式（紧凑） */
+.app.density-comfortable { --actionzone-min-h: 128px; } /* 触屏模式（舒适） */
+.actionzone { min-height: var(--actionzone-min-h, 104px); }
