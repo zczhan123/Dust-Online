@@ -887,13 +887,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return art ? dustEntryLabel(art) : '尘起';
     }
     case 'caiyuliu':
-      return a.to === 'defense' ? '移到防御骰区' : a.to === 'meditation' ? '移到冥想骰区' : '不移动';
+      return a.to === 'defense' ? '「裁雨流」移到防御骰区' : a.to === 'meditation' ? '「裁雨流」移到冥想骰区' : '不发动「裁雨流」';
     case 'guwangCharge':
       return '不变更';
     case 'guwangCancel':
-      return '承受伤害';
+      return '不发动「高塔铁幕」';
     case 'dunwuHalve':
-      return '不减半';
+      return '不发动「灵能屏障」';
     case 'fengmang': {
       if (!a.accept) return '不发动';
       const pd = state.pending;
@@ -903,13 +903,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return `发动（消耗 攻击${av} 与 冥想${mv}）`;
     }
     case 'shenhongKill':
-      return a.accept ? '发动杀意（3 真伤 + 回2）' : '不发动';
+      return a.accept ? '发动「杀意」（3 真伤 + 回2）' : '不发动「杀意」';
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dunwuPulse': {
       const pd = state.pending;
       const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;
-      return a.accept ? `发动脉冲（${amount} 点真实伤害）` : '不发动';
+      return a.accept ? `发动「灵能脉冲」（${amount} 点真实伤害）` : '不发动「灵能脉冲」';
     }
     case 'reroll':
     case 'skill':
@@ -999,13 +999,13 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       if (!a.cancel || !a.defenseDieId) return null;
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
-      return { parts: ['取消（消耗 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
+      return { parts: ['发动「高塔铁幕」取消（消耗 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
     }
     case 'dunwuHalve': {
       if (!a.accept || !a.meditationDieId) return null;
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
-      return { parts: ['伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
+      return { parts: ['发动「灵能屏障」伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
     }
     case 'guwangCharge': {
       if (!a.dieId) return null;

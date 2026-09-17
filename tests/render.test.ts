@@ -1131,9 +1131,9 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelector('.hint-phase')?.textContent).toContain('高塔铁幕');
     // 「承受伤害」文字按钮 + 「取消（消耗 防4）」骰片行
     const take = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="guwangCancel"]');
-    expect(take!.textContent).toBe('承受伤害');
+    expect(take!.textContent).toBe('不发动「高塔铁幕」');
     const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
-    expect(row.textContent).toContain('取消（消耗');
+    expect(row.textContent).toContain('发动「高塔铁幕」取消（消耗');
     expect(row.querySelector('.pay-die[data-act="guwangCancel"]')!.textContent).toBe('防4');
     expect(state.pending!.kind).toBe('guwangCancel'); // 渲染不应改变状态
   });
@@ -1163,8 +1163,8 @@ describe('renderGame (interaction)', () => {
     const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="shenhongKill"]');
     expect(btns.length).toBe(2);
     const labels = Array.from(btns).map((b) => b.textContent);
-    expect(labels).toContain('发动杀意（3 真伤 + 回2）');
-    expect(labels).toContain('不发动');
+    expect(labels).toContain('发动「杀意」（3 真伤 + 回2）');
+    expect(labels).toContain('不发动「杀意」');
     expect(state.pending!.kind).toBe('shenhongKill'); // 渲染不应改变状态
   });
 
@@ -1274,9 +1274,9 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelector('.hint-phase')?.textContent).toContain('灵能屏障');
     // 「不减半」文字按钮 + 「伤害减半（消耗 冥3）」骰片行
     const decline = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="dunwuHalve"]');
-    expect(decline!.textContent).toBe('不减半');
+    expect(decline!.textContent).toBe('不发动「灵能屏障」');
     const halveRow = root.querySelector<HTMLElement>('.actionlist-chips')!;
-    expect(halveRow.textContent).toContain('伤害减半（消耗');
+    expect(halveRow.textContent).toContain('发动「灵能屏障」伤害减半（消耗');
     expect(halveRow.querySelector('.pay-die[data-act="dunwuHalve"]')!.textContent).toBe('冥3');
     expect(state.pending!.kind).toBe('dunwuHalve'); // 渲染不应改变状态
   });
@@ -1290,8 +1290,8 @@ describe('renderGame (interaction)', () => {
     const btns = root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="dunwuPulse"]');
     expect(btns.length).toBe(2);
     const labels = Array.from(btns).map((b) => b.textContent);
-    expect(labels).toContain('发动脉冲（2 点真实伤害）');
-    expect(labels).toContain('不发动');
+    expect(labels).toContain('发动「灵能脉冲」（2 点真实伤害）');
+    expect(labels).toContain('不发动「灵能脉冲」');
     expect(state.pending!.kind).toBe('dunwuPulse'); // 渲染不应改变状态
   });
 
