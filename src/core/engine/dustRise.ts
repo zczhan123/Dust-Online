@@ -30,6 +30,8 @@ export function applyDustRiseToArtifact(
     let desc = `为「${a.name}」充能（${a.chargeLayer}/${req}）`;
     if (a.chargeLayer >= req) {
       a.activeMarkerSide = 'left';
+      a.armedSide = 'left';
+      a.armedTurn = g.turnIndex;
       desc += '，完成充能并激活';
     }
     return desc;
@@ -38,9 +40,13 @@ export function applyDustRiseToArtifact(
   if (a.activeMarkerSide == null) {
     const chosen = side ?? 'left';
     a.activeMarkerSide = chosen;
+    a.armedSide = chosen;
+    a.armedTurn = g.turnIndex;
     return `激活「${a.name}」的${sideLabel(chosen)}侧`;
   }
 
   a.activeMarkerSide = a.activeMarkerSide === 'left' ? 'right' : 'left';
+  a.armedSide = a.activeMarkerSide;
+  a.armedTurn = g.turnIndex;
   return `将「${a.name}」切换到${sideLabel(a.activeMarkerSide)}侧`;
 }

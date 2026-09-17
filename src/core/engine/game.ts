@@ -157,12 +157,23 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   return acts;
 }
 
+/** 「激活」类技能：仅在该侧被“切入”的当回合可用一次 */
+function activationUsable(g: GameState, a: { armedSide: 'left' | 'right' | null; armedTurn: number }, s: { side: 'left' | 'right' | 'only' }): boolean {
+  return a.armedSide === (s.side === 'only' ? 'left' : s.side) && a.armedTurn === g.turnIndex;
+}
+
+/** 该技能当前是否属于“可发动”类型（启动 / 激活 / 必杀） */
+function isUsableKind(kind: string): boolean {
+  return kind === 'activate' || kind === 'activation' || kind === 'ultimate';
+}
+
 function activateSkillActions(g: GameState, p: PlayerState): Action[] {
   const acts: Action[] = [];
   for (const a of p.artifacts) {
     for (const s of a.skills) {
-      if (s.kind !== 'activate' && s.kind !== 'ultimate') continue;
+      if (!isUsableKind(s.kind)) continue;
       if (!skillActive(a, s)) continue;
+      if (s.kind === 'activation' && !activationUsable(g, a, s)) continue;
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) continue;
       if (g.skillsUsedThisTurn.includes(s.key)) continue;
       if (s.key === 'buxiang.cuilian') {
@@ -589,9 +600,12 @@ export function applyAction(g: GameState, action: Action): GameState {
       const p = g.players[g.activePlayer];
       const a = p.artifacts.find((x) => x.id === action.artifactId);
       if (!a) throw new Error(`no artifact: ${action.artifactId}`);
-      const s = a.skills.find((x) => x.side === action.side && (x.kind === 'activate' || x.kind === 'ultimate'));
+      const s = a.skills.find(
+        (x) => x.side === action.side && (x.kind === 'activate' || x.kind === 'activation' || x.kind === 'ultimate'),
+      );
       if (!s) throw new Error('no usable skill on that side');
       if (!skillActive(a, s)) throw new Error('skill not active');
+      if (s.kind === 'activation' && !activationUsable(g, a, s)) throw new Error('activation skill only usable in the turn it was armed');
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) throw new Error('ultimate already used');
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       assertConversionAllowed(g, g.activePlayer, action.params?.costSlots as SlotFill[] | undefined);

@@ -1069,3 +1069,7 @@ button.pay-die {
 @media (max-width: 719px) {
   .vitals { width: auto; }
 }
+
+/* 「激活」类技能：本次已用完（灰底 + 保留绿色左边线，表示仍是激活侧） */
+.skill-part--spent { background: #cfd4db; border-left-color: var(--on); opacity: 0.95; }
+.badge-active--spent { background: #d1d5db; color: #4b5563; }

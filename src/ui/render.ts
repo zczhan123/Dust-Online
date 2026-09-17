@@ -176,6 +176,7 @@ const COST_KIND_LABEL: Record<string, string> = {
 };
 
 function kindFromType(type: string): SkillDef['kind'] | undefined {
+  if (type.includes('激活')) return 'activation';
   if (type.includes('启动')) return 'activate';
   if (type.includes('必杀')) return 'ultimate';
   if (type.includes('充能')) return 'charge';
@@ -185,7 +186,7 @@ function kindFromType(type: string): SkillDef['kind'] | undefined {
 }
 
 function isActivatableType(type: string): boolean {
-  return type.includes('启动') || type.includes('必杀');
+  return type.includes('启动') || type.includes('激活') || type.includes('必杀');
 }
 
 function findSkillKey(a: Artifact, side: SkillDef['side'], type: string): string | undefined {
@@ -208,6 +209,18 @@ function skillLabel(
   return t?.name;
 }
 
+/** 激活侧是否为「激活」类技能、且当前已不可用（用于「已激活·xx」徽标变灰） */
+function activeSideSpent(ctx: Ctx, a: Artifact): boolean {
+  const side = a.activeMarkerSide;
+  if (!side) return false;
+  const skills = ARTIFACT_TEXT[a.id]?.skills;
+  const t =
+    skills?.find((s) => s.side === side && s.type.includes('激活')) ??
+    skills?.find((s) => s.side === 'only' && s.type.includes('激活'));
+  if (!t) return false;
+  return skillPartState(ctx, a, t) === 'spent';
+}
+
 /** 该神器某侧显示名（不区分技能类型），用于名称兜底 */
 function sideDisplayName(a: Artifact | undefined, side: 'left' | 'right' | 'only'): string | undefined {
   if (!a) return undefined;
@@ -219,17 +232,24 @@ function looksLikeInternalKey(s: string): boolean {
   return /^[a-z0-9]+(\.[a-z0-9]+)+$/i.test(s.trim());
 }
 
-/** 单条技能行的展示状态：可用(绿) / 未激活(浅灰) / 不能再使用(深灰) */
+/** 单条技能行的展示状态：可用(绿) / 未激活(浅灰) / 不能再使用(深灰) / 激活侧但本次已用完(灰底绿边) */
 function skillPartState(
   ctx: Ctx,
   a: Artifact,
   s: { side: SkillDef['side']; type: string },
-): 'on' | 'off' | 'disabled' {
+): 'on' | 'off' | 'disabled' | 'spent' {
   const key = findSkillKey(a, s.side, s.type);
   const markerOk = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
   if (key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key)) return 'disabled';
   if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
   if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
+  // 「激活」类：只有被“切入该侧”的当回合、且本回合未用过时才可用；否则为“已用完”（灰底 + 保留绿色左边线）
+  if (s.type.includes('激活') && markerOk) {
+    const armedNow =
+      a.armedTurn === ctx.state.turnIndex && a.armedSide === (s.side === 'only' ? 'left' : s.side);
+    const used = key != null && ctx.state.skillsUsedThisTurn.includes(key);
+    if (!armedNow || used) return 'spent';
+  }
   return markerOk ? 'on' : 'off';
 }
 
@@ -407,6 +427,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     const activeName =
       sideDisplayName(a, a.activeMarkerSide) ?? sideDisplayName(a, 'only') ?? a.name;
     act.textContent = `已激活·${activeName}`;
+    if (activeSideSpent(ctx, a)) act.classList.add('badge-active--spent');
     head.appendChild(act);
   }
   if (a.chargeReq !== undefined) {
@@ -459,7 +480,9 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
             ? 'skill-part--on'
             : pstate === 'disabled'
               ? 'skill-part--disabled'
-              : 'skill-part--off';
+              : pstate === 'spent'
+                ? 'skill-part--spent'
+                : 'skill-part--off';
         const part = el('div', `skill-part ${pcls}`);
         part.dataset.side = s.side;
         const key = findSkillKey(a, s.side, s.type);
@@ -1653,7 +1676,13 @@ function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
     for (const s of parts) {
       const st = skillPartState(ctx, art, s);
       const cls =
-        st === 'on' ? 'skill-part--on' : st === 'disabled' ? 'skill-part--disabled' : 'skill-part--off';
+        st === 'on'
+          ? 'skill-part--on'
+          : st === 'disabled'
+            ? 'skill-part--disabled'
+            : st === 'spent'
+              ? 'skill-part--spent'
+              : 'skill-part--off';
       const part = el('div', `skill-part ${cls}`);
       const pHead = el('div', 'skill-part-head');
       const badge = el('span', 'skill-type');
@@ -1726,6 +1755,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
     act.textContent = `已激活·${
       sideDisplayName(art, art.activeMarkerSide) ?? sideDisplayName(art, 'only') ?? art.name
     }`;
+    if (activeSideSpent(ctx, art)) act.classList.add('badge-active--spent');
     box.appendChild(act);
   }
   box.appendChild(detailSkillList(ctx, art));

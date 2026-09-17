@@ -1,6 +1,9 @@
 import type { Artifact } from '../model/types';
 
-type ArtifactBase = Omit<Artifact, 'activeMarkerSide' | 'count' | 'chargeLayer'>;
+type ArtifactBase = Omit<
+  Artifact,
+  'activeMarkerSide' | 'armedSide' | 'armedTurn' | 'count' | 'chargeLayer'
+>;
 
 export const ARTIFACTS: Record<string, ArtifactBase> = {
   '001': { id: '001', name: '雨切', weapon: '武士刀', column: 1, speed: 4, will: 7, skills: [{ side: 'left', kind: 'activate', key: 'yuqie.breakthrough' }, { side: 'right', kind: 'trigger', key: 'yuqie.caiyuliu' }] },
@@ -51,6 +54,8 @@ export function makeArtifact(id: string): Artifact {
         }
       : undefined,
     activeMarkerSide: null,
+    armedSide: null,
+    armedTurn: -1,
     count: 0,
     chargeLayer: 0,
     skills: base.skills.map((s) => ({ ...s })),

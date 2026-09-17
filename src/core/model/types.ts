@@ -79,7 +79,8 @@ export interface Buff {
 
 export interface SkillDef {
   side: 'left' | 'right' | 'only';
-  kind: 'activate' | 'continuous' | 'charge' | 'ultimate' | 'trigger';
+  /** continuous=持续 trigger=触发 activate=启动 charge=充能 ultimate=必杀 activation=激活（仅在“切入该侧”的当回合可用一次） */
+  kind: 'activate' | 'activation' | 'continuous' | 'charge' | 'ultimate' | 'trigger';
   key: string;
 }
 
@@ -94,6 +95,10 @@ export interface Artifact {
   life?: number;
   chargeReq?: number;
   activeMarkerSide: 'left' | 'right' | null;
+  /** 本回合被“激活/切入”的侧（供「激活」类技能判定：只在切入当回合可用） */
+  armedSide: 'left' | 'right' | null;
+  /** 执行上述切入时的回合号（与 GameState.turnIndex 比较） */
+  armedTurn: number;
   count: number;
   chargeLayer: number;
   skills: SkillDef[];
