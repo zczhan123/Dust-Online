@@ -185,7 +185,7 @@ body {
   padding: 5px 8px;
 }
 .skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.skill-name { font-weight: 700; font-size: 13px; flex: 0 0 auto; }
+.skill-name { font-weight: 700; font-size: 13px; }
 
 .skill-part {
   border-left: 4px solid #cfc8ba;
@@ -204,9 +204,12 @@ body {
 .skill-part--disabled { background: #cfd4db; border-left-color: #6b7280; opacity: 0.95; }
 .badge-used { background: #d1d5db; color: #4b5563; }
 
-.skill-part-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; }
+/* 技能行：徽标 + 技能名 + 描述按“行内流”排列 → 描述换行后的续行贴左端（不缩进） */
+.skill-part-head { display: block; }
+.skill-part-head .skill-type { display: inline; margin-right: 6px; }
+.skill-part-head .skill-name { display: inline; margin-right: 6px; }
+.skill-part-head .badge { display: inline; margin-left: 2px; margin-right: 4px; }
 .skill-type {
-  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 700;
   background: #e3e7ee;
@@ -215,7 +218,7 @@ body {
   padding: 0 6px;
 }
 .skill-part-head .badge { flex: 0 0 auto; }
-.skill-text { flex: 1 1 0%; min-width: 0; font-size: 12px; color: #4b5563; line-height: 1.55; }
+.skill-text { display: inline; font-size: 12px; color: #4b5563; line-height: 1.55; }
 
 .areas { display: flex; gap: 8px; margin: 6px 0; }
 .area {
@@ -1073,3 +1076,18 @@ button.pay-die {
 /* 「激活」类技能：本次已用完（灰底 + 保留绿色左边线，表示仍是激活侧） */
 .skill-part--spent { background: #cfd4db; border-left-color: var(--on); opacity: 0.95; }
 .badge-active--spent { background: #d1d5db; color: #4b5563; }
+
+/* 中央操作区：设定最小高度 + 内部面板纵向居中 → 进出技能选择时高度不跳变 */
+:root { --actionzone-min-h: 92px; }
+.actionzone { min-height: var(--actionzone-min-h); }
+.actionzone .actionlist,
+.actionzone .selector,
+.actionzone .confirm-row,
+.actionzone .convertpick,
+.actionzone .dustflow,
+.actionzone .paypanel {
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}

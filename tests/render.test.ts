@@ -445,6 +445,34 @@ describe('renderGame (read-only snapshot)', () => {
     ).toBe(true);
   });
 
+  it('shows 电刑/雷暴 ask options with skill names and dice chips', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['013', '014', '015'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    state.players.A.areas.meditation.push({ id: 'm1', value: 4, kind: 'meditation' });
+
+    state.pending = { kind: 'dianxing', player: 'A', picked: [] };
+    renderGame(state, root, hooksFor());
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toContain('不发动「电刑」');
+    expect(root.querySelector('.actionlist-chips .pay-die[data-id="m1"]')!.textContent).toBe('冥4');
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('电刑');
+
+    state.pending = { kind: 'leibao', player: 'A', picked: [] };
+    renderGame(state, root, hooksFor());
+    const labels2 = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
+      (b) => b.textContent,
+    );
+    expect(labels2).toContain('不发动「雷暴」');
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('雷暴');
+  });
+
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
     const state = createGame({
       seed: 1,

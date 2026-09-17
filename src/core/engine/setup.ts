@@ -78,8 +78,6 @@ export function setupGame(opts: SetupOptions): GameState {
     winner: null,
     skillConsumedThisAction: 0,
     dunwuPulseUsedThisTurn: false,
-    attackedThisTurn: false,
-    attackBlockedThisTurn: false,
     attackQueue: null,
     extraReroll: null,
   };

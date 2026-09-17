@@ -725,6 +725,18 @@ function phaseHint(ctx: Ctx): HintPart[] {
       { text: '：对方重掷阶段结束，可插入一个你的重掷阶段（重掷 1 次、骰数 ≤ 速度）。' },
     ];
   }
+  if (state.pending && state.pending.kind === 'dianxing') {
+    return [
+      { text: '电刑', color: state.pending.player },
+      { text: '：你使用了攻击骰，可消耗 2 个冥想骰（依次以 1、2、3 点各进行一次攻击）。' },
+    ];
+  }
+  if (state.pending && state.pending.kind === 'leibao') {
+    return [
+      { text: '雷暴', color: state.pending.player },
+      { text: '：你的攻击被抵挡，可将最多 2 个冥想骰移动到攻击骰区（保留点数）。' },
+    ];
+  }
   if (state.pendingAttack) {
     return [{ text: '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。' }];
   }
@@ -906,6 +918,12 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return a.accept ? '发动「杀意」（3 真伤 + 回2）' : '不发动「杀意」';
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
+    case 'dianxing':
+      return a.accept === false ? '不发动「电刑」' : '发动「电刑」';
+    case 'leibao':
+      if (a.accept === false) return '不发动「雷暴」';
+      if (a.done) return '完成（移动这些冥想骰）';
+      return '发动「雷暴」';
     case 'dunwuPulse': {
       const pd = state.pending;
       const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;
@@ -1012,6 +1030,18 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'guwangCharge' ? opponent(pd.player) : state.activePlayer;
       return { parts: ['改为 1 点 ', ''], dice: [{ id: a.dieId, owner }] };
+    }
+    case 'dianxing': {
+      // 013 电刑：逐颗选消耗的冥想骰（骰片）
+      if (!a.pick) return null;
+      const owner: PlayerId = state.pending?.player ?? state.activePlayer;
+      return { parts: ['消耗 ', ''], dice: [{ id: a.pick, owner }] };
+    }
+    case 'leibao': {
+      // 013 雷暴·触发：逐颗选要移动到攻击骰区的冥想骰（骰片）
+      if (!a.pick) return null;
+      const owner: PlayerId = state.pending?.player ?? state.activePlayer;
+      return { parts: ['移到攻击区 ', ''], dice: [{ id: a.pick, owner }] };
     }
     default:
       return null;

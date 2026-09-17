@@ -5,7 +5,7 @@ import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
-import { setDieValue, heal, paySlots } from './effects';
+import { setDieValue, heal, moveDice, paySlots } from './effects';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState, SlotFill } from '../model/types';
@@ -41,8 +41,6 @@ export function beginTurn(g: GameState): void {
   g.skillsUsedThisTurn = [];
   g.skillConsumedThisAction = 0;
   g.dunwuPulseUsedThisTurn = false;
-  g.attackedThisTurn = false;
-  g.attackBlockedThisTurn = false;
   g.attackQueue = null;
   g.extraReroll = null;
   const p = g.activePlayer;
@@ -379,6 +377,24 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'leibaoReroll', accept: false },
       ];
     }
+    if (g.pending.kind === 'dianxing') {
+      const pd = g.pending;
+      const p = g.players[pd.player];
+      const acts: Action[] = pd.picked.length === 0 ? [{ t: 'dianxing', accept: false }] : [];
+      for (const d of p.areas.meditation) {
+        if (!pd.picked.includes(d.id)) acts.push({ t: 'dianxing', pick: d.id });
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'leibao') {
+      const pd = g.pending;
+      const p = g.players[pd.player];
+      const acts: Action[] = pd.picked.length === 0 ? [{ t: 'leibao', accept: false }] : [{ t: 'leibao', done: true }];
+      for (const d of p.areas.meditation) {
+        if (!pd.picked.includes(d.id)) acts.push({ t: 'leibao', pick: d.id });
+      }
+      return acts;
+    }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
     if (pp.areas.attack.length > 0 && pp.areas.meditation.length > 0) {
@@ -431,31 +447,6 @@ export function getLegalActions(g: GameState): Action[] {
       const acts: Action[] = [{ t: 'advance' }];
       for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
       acts.push(...activateSkillActions(g, p));
-      // 013 电刑（触发：本回合使用过攻击骰后）：消耗 2 个冥想骰 → 依次以 1/2/3 点攻击
-      const dzArt = p.artifacts.find((x) => x.skills.some((s2) => s2.key === 'minglei.dianxing'));
-      const dzSkill = dzArt?.skills.find((s2) => s2.key === 'minglei.dianxing');
-      if (
-        dzArt &&
-        dzSkill &&
-        hasActiveSkill(p, 'minglei.dianxing') &&
-        g.attackedThisTurn &&
-        p.areas.meditation.length >= 2
-      ) {
-        const pick = p.areas.meditation.slice(0, 2).map((d) => ({ dieIds: [d.id] }));
-        acts.push({ t: 'skill', artifactId: dzArt.id, side: dzSkill.side, params: { costSlots: pick } });
-      }
-      // 013 雷暴·触发（本回合攻击被抵挡后）：移动最多 2 个冥想骰到攻击骰区（保留点数）
-      const lbArt = p.artifacts.find((x) => x.skills.some((s2) => s2.key === 'minglei.leibao.trigger'));
-      const lbSkill = lbArt?.skills.find((s2) => s2.key === 'minglei.leibao.trigger');
-      if (
-        lbArt &&
-        lbSkill &&
-        hasActiveSkill(p, 'minglei.leibao.trigger') &&
-        g.attackBlockedThisTurn &&
-        p.areas.meditation.length >= 1
-      ) {
-        acts.push({ t: 'skill', artifactId: lbArt.id, side: lbSkill.side, params: { moveIds: [] } });
-      }
       return acts;
     }
     default:
@@ -485,7 +476,7 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
 
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve' && action.t !== 'dunwuPulse' && action.t !== 'leibaoReroll') {
+  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve' && action.t !== 'dunwuPulse' && action.t !== 'leibaoReroll' && action.t !== 'dianxing' && action.t !== 'leibao') {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -535,6 +526,63 @@ export function applyAction(g: GameState, action: Action): GameState {
       }
       break;
     }
+    case 'dianxing': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'dianxing') throw new Error('no dianxing pending');
+      const p = g.players[pd.player];
+      if (action.accept === false) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「电刑」`);
+        pumpAttackQueue(g);
+        break;
+      }
+      const id = action.pick;
+      if (!id) throw new Error('missing die');
+      if (pd.picked.includes(id)) throw new Error('duplicate die id');
+      if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+      pd.picked.push(id);
+      if (pd.picked.length === 2) {
+        const pickedVals = pd.picked.map((x) => p.areas.meditation.find((d) => d.id === x)?.value ?? 0);
+        consumeDice(p, 'meditation', pd.picked);
+        g.pending = null;
+        g.attackQueue = { player: pd.player, values: [1, 2, 3] };
+        logLine(
+          g,
+          `${pname(pd.player)} 发动「电刑」：消耗 2 个冥想骰（${pickedVals.join('/')}点），依次以 1、2、3 点各进行一次攻击`,
+        );
+        pumpAttackQueue(g);
+      }
+      break;
+    }
+    case 'leibao': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'leibao') throw new Error('no leibao pending');
+      const p = g.players[pd.player];
+      if (action.accept === false) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「雷暴」`);
+        pumpAttackQueue(g);
+        break;
+      }
+      if (action.done) {
+        if (pd.picked.length === 0) throw new Error('nothing picked');
+        moveDice(g, pd.player, pd.picked, 'attack');
+        logLine(
+          g,
+          `${pname(pd.player)} 发动「雷暴」：将 ${pd.picked.length} 个冥想骰移动到攻击骰区（保留点数）`,
+        );
+        g.pending = null;
+        pumpAttackQueue(g);
+        break;
+      }
+      const id = action.pick;
+      if (!id) throw new Error('missing die');
+      if (pd.picked.includes(id)) throw new Error('duplicate die id');
+      if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+      if (pd.picked.length >= 2) throw new Error('at most 2 dice');
+      pd.picked.push(id);
+      break;
+    }
     case 'dustRise': {
       if (g.phase !== 'dustRise') throw new Error('not dust rise phase');
       const p = g.players[g.activePlayer];
@@ -567,7 +615,6 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (g.pendingAttack) throw new Error('pending attack unresolved');
       assertConversionAllowed(g, g.activePlayer, action.costSlots);
       doAttack(g, g.activePlayer, action.costSlots);
-      g.attackedThisTurn = true;
       break;
     case 'block': {
       if (!g.pendingAttack) throw new Error('no pending attack');
@@ -708,7 +755,7 @@ export function applyAction(g: GameState, action: Action): GameState {
           (x.kind === 'activate' ||
             x.kind === 'activation' ||
             x.kind === 'ultimate' ||
-            (x.kind === 'trigger' && TRIGGER_ACTION_KEYS.includes(x.key))),
+            false),
       );
       if (!s) throw new Error('no usable skill on that side');
       if (!skillActive(a, s)) throw new Error('skill not active');

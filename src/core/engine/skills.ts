@@ -1,7 +1,7 @@
 import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
-import { dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
+import { dealTrueDamage, virtualAttack } from './combat';
 import { moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
@@ -478,38 +478,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const ids = (params.targetDieIds as string[]) ?? [];
       const changed = changeOnePointDice(g, player, ids, player, rng);
       logLine(g, `${pname(player)} 发动「数罪并罚」：变更自己 ${changed} 个能力骰（1 点 → 6 点）`);
-    },
-  },
-  // 013 电刑（触发）：当你使用 1 个攻击骰后。消耗 2 个冥想骰 → 依次以 1、2、3 点各进行一次攻击
-  'minglei.dianxing': {
-    run({ g, player, params, reportConsumed }) {
-      const p = g.players[player];
-      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
-      if (fills.length !== 2) throw new Error('电刑需消耗恰好 2 个冥想骰');
-      const spec: SlotSpec[] = [{ kind: 'meditation' }, { kind: 'meditation' }];
-      paySlots(g, player, spec, fills, reportConsumed);
-      g.attackQueue = { player, values: [1, 2, 3] };
-      logLine(g, `${pname(player)} 发动「电刑」：消耗 2 个冥想骰，依次以 1、2、3 点各进行一次攻击`);
-      pumpAttackQueue(g);
-      void p;
-    },
-  },
-  // 013 雷暴·触发：当你的攻击被抵挡后。将最多 2 个冥想骰移动到攻击骰区（保留原本点数）
-  'minglei.leibao.trigger': {
-    run({ g, player, params }) {
-      const p = g.players[player];
-      const ids = (params.moveIds as string[]) ?? [];
-      if (ids.length > 2) throw new Error('最多移动 2 个冥想骰');
-      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
-      for (const id of ids) {
-        if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
-      }
-      if (ids.length > 0) moveDice(g, player, ids, 'attack');
-      g.attackBlockedThisTurn = false; // 每次被抵挡后至多发动一次
-      logLine(
-        g,
-        `${pname(player)} 发动「雷暴」：将 ${ids.length} 个冥想骰移动到攻击骰区（保留点数）`,
-      );
     },
   },
   // 015 残响·必杀 绝境天神：当前生命每比初始生命低 10 点，计数 +1（向下取整，最高 4 层）

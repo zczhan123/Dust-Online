@@ -245,50 +245,66 @@ describe('014 惩戒（激活类规则）', () => {
 });
 
 describe('013 鸣雷（电刑 / 雷暴）', () => {
-  it('「电刑」：使用攻击骰后可用；消耗 2 冥想骰 → 依次以 1、2、3 点攻击（逐段独立结算）', () => {
+  it('「电刑」：攻击结算后询问；发动需分两步选 2 颗冥想骰 → 依次以 1、2、3 点攻击', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
     skipInitialReroll(g);
-    // 激活 013 左侧（电刑）
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'left'); // 电刑在左侧
+    until(g, atA(g, 'main'));
+
+    g.players.A.areas.attack.push({ id: 'a-atk', value: 2, kind: 'attack' });
+    g.players.A.areas.meditation.push(
+      { id: 'm1', value: 3, kind: 'meditation' },
+      { id: 'm2', value: 5, kind: 'meditation' },
+    );
+
+    // 使用攻击骰（B 不抵挡）→ 结算完成后询问「电刑」
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind).toBe('dianxing');
+    // 未选任何骰时：有「不发动」+ 每颗冥想骰一个选项
+    const acts0 = getLegalActions(g);
+    expect(acts0.some((a) => a.t === 'dianxing' && a.accept === false)).toBe(true);
+    expect(acts0.filter((a) => a.t === 'dianxing' && a.pick).length).toBeGreaterThanOrEqual(2);
+
+    applyAction(g, { t: 'dianxing', pick: 'm1' });
+    applyAction(g, { t: 'dianxing', pick: 'm2' }); // 选满 2 颗 → 立刻执行
+    expect(g.players.A.areas.meditation.some((d) => d.id === 'm1')).toBe(false); // 已消耗
+    expect(g.pendingAttack?.value).toBe(1); // 第一段
+    applyAction(g, { t: 'block' });
+    expect(g.pendingAttack?.value).toBe(2); // 第二段
+    applyAction(g, { t: 'block' });
+    expect(g.pendingAttack?.value).toBe(3); // 第三段
+    applyAction(g, { t: 'block' });
+    expect(g.pendingAttack).toBeNull();
+    expect(g.attackQueue).toBeNull();
+    expect(g.pending).toBeNull(); // 虚拟攻击不会再触发「电刑」
+  });
+
+  it('「电刑」：不发动则无任何效果（不消耗冥想骰、不追加攻击）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
     dustRise(g, '013', 'left');
     until(g, atA(g, 'main'));
 
-    // 未使用攻击骰前：不提供「电刑」
-    const skillActions = () =>
-      getLegalActions(g).filter((a) => a.t === 'skill' && a.artifactId === '013');
-    expect(skillActions()).toEqual([]);
-
-    // 使用 1 个攻击骰（B 不抵挡）
     g.players.A.areas.attack.push({ id: 'a-atk', value: 2, kind: 'attack' });
+    g.players.A.areas.meditation.push(
+      { id: 'm1', value: 3, kind: 'meditation' },
+      { id: 'm2', value: 5, kind: 'meditation' },
+    );
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
-    applyAction(g, { t: 'block' }); // 不抵挡 → 造成伤害
-    expect(g.attackedThisTurn).toBe(true);
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind).toBe('dianxing');
 
-    // 提供「电刑」（需 2 个冥想骰）
-    const g2 = g;
-    g2.players.A.areas.meditation.push({ id: 'm1', value: 3, kind: 'meditation' });
-    g2.players.A.areas.meditation.push({ id: 'm2', value: 5, kind: 'meditation' });
-    expect(skillActions().length).toBe(1);
-
-    applyAction(g2, {
-      t: 'skill',
-      artifactId: '013',
-      side: 'left',
-      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }] },
-    });
-    // 第一段（1 点）待抵挡
-    expect(g2.pendingAttack?.value).toBe(1);
-    applyAction(g2, { t: 'block' }); // 不抵挡 → 扣血
-    expect(g2.pendingAttack?.value).toBe(2); // 第二段
-    applyAction(g2, { t: 'block' });
-    expect(g2.pendingAttack?.value).toBe(3); // 第三段
-    applyAction(g2, { t: 'block' });
-    expect(g2.pendingAttack).toBeNull();
-    expect(g2.attackQueue).toBeNull();
-    void skillActions;
+    const medBefore = g.players.A.areas.meditation.length;
+    applyAction(g, { t: 'dianxing', accept: false });
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack).toBeNull();
+    expect(g.players.A.areas.meditation.length).toBe(medBefore); // 未消耗
   });
 
-  it('「雷暴·触发」：攻击被抵挡后可把最多 2 个冥想骰移到攻击骰区（保留点数）', () => {
+  it('「雷暴·触发」：攻击被抵挡后询问；可选 1 颗即「完成」→ 移到攻击骰区（保留点数）', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
     skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
@@ -296,21 +312,38 @@ describe('013 鸣雷（电刑 / 雷暴）', () => {
     until(g, atA(g, 'main'));
 
     g.players.A.areas.attack.push({ id: 'a-atk', value: 4, kind: 'attack' });
-    g.players.A.areas.meditation.push({ id: 'm1', value: 2, kind: 'meditation' });
+    g.players.A.areas.meditation.push(
+      { id: 'm1', value: 2, kind: 'meditation' },
+      { id: 'm2', value: 6, kind: 'meditation' },
+    );
     g.players.B.areas.defense.push({ id: 'b-def', value: 3, kind: 'defense' });
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
     applyAction(g, { t: 'block', costSlots: [{ dieIds: ['b-def'] }] }); // 被抵挡
-    expect(g.attackBlockedThisTurn).toBe(true);
+    expect(g.pending?.kind).toBe('leibao');
 
-    applyAction(g, {
-      t: 'skill',
-      artifactId: '013',
-      side: 'right',
-      params: { moveIds: ['m1'] },
-    });
+    // 选 1 颗 → 出现「完成」
+    applyAction(g, { t: 'leibao', pick: 'm1' });
+    expect(getLegalActions(g).some((a) => a.t === 'leibao' && a.done === true)).toBe(true);
+    applyAction(g, { t: 'leibao', done: true });
     expect(g.players.A.areas.attack.some((d) => d.id === 'm1' && d.value === 2)).toBe(true);
     expect(g.players.A.areas.meditation.some((d) => d.id === 'm1')).toBe(false);
-    expect(g.attackBlockedThisTurn).toBe(false); // 每次被抵挡后至多发动一次
+    expect(g.pending).toBeNull();
+  });
+
+  it('「雷暴·触发」：不发动则冥想骰不动', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    until(g, atA(g, 'dustRise'));
+    dustRise(g, '013', 'right');
+    until(g, atA(g, 'main'));
+    g.players.A.areas.attack.push({ id: 'a-atk', value: 4, kind: 'attack' });
+    g.players.A.areas.meditation.push({ id: 'm1', value: 2, kind: 'meditation' });
+    g.players.B.areas.defense.push({ id: 'b-def', value: 3, kind: 'defense' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk'] }] });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['b-def'] }] });
+    applyAction(g, { t: 'leibao', accept: false });
+    expect(g.pending).toBeNull();
+    expect(g.players.A.areas.meditation.some((d) => d.id === 'm1')).toBe(true);
   });
 
   it('「雷暴·持续」：对方重掷阶段结束时询问；接受 → 插入额外重掷阶段（重掷 1 次后恢复原流程）', () => {

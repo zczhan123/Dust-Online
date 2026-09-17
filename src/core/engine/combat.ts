@@ -99,7 +99,6 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   if (g.phase === 'gameOver') return;
 
   if (blocked) {
-    g.attackBlockedThisTurn = true;
     // 锋芒·触发：你的攻击被防御骰抵挡后
     if (hasActiveSkill(g.players[pa.attacker], 'buxiang.fengmang.trigger')) {
       g.pending = { kind: 'fengmang', player: pa.attacker, defenderId, value: pa.value };
@@ -108,6 +107,17 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
     // 裁雨流：当你使用攻击骰造成伤害后
     if (hasActiveSkill(g.players[pa.attacker], 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
       g.pending = { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue };
+    }
+  }
+  // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
+  if (g.pending === null && !g.attackQueue) {
+    const atk = g.players[pa.attacker];
+    const med = atk.areas.meditation.length;
+    const usedAttackDie = pa.physical && pa.sourceDieId !== undefined;
+    if (usedAttackDie && hasActiveSkill(atk, 'minglei.dianxing') && med >= 2) {
+      g.pending = { kind: 'dianxing', player: pa.attacker, picked: [] };
+    } else if (blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
+      g.pending = { kind: 'leibao', player: pa.attacker, picked: [] };
     }
   }
   // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段

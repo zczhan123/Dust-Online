@@ -46,6 +46,8 @@ export type Action =
   | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string }
   | { t: 'dunwuPulse'; accept: boolean }
   | { t: 'leibaoReroll'; accept: boolean }
+  | { t: 'dianxing'; accept?: false; pick?: string }
+  | { t: 'leibao'; accept?: false; pick?: string; done?: true }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -65,7 +67,9 @@ export type Pending =
   | { kind: 'shenhongKill'; player: PlayerId }
   | { kind: 'dunwuHalve'; player: PlayerId }
   | { kind: 'dunwuPulse'; player: PlayerId; amount: number }
-  | { kind: 'leibaoReroll'; player: PlayerId };
+  | { kind: 'leibaoReroll'; player: PlayerId }
+  | { kind: 'dianxing'; player: PlayerId; picked: string[] }
+  | { kind: 'leibao'; player: PlayerId; picked: string[] };
 
 export interface Distribution {
   defense: number[];
@@ -147,10 +151,6 @@ export interface GameState {
   winner: PlayerId | null;
   skillConsumedThisAction: number;
   dunwuPulseUsedThisTurn: boolean;
-  /** 本回合是否使用过攻击骰（013 电刑触发条件） */
-  attackedThisTurn: boolean;
-  /** 本回合自己的攻击是否被抵挡过（013 雷暴·触发条件） */
-  attackBlockedThisTurn: boolean;
   /** 多段攻击队列（013 电刑：1/2/3 逐段结算） */
   attackQueue: { player: PlayerId; values: number[] } | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
