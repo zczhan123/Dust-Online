@@ -412,6 +412,39 @@ describe('renderGame (read-only snapshot)', () => {
     }
   });
 
+  it('marks a used 「激活」 skill as spent (gray bg + green left border, gray badge)', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['013', '014', '015'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    // 尘起阶段切入 014 左侧
+    const med = { id: 'med-act', value: 4, kind: 'meditation' as const };
+    state.players.A.areas.meditation.push(med);
+    applyAction(state, { t: 'dustRise', artifactId: '014', side: 'left', costSlots: [{ dieIds: [med.id] }] });
+    applyAction(state, { t: 'advance' }); // -> 主要阶段
+
+    renderGame(state, root, hooksFor());
+    const partSel = '.player--self .card[data-artifact="014"] .skill-part[data-key="chengjie.jinghua"]';
+    // 切入当回合未使用：绿色可用
+    expect(root.querySelector(partSel)!.classList.contains('skill-part--on')).toBe(true);
+    expect(
+      root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!.classList.contains('badge-active--spent'),
+    ).toBe(false);
+
+    // 发动「净化」（不选任何骰）
+    applyAction(state, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
+    renderGame(state, root, hooksFor());
+    const spent = root.querySelector<HTMLElement>(partSel)!;
+    expect(spent.classList.contains('skill-part--spent')).toBe(true);
+    expect(spent.classList.contains('skill-part--on')).toBe(false);
+    expect(
+      root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!.classList.contains('badge-active--spent'),
+    ).toBe(true);
+  });
+
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
     const state = createGame({
       seed: 1,
