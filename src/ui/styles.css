@@ -1077,17 +1077,14 @@ button.pay-die {
 .skill-part--spent { background: #cfd4db; border-left-color: var(--on); opacity: 0.95; }
 .badge-active--spent { background: #d1d5db; color: #4b5563; }
 
-/* 中央操作区：设定最小高度 + 内部面板纵向居中 → 进出技能选择时高度不跳变 */
+/* 中央操作区：设定最小高度，进出面板时高度不跳变（保留各自原有布局方向，不要改 flex-direction） */
 :root { --actionzone-min-h: 92px; }
 .actionzone { min-height: var(--actionzone-min-h); }
-.actionzone .actionlist,
+/* 横向排列的面板：仅加最小高度 + 多行时行组居中 */
+.actionzone .actionlist { min-height: 44px; align-content: center; }
+.actionzone .confirm-row { min-height: 44px; }
+.actionzone .convertpick { min-height: 44px; }
+/* 纵向排列的面板：加最小高度 + 内容纵向居中 */
 .actionzone .selector,
-.actionzone .confirm-row,
-.actionzone .convertpick,
-.actionzone .dustflow,
-.actionzone .paypanel {
-  min-height: 44px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
+.actionzone .paypanel { min-height: 44px; justify-content: center; }
+.actionzone .dustflow { min-height: 44px; justify-content: center; }
