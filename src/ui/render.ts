@@ -2347,9 +2347,10 @@ function applyZoom(stage: HTMLElement, prefs: Prefs): void {
     stage.style.width = k === 1 ? '' : `${100 / k}%`;
     return;
   }
-  // 自动：只在「视口尺寸 / 密度」变化时重算，避免内容一变（如确认条出现/消失）就来回抖动
-  const vw = typeof window !== 'undefined' ? window.innerWidth || 0 : 0;
-  const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
+  // 自动：只在「布局视口尺寸 / 密度」变化时重算，避免内容一变（如确认条出现/消失）就来回抖动
+  const doc = typeof document !== 'undefined' ? document.documentElement : null;
+  const vw = doc ? doc.clientWidth : 0;
+  const vh = doc ? doc.clientHeight : 0;
   const stamp = `${vw}x${vh}:${prefs.density}`;
   if (stage.dataset.zoomStamp !== stamp) {
     stage.style.transform = 'none';

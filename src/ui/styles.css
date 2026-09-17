@@ -10,6 +10,11 @@
   --off-bg: #f1efe9;
 }
 
+/* 竖向滚动条占位恒定：内容高度变化（如确认条出现/消失）不再改变可用宽度/高度 */
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
 body {
   margin: 0;
   font-family: system-ui, "Microsoft YaHei", sans-serif;
@@ -1034,3 +1039,13 @@ button.pay-die {
 .confirm-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .confirm-row .btn { flex: 0 0 auto; }
 .vitals { width: 168px; flex: 0 0 auto; }
+
+/* 操作列表 / 确认条 / 选骰面板：统一最小高度，切换时高度不跳变 */
+.actionlist,
+.confirm-row,
+.selector { min-height: 40px; }
+.confirm-row { box-sizing: border-box; }
+/* 窄屏允许生命值栏收缩（覆盖结尾的固定宽度） */
+@media (max-width: 719px) {
+  .vitals { width: auto; }
+}
