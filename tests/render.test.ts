@@ -277,14 +277,31 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(state, root, hooks);
 
     expect(root.querySelector('.app')!.classList.contains('log-collapsed')).toBe(true);
-    expect(root.querySelector('.log-edge')).not.toBeNull();
+    expect(root.querySelector('.edge-bar [data-act="edgeSettingsOpen"]')).not.toBeNull();
     expect(root.querySelector('.log-drawer')).toBeNull();
 
-    root.querySelector<HTMLButtonElement>('.log-edge')!.click();
+    // 贴边按钮组里有「设置」入口（避免收起战报后无法进设置）
+    const edgeSettings = root.querySelector<HTMLButtonElement>(
+      '.edge-bar [data-act="edgeSettingsOpen"]',
+    )!;
+    expect(edgeSettings).not.toBeNull();
+    edgeSettings.click();
+    expect(ui.settingsOpen).toBe(true);
+    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+    expect(ui.settingsOpen).toBe(false);
+
+    root.querySelector<HTMLButtonElement>('.edge-bar [data-act="logOpen"]')!.click();
     expect(ui.logOpen).toBe(true);
     expect(root.querySelector('.log-drawer .log')).not.toBeNull();
 
-    // 点空白处关闭
+    // 抽屉里也有「设置」入口，且会先关抽屉（否则被遮罩挡住）
+    root.querySelector<HTMLButtonElement>('[data-act="drawerSettingsOpen"]')!.click();
+    expect(ui.logOpen).toBe(false);
+    expect(ui.settingsOpen).toBe(true);
+    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+
+    // 重新打开抽屉后，点空白处关闭
+    root.querySelector<HTMLButtonElement>('.edge-bar [data-act="logOpen"]')!.click();
     root.querySelector<HTMLElement>('.log-overlay')!.click();
     expect(ui.logOpen).toBe(false);
     expect(root.querySelector('.log-drawer')).toBeNull();

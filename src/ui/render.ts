@@ -1559,6 +1559,29 @@ function settingsPanel(ctx: Ctx): HTMLElement {
 function logDrawer(ctx: Ctx): HTMLElement {
   const overlay = el('div', 'log-overlay');
   const panel = el('div', 'log-drawer');
+  const head = el('div', 'log-drawer-head');
+  const set = document.createElement('button');
+  set.type = 'button';
+  set.className = 'btn btn-settings';
+  set.dataset.act = 'drawerSettingsOpen';
+  set.textContent = '⚙ 设置';
+  set.addEventListener('click', () => {
+    ctx.hooks.ui.logOpen = false;
+    ctx.hooks.ui.settingsOpen = true;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(set);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel';
+  close.dataset.act = 'logClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ctx.hooks.ui.logOpen = false;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  panel.appendChild(head);
   panel.appendChild(logPanel(ctx));
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
@@ -2201,17 +2224,29 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}`,
   );
 
-  // 战报贴边按钮（战报栏收起 / 窄屏时可见；点击拉出抽屉）
-  const logEdge = document.createElement('button');
-  logEdge.type = 'button';
-  logEdge.className = 'btn log-edge';
-  logEdge.dataset.act = 'logOpen';
-  logEdge.textContent = '战报';
-  logEdge.addEventListener('click', () => {
+  // 贴边按钮组（战报栏收起 / 窄屏时可见）：设置 + 战报
+  const edgeBar = el('div', 'edge-bar');
+  const edgeSettings = document.createElement('button');
+  edgeSettings.type = 'button';
+  edgeSettings.className = 'btn edge-btn';
+  edgeSettings.dataset.act = 'edgeSettingsOpen';
+  edgeSettings.textContent = '⚙ 设置';
+  edgeSettings.addEventListener('click', () => {
+    hooks.ui.settingsOpen = true;
+    hooks.requestRender();
+  });
+  edgeBar.appendChild(edgeSettings);
+  const edgeLog = document.createElement('button');
+  edgeLog.type = 'button';
+  edgeLog.className = 'btn edge-btn';
+  edgeLog.dataset.act = 'logOpen';
+  edgeLog.textContent = '战报';
+  edgeLog.addEventListener('click', () => {
     hooks.ui.logOpen = true;
     hooks.requestRender();
   });
-  app.appendChild(logEdge);
+  edgeBar.appendChild(edgeLog);
+  app.appendChild(edgeBar);
 
   // 左栏：设置 + 战报
   const sidebar = el('div', 'sidebar');

@@ -848,7 +848,7 @@ button.pay-die {
   position: fixed;
   inset: 0;
   background: rgba(20, 24, 30, 0.45);
-  z-index: 40;
+  z-index: 46;
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
@@ -970,9 +970,11 @@ button.pay-die {
 
 /* ===== 二期：响应式 + 战报抽屉 ===== */
 /* 贴边按钮：战报收起 / 窄屏时可见 */
-.log-edge { display: none; align-self: flex-start; position: sticky; top: 8px; }
+.edge-bar { display: none; flex-direction: column; gap: 6px; align-self: flex-start; position: sticky; top: 8px; }
+.edge-btn { white-space: nowrap; }
+.log-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .app.log-collapsed .sidebar { display: none; }
-.app.log-collapsed .log-edge { display: inline-flex; }
+.app.log-collapsed .edge-bar { display: flex; }
 
 .log-overlay { position: fixed; inset: 0; background: rgba(20, 24, 30, 0.35); z-index: 45; }
 .log-drawer {
@@ -1005,7 +1007,7 @@ button.pay-die {
 /* 中屏（720–1279）：战报栏默认收起（改由贴边按钮拉出）；卡片允许换行 */
 @media (max-width: 1279px) {
   .sidebar { display: none; }
-  .log-edge { display: inline-flex; }
+  .edge-bar { display: flex; }
   .card { min-width: 180px; }
 }
 
