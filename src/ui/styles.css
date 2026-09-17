@@ -140,7 +140,7 @@ body {
 }
 /* 缩略卡图：固定高度裁切，点击/长按看详情 */
 .card-art--thumb .card-art-img {
-  height: 72px;
+  height: 140px;
   object-fit: cover;
   object-position: top center;
 }
@@ -896,3 +896,65 @@ button.pay-die {
 }
 .detail-title { font-weight: 700; font-size: 15px; }
 .detail-sub { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+
+/* ===== 中央操作区：提示栏 + 操作栏合并 ===== */
+.actionzone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.actionzone .hint {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: #4b5563;
+}
+.actionzone .actionlist { background: transparent; border: 0; padding: 0; }
+.hint-skill { font-weight: 700; }
+
+/* ===== 双方生命 + 尘落 ===== */
+.vitals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-width: 160px;
+}
+.vitals-item { display: flex; align-items: baseline; gap: 8px; }
+.vitals-who { font-size: 12px; color: var(--muted); }
+.vitals-life { font-weight: 700; font-size: 15px; }
+.vitals-dust {
+  border-top: 1px solid #eef0f3;
+  padding-top: 6px;
+  font-size: 13px;
+  color: #7a5a1e;
+  font-weight: 700;
+}
+
+/* 尘印标记：冥想骰区标签右侧，仅展示 */
+.area-seal { margin-left: auto; font-size: 11px; }
+
+/* 隐藏描述时：技能左右排列（同名技能在同一组内） */
+.skills--inline { flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center; }
+.skills--inline .skill {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 6px;
+}
+
+/* 详情浮窗：字号放大以便阅读 */
+.detail-popover .skill-name { font-size: 14px; }
+.detail-popover .skill-type { font-size: 12px; }
+.detail-popover .skill-text { font-size: 13px; line-height: 1.65; color: #374151; }
+.detail-title { font-size: 16px; }

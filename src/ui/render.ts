@@ -438,7 +438,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
-    const skills = el('div', 'skills');
+    const skills = el('div', `skills${ctx.prefs.showSkillText ? '' : ' skills--inline'}`);
     const groups = new Map<string, typeof text.skills>();
     for (const s of text.skills) {
       const existing = groups.get(s.name);
@@ -527,6 +527,12 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
 
   const label = el('div', 'area-label');
   label.textContent = `${AREA_LABEL[kind]}（${player.areas[kind].length}）`;
+  // 尘印标记：移动到冥想骰区（靠右、仅展示不可点）
+  if (kind === 'meditation' && player.hasDustSeal) {
+    const seal = el('span', 'badge badge-seal area-seal');
+    seal.textContent = '尘印标记';
+    label.appendChild(seal);
+  }
   box.appendChild(label);
 
   const dice = el('div', 'dice');
@@ -624,14 +630,6 @@ function playerPanel(
   const title = el('span', 'player-title');
   title.textContent = `玩家${player.id}`;
   header.appendChild(title);
-  const life = el('span', `player-life life-${player.id}`);
-  life.textContent = `生命 ${player.life}/${player.lifeMax}`;
-  header.appendChild(life);
-  if (player.hasDustSeal) {
-    const seal = el('span', 'badge badge-seal');
-    seal.textContent = '尘印标记';
-    header.appendChild(seal);
-  }
 
   const cards = el('div', 'cards');
   for (const a of player.artifacts) cards.appendChild(artifactCard(a, ctx));
@@ -647,30 +645,70 @@ function playerPanel(
   return panel;
 }
 
-function phaseHint(ctx: Ctx): string {
+/** 提示栏分段：color = 用该玩家配色高亮（用于技能名） */
+interface HintPart {
+  text: string;
+  color?: PlayerId;
+}
+
+function phaseHint(ctx: Ctx): HintPart[] {
   const { state } = ctx;
   const pd = state.pending;
-  if (pd && pd.kind === 'caiyuliu') return '裁雨流：选择该骰去向。';
-  if (pd && pd.kind === 'fengmang') return '锋芒：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。';
-  if (pd && pd.kind === 'guwangCharge') return '孤王·高塔铁幕：可将对方 1 个攻击骰点数改为 1。';
-  if (pd && pd.kind === 'guwangCancel') return `孤王·高塔铁幕：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。`;
-  if (pd && pd.kind === 'shenhongKill') return '深红·杀意：本回合补充≤3，可造成 3 点真实伤害并回复 2 点生命。';
-  if (pd && pd.kind === 'dunwuHalve') return '顿悟·灵能屏障：可消耗 1 个冥想骰，使本次攻击伤害减半。';
-  if (pd && pd.kind === 'dunwuPulse') return `顿悟·灵能脉冲：可造成 ${pd.amount} 点真实伤害（本回合消耗 ${pd.amount} 颗能力骰）。`;
-  if (state.pendingAttack) return '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。';
+  if (pd && pd.kind === 'caiyuliu') {
+    return [{ text: '裁雨流', color: pd.player }, { text: '：选择该骰去向。' }];
+  }
+  if (pd && pd.kind === 'fengmang') {
+    return [
+      { text: '锋芒', color: pd.player },
+      { text: '：可发动（消耗 1 攻击骰 + 1 冥想骰）或不发动。' },
+    ];
+  }
+  if (pd && pd.kind === 'guwangCharge') {
+    return [
+      { text: '高塔铁幕', color: pd.player },
+      { text: '：可将对方 1 个攻击骰点数改为 1。' },
+    ];
+  }
+  if (pd && pd.kind === 'guwangCancel') {
+    return [
+      { text: '高塔铁幕', color: pd.player },
+      { text: `：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。` },
+    ];
+  }
+  if (pd && pd.kind === 'shenhongKill') {
+    return [
+      { text: '杀意', color: pd.player },
+      { text: '：本回合补充≤3，可造成 3 点真实伤害并回复 2 点生命。' },
+    ];
+  }
+  if (pd && pd.kind === 'dunwuHalve') {
+    return [
+      { text: '灵能屏障', color: pd.player },
+      { text: '：可消耗 1 个冥想骰，使本次攻击伤害减半。' },
+    ];
+  }
+  if (pd && pd.kind === 'dunwuPulse') {
+    return [
+      { text: '灵能脉冲', color: pd.player },
+      { text: `：可造成 ${pd.amount} 点真实伤害（本回合消耗 ${pd.amount} 颗能力骰）。` },
+    ];
+  }
+  if (state.pendingAttack) {
+    return [{ text: '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。' }];
+  }
   switch (state.phase) {
     case 'initialReroll':
-      return '初始重掷：可点选任意数量的骰子后点「重掷选中」，或点「跳过」。';
+      return [{ text: '初始重掷：可点选任意数量的骰子后点「重掷选中」，或点「跳过」。' }];
     case 'reroll':
-      return '重掷阶段：点击你的骰子选择，再点「重掷选中」；或跳过。';
+      return [{ text: '重掷阶段：点击你的骰子选择，再点「重掷选中」；或跳过。' }];
     case 'dustRise':
-      return '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。';
+      return [{ text: '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。' }];
     case 'main':
-      return '主要阶段：可启动技能、发动攻击（顺序不限）；完成后「结束回合」。';
+      return [{ text: '主要阶段：可启动技能、发动攻击（顺序不限）；完成后「结束回合」。' }];
     case 'gameOver':
-      return `游戏结束，胜者：${state.winner ?? '—'}。`;
+      return [{ text: `游戏结束，胜者：${state.winner ?? '—'}。` }];
     default:
-      return '';
+      return [];
   }
 }
 
@@ -691,9 +729,63 @@ function hintBox(ctx: Ctx): HTMLElement {
   turn.appendChild(document.createTextNode(' 操作'));
   hint.appendChild(turn);
   const phase = el('span', 'hint-phase');
-  phase.textContent = phaseHint(ctx);
+  for (const part of phaseHint(ctx)) {
+    if (part.color) {
+      const strong = el('span', `hint-skill player-${part.color}`);
+      strong.textContent = part.text;
+      phase.appendChild(strong);
+    } else {
+      phase.appendChild(document.createTextNode(part.text));
+    }
+  }
   hint.appendChild(phase);
   return hint;
+}
+
+/** 中央操作区：把「轮到谁 + 阶段提示」与下方的操作栏合并为一块 */
+function actionZone(ctx: Ctx): HTMLElement {
+  const zone = el('div', 'actionzone');
+  zone.appendChild(hintBox(ctx));
+  const ui = ctx.hooks.ui;
+  if (ui.convertPick) {
+    zone.appendChild(convertPickPanel(ctx));
+  } else if (ui.fengmangPick && ui.pendingConfirm == null) {
+    zone.appendChild(fengmangPanel(ctx));
+  } else if (ui.dustFlow) {
+    zone.appendChild(dustFlowView(ctx));
+  } else {
+    const confirm = confirmRow(ctx);
+    if (confirm) {
+      zone.appendChild(confirm);
+    } else if (ui.selection) {
+      const chooser = chooserPanel(ctx);
+      if (chooser) zone.appendChild(chooser);
+    } else {
+      zone.appendChild(operationList(ctx));
+    }
+  }
+  return zone;
+}
+
+/** 双方生命 + 尘落（替代旧的“重开/尘落”区） */
+function vitalsBar(ctx: Ctx): HTMLElement {
+  const { state } = ctx;
+  const bar = el('div', 'vitals');
+  for (const pid of ['A', 'B'] as PlayerId[]) {
+    const p = state.players[pid];
+    const item = el('div', `vitals-item vitals-${pid}`);
+    const who = el('span', 'vitals-who');
+    who.textContent = `玩家${pid}`;
+    item.appendChild(who);
+    const hp = el('span', `vitals-life life-${pid}`);
+    hp.textContent = `生命 ${p.life}/${p.lifeMax}`;
+    item.appendChild(hp);
+    bar.appendChild(item);
+  }
+  const dust = el('div', 'vitals-dust');
+  dust.textContent = `尘落 ${state.dustfall} / 10`;
+  bar.appendChild(dust);
+  return bar;
 }
 
 function confirmRow(ctx: Ctx): HTMLElement | null {
@@ -2070,9 +2162,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   });
   sidebarHead.appendChild(settingsBtn);
   sidebar.appendChild(sidebarHead);
-  const logTitle = el('div', 'log-title');
-  logTitle.textContent = '战报';
-  sidebar.appendChild(logTitle);
   sidebar.appendChild(logPanel(ctx));
   app.appendChild(sidebar);
 
@@ -2082,39 +2171,11 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   const centerband = el('div', 'centerband');
   const left = el('div', 'centerband-left');
-  left.appendChild(hintBox(ctx));
-
-  if (hooks.ui.convertPick) {
-    left.appendChild(convertPickPanel(ctx));
-  } else if (hooks.ui.fengmangPick && hooks.ui.pendingConfirm == null) {
-    left.appendChild(fengmangPanel(ctx));
-  } else if (hooks.ui.dustFlow) {
-    left.appendChild(dustFlowView(ctx));
-  } else {
-    const confirm = confirmRow(ctx);
-    if (confirm) {
-      left.appendChild(confirm);
-    } else if (hooks.ui.selection) {
-      const chooser = chooserPanel(ctx);
-      if (chooser) left.appendChild(chooser);
-    } else {
-      left.appendChild(operationList(ctx));
-    }
-  }
+  left.appendChild(actionZone(ctx));
   centerband.appendChild(left);
 
   const right = el('div', 'centerband-right');
-  const dustfall = el('div', 'dustfall');
-  dustfall.textContent = `尘落 ${state.dustfall} / 10`;
-  right.appendChild(dustfall);
-
-  const restart = document.createElement('button');
-  restart.type = 'button';
-  restart.className = 'btn btn-restart';
-  restart.dataset.act = 'restart';
-  restart.textContent = '重开';
-  restart.addEventListener('click', () => hooks.onRestart());
-  right.appendChild(restart);
+  right.appendChild(vitalsBar(ctx));
   centerband.appendChild(right);
 
   main.appendChild(centerband);

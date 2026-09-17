@@ -162,7 +162,7 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const band = root.querySelector('.centerband');
     expect(band).not.toBeNull();
-    expect(band!.querySelector('.dustfall')?.textContent).toContain('尘落');
+    expect(band!.querySelector('.vitals-dust')?.textContent).toContain('尘落');
     expect(root.querySelector('.sidebar .log')).not.toBeNull();
   });
 
@@ -171,11 +171,55 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.textContent ?? '').toContain('雨切（武士刀）');
   });
 
-  it('colors the life span by player id', () => {
+  it('shows both players life in the merged vitals bar, colored by player', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
-    const life = root.querySelector('.player--self .player-life');
-    expect(life).not.toBeNull();
-    expect(life!.classList.contains('life-A')).toBe(true);
+    const lifeA = root.querySelector('.centerband .vitals-life.life-A');
+    const lifeB = root.querySelector('.centerband .vitals-life.life-B');
+    expect(lifeA).not.toBeNull();
+    expect(lifeB).not.toBeNull();
+    expect(lifeA!.textContent).toContain('生命');
+    // 原来的玩家头部生命显示已移除
+    expect(root.querySelector('.player-life')).toBeNull();
+  });
+
+  it('highlights the pending skill name in the hint with the acting player color', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
+    skipInitialReroll(state);
+    const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
+    gw.activeMarkerSide = 'left';
+    state.players.A.areas.defense = [{ id: 'gd1', value: 4, kind: 'defense' }];
+    dealTrueDamage(state, 'A', 6);
+    renderGame(state, root, hooksFor());
+    const hi = root.querySelector('.hint-phase .hint-skill')!;
+    expect(hi.textContent).toBe('高塔铁幕');
+    expect(hi.classList.contains('player-A')).toBe(true);
+  });
+
+  it('moves 尘印标记 into the meditation area (display only) and drops the header badge', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    state.players.A.hasDustSeal = true;
+    renderGame(state, root, hooksFor());
+    const seal = root.querySelector<HTMLElement>(
+      '.player--self .area[data-kind="meditation"] .area-seal',
+    )!;
+    expect(seal.textContent).toBe('尘印标记');
+    expect(seal.tagName).toBe('SPAN');
+    expect(root.querySelector('.player-header .badge-seal')).toBeNull();
+  });
+
+  it('lays out skill rows horizontally when descriptions are hidden', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.skills--inline')).not.toBeNull();
+    renderGame(state, root, hooksFor(() => {}, { showSkillText: true }));
+    expect(root.querySelector('.skills--inline')).toBeNull();
+  });
+
+  it('removes the 战报 title and the 重开 button (settings stays)', () => {
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    expect(root.querySelector('.log-title')).toBeNull();
+    expect(root.querySelector('.btn-restart')).toBeNull();
+    expect(root.querySelector('.btn-settings')).not.toBeNull();
   });
 
   it('shows count and charge badges when present', () => {
@@ -243,14 +287,17 @@ describe('renderGame (interaction)', () => {
     expect(root.querySelectorAll('.actionlist .btn').length).toBeGreaterThan(0);
   });
 
-  it('puts the operation list and dustfall inside the center band', () => {
+  it('puts the action zone and the vitals bar inside the center band', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
     renderGame(state, root, hooksFor());
     const band = root.querySelector('.centerband')!;
-    expect(band.querySelector('.centerband-left .actionlist')).not.toBeNull();
-    expect(band.querySelector('.centerband-right .dustfall')).not.toBeNull();
+    const zone = band.querySelector('.centerband-left .actionzone')!;
+    // 提示栏与操作栏合并进同一块
+    expect(zone.querySelector('.hint')).not.toBeNull();
+    expect(zone.querySelector('.actionlist')).not.toBeNull();
+    expect(band.querySelector('.centerband-right .vitals-dust')).not.toBeNull();
   });
 
   it('orders dice areas as 防御/攻击/冥想 so the attack area sits in the middle', () => {
