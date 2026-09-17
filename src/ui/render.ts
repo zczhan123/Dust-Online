@@ -527,12 +527,6 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
 
   const label = el('div', 'area-label');
   label.textContent = `${AREA_LABEL[kind]}（${player.areas[kind].length}）`;
-  // 尘印标记：移动到冥想骰区（靠右、仅展示不可点）
-  if (kind === 'meditation' && player.hasDustSeal) {
-    const seal = el('span', 'badge badge-seal area-seal');
-    seal.textContent = '尘印标记';
-    label.appendChild(seal);
-  }
   box.appendChild(label);
 
   const dice = el('div', 'dice');
@@ -612,9 +606,17 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
   }
   box.appendChild(dice);
 
+  // 尘印标记：冥想骰区最右侧（仅展示、不可点）
+  if (kind === 'meditation' && player.hasDustSeal) {
+    const seal = el('span', 'badge badge-seal area-seal');
+    seal.textContent = '尘印标记';
+    box.appendChild(seal);
+  }
+
   return box;
 }
 
+/** 玩家面板：只保留骰区与神器卡（不再显示「玩家A/B」头部——身份由生命值栏呈现） */
 function playerPanel(
   player: PlayerState,
   role: 'enemy' | 'self',
@@ -624,11 +626,6 @@ function playerPanel(
   const panel = el('div', `player player--${role}`);
   panel.dataset.player = player.id;
 
-  const header = el('div', 'player-header');
-  const title = el('span', 'player-title');
-  title.textContent = `玩家${player.id}`;
-  header.appendChild(title);
-
   const cards = el('div', 'cards');
   for (const a of player.artifacts) cards.appendChild(artifactCard(a, ctx));
 
@@ -636,8 +633,8 @@ function playerPanel(
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
   for (const k of order) areas.appendChild(areaBox(k, player, ctx));
 
-  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上（骰区在生命值之上）
-  const seq: HTMLElement[] = role === 'enemy' ? [header, cards, areas] : [areas, cards, header];
+  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上
+  const seq: HTMLElement[] = role === 'enemy' ? [cards, areas] : [areas, cards];
   for (const node of seq) panel.appendChild(node);
 
   return panel;

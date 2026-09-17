@@ -84,14 +84,16 @@ describe('renderGame (read-only snapshot)', () => {
     ]);
   });
 
-  it('puts self dice areas above the life header', () => {
+  it('puts self dice areas above the artifact cards (no player header)', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const self = root.querySelector('.player--self')!;
     expect(self.firstElementChild!.classList.contains('areas')).toBe(true);
-    const header = self.querySelector('.player-header')!;
-    // header 必须排在 areas 之后
+    // 「玩家A/B」头部已移除
+    expect(self.querySelector('.player-header')).toBeNull();
     const order = Array.from(self.children);
-    expect(order.indexOf(self.querySelector('.areas')!)).toBeLessThan(order.indexOf(header));
+    expect(order.indexOf(self.querySelector('.areas')!)).toBeLessThan(
+      order.indexOf(self.querySelector('.cards')!),
+    );
   });
 
   it('renders dice in three areas per player', () => {
@@ -180,8 +182,8 @@ describe('renderGame (read-only snapshot)', () => {
     expect(lifeA!.textContent).toContain('生命');
     // 原来的玩家头部生命显示已移除
     expect(root.querySelector('.player-life')).toBeNull();
-    // 颜色圆圈：从玩家头部移到生命值栏
-    expect(root.querySelector('.player-header .dot')).toBeNull();
+    // 颜色圆圈：从玩家头部移到生命值栏（头部已整体移除）
+    expect(root.querySelector('.player-header')).toBeNull();
     expect(root.querySelector('.vitals .dot-A')).not.toBeNull();
     expect(root.querySelector('.vitals .dot-B')).not.toBeNull();
   });
@@ -224,7 +226,10 @@ describe('renderGame (read-only snapshot)', () => {
     )!;
     expect(seal.textContent).toBe('尘印标记');
     expect(seal.tagName).toBe('SPAN');
-    expect(root.querySelector('.player-header .badge-seal')).toBeNull();
+    // 冥想骰区内的最右元素（右对齐）
+    const area = root.querySelector('.player--self .area[data-kind="meditation"]')!;
+    expect(area.lastElementChild).toBe(seal);
+    expect(root.querySelector('.player-header')).toBeNull();
   });
 
   it('lays out skill rows horizontally when descriptions are hidden', () => {
