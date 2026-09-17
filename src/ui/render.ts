@@ -427,21 +427,19 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   // 卡片头部同样可点击/长按查看技能详情（省略卡图时这是唯一入口）
   attachDetailTrigger(head, ctx, a.id);
 
-  // 卡图（可省略）；无论如何，卡片头部都可点击/长按查看技能详情
-  if (ctx.prefs.cardArt !== 'none') {
-    const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
-    const artImg = document.createElement('img');
-    artImg.className = 'card-art-img';
-    artImg.src = `/cards/${a.id}.jpg`;
-    artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
-    artImg.addEventListener('error', () => {
-      art.classList.add('card-art--missing');
-      art.textContent = '（卡图占位）';
-    });
-    art.appendChild(artImg);
-    attachDetailTrigger(art, ctx, a.id);
-    card.appendChild(art);
-  }
+  // 卡图（缩略 / 完整）；卡片头部也可点击/长按查看技能详情
+  const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
+  const artImg = document.createElement('img');
+  artImg.className = 'card-art-img';
+  artImg.src = `/cards/${a.id}.jpg`;
+  artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
+  artImg.addEventListener('error', () => {
+    art.classList.add('card-art--missing');
+    art.textContent = '（卡图占位）';
+  });
+  art.appendChild(artImg);
+  attachDetailTrigger(art, ctx, a.id);
+  card.appendChild(art);
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
@@ -1517,7 +1515,6 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   row('卡图', [
     { text: '缩略', on: ui.prefs.cardArt === 'thumb', onClick: () => setPref(ctx, 'cardArt', 'thumb') },
     { text: '完整', on: ui.prefs.cardArt === 'full', onClick: () => setPref(ctx, 'cardArt', 'full') },
-    { text: '省略', on: ui.prefs.cardArt === 'none', onClick: () => setPref(ctx, 'cardArt', 'none') },
   ]);
   row('界面密度', [
     { text: '紧凑', on: ui.prefs.density === 'compact', onClick: () => setPref(ctx, 'density', 'compact') },

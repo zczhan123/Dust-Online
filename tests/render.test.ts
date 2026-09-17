@@ -330,15 +330,15 @@ describe('renderGame (read-only snapshot)', () => {
       )!;
     };
 
-    // 触屏模式：舒适密度 + 战报收起 + 省略卡图 + 技能隐藏
+    // 触屏模式：舒适密度 + 战报收起 + 缩略卡图 + 技能隐藏
     rowBtn('预设组合', '触屏模式').click();
     expect(ui.prefs.preset).toBe('touch');
     expect(ui.prefs.density).toBe('comfortable');
     expect(ui.prefs.logCollapsed).toBe(true);
-    expect(ui.prefs.cardArt).toBe('none');
+    expect(ui.prefs.cardArt).toBe('thumb');
     expect(ui.prefs.showSkillText).toBe(false);
-    // 省略卡图后仍可从卡片头部打开技能详情
-    expect(root.querySelectorAll('.card-art').length).toBe(0);
+    expect(root.querySelectorAll('.card-art--thumb').length).toBeGreaterThan(0);
+    // 卡片头部同样可打开技能详情
     expect(root.querySelector('.card .card-head.detail-trigger')).not.toBeNull();
 
     // 手动改单项 → 自定义
