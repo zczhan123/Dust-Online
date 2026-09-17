@@ -247,6 +247,21 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.btn-settings')).not.toBeNull();
   });
 
+  it('tags each panel with its player id so the accent line follows the player color', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const tag = (sel: string) => root.querySelector<HTMLElement>(sel)!.dataset.player;
+
+    renderGame(state, root, hooksFor());
+    expect(tag('.player--self')).toBe('A');
+    expect(tag('.player--enemy')).toBe('B');
+
+    // 回合切换后：上下两块交换角色，玩家 id 也随之更新（CSS 由此决定线条颜色）
+    state.activePlayer = 'B';
+    renderGame(state, root, hooksFor());
+    expect(tag('.player--self')).toBe('B');
+    expect(tag('.player--enemy')).toBe('A');
+  });
+
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
     const state = createGame({
       seed: 1,

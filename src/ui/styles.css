@@ -77,8 +77,11 @@ body {
   border-radius: 10px;
   padding: 8px 10px;
 }
-.player--enemy { border-top: 3px solid #b75b5b; }
-.player--self { border-bottom: 3px solid #3f7fa6; }
+/* 面板顶/底的那条线 = 该面板所属玩家的颜色（A 蓝 / B 红）；随上下角色自动跟随 */
+.player[data-player='A'] { --pc: #2563eb; }
+.player[data-player='B'] { --pc: #dc2626; }
+.player--enemy { border-top: 3px solid var(--pc, #b75b5b); }
+.player--self { border-bottom: 3px solid var(--pc, #3f7fa6); }
 
 .player-header {
   display: flex;
