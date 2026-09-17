@@ -1,16 +1,24 @@
-import type { GameState, PlayerId } from '../model/types';
+import type { Artifact, GameState, PlayerId, PlayerState } from '../model/types';
 import { hasActiveSkill } from './skill-state';
 import { paySlots, type SlotFill } from './effects';
 import { logLine, pname } from './log';
+
+/** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
+export function artifactWithSkill(p: PlayerState, key: string): Artifact | undefined {
+  return p.artifacts.find((a) => a.skills.some((s) => s.key === key));
+}
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
   const p = g.players[player];
   const adds = p.buffs.filter((b) => b.attr === 'attackDamage').map((b) => b.add);
   const buffMax = adds.length ? Math.max(...adds) : 0;
-  const fengmang = hasActiveSkill(p, 'buxiang.fengmang')
-    ? p.artifacts.find((a) => a.id === '004')?.count ?? 0
-    : 0;
-  return Math.max(buffMax, fengmang);
+  // 004 锋芒（持续）：攻击伤害 + 淬炼计数
+  const fmArt = artifactWithSkill(p, 'buxiang.fengmang');
+  const fengmang = hasActiveSkill(p, 'buxiang.fengmang') ? fmArt?.count ?? 0 : 0;
+  // 015 绝境天神（持续）：攻击伤害 + 计数
+  const cxArt = artifactWithSkill(p, 'canxiang.juejing');
+  const canxiang = hasActiveSkill(p, 'canxiang.juejing') ? cxArt?.count ?? 0 : 0;
+  return Math.max(buffMax, fengmang, canxiang);
 }
 
 export function checkLifeEnd(g: GameState): void {

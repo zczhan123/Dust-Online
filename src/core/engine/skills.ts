@@ -416,4 +416,17 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       logLine(g, `${pname(player)} 发动必杀「梦醒时分」：将 ${ids.length} 颗冥想骰移动到「${to === 'attack' ? '攻击' : '防御'}骰区」（保留点数）`);
     },
   },
+  // 015 残响·必杀 绝境天神：当前生命每比初始生命低 10 点，计数 +1（向下取整，最高 4 层）
+  'canxiang.juejing.ultimate': {
+    run({ g, player, artifact }) {
+      const p = g.players[player];
+      const missing = Math.max(0, p.lifeMax - p.life);
+      const layers = Math.min(4, Math.floor(missing / 10));
+      artifact.count = layers;
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「绝境天神」：计数设为 ${layers}（生命 ${p.life}/${p.lifeMax}，每低 10 点计数 +1，上限 4）`,
+      );
+    },
+  },
 };

@@ -59,6 +59,13 @@ export function beginTurn(g: GameState): void {
 export function endTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
   const p = g.players[g.activePlayer];
+  // 015 残响·持续：每当你的回合结束时，本神器计数下降 1 点（最低 0；充能层数不受影响）
+  const cx = p.artifacts.find((a) => a.skills.some((s) => s.key === 'canxiang.juejing'));
+  if (cx && hasActiveSkill(p, 'canxiang.juejing') && cx.count > 0) {
+    const before = cx.count;
+    cx.count -= 1;
+    logLine(g, `「${cx.name}」：回合结束，计数 ${before} → ${cx.count}`);
+  }
   p.buffs = p.buffs.filter((b) => b.duration !== 'thisTurn');
   g.firstRound[g.activePlayer] = false;
   g.activePlayer = g.activePlayer === 'A' ? 'B' : 'A';
@@ -198,6 +205,27 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         if (anyDie) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id, x: 1 } });
       } else if (s.key === 'mingjing.ultimate') {
         acts.push({ t: 'skill', artifactId: a.id, side: s.side });
+      } else if (s.key === 'canxiang.juejing.ultimate') {
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side });
+      } else if (s.key === 'chengjie.jinghua') {
+        const opp: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
+        const pick = g.players[opp].areas.attack
+          .concat(g.players[opp].areas.defense, g.players[opp].areas.meditation)
+          .filter((d) => d.value === 1);
+        acts.push({
+          t: 'skill',
+          artifactId: a.id,
+          side: s.side,
+          params: { targetDieIds: pick.slice(0, 2).map((d) => d.id) },
+        });
+      } else if (s.key === 'chengjie.shuzui') {
+        const pick = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].filter((d) => d.value === 1);
+        acts.push({
+          t: 'skill',
+          artifactId: a.id,
+          side: s.side,
+          params: { targetDieIds: pick.slice(0, 2).map((d) => d.id) },
+        });
       } else if (s.key === 'wansha.ultimate') {
         const atk = p.areas.attack[0];
         if (atk) {

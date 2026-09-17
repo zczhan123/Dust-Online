@@ -39,6 +39,42 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
     { side: 'only', kind: 'continuous', key: 'monv.awaken' },
     { side: 'only', kind: 'ultimate', key: 'monv.ultimate' },
   ] },
+  '013': {
+    id: '013',
+    name: '鸣雷',
+    weapon: '长枪',
+    column: 1,
+    speed: 3,
+    will: 9,
+    skills: [
+      { side: 'left', kind: 'trigger', key: 'minglei.dianxing' },
+      { side: 'right', kind: 'trigger', key: 'minglei.leibao.trigger' },
+      { side: 'right', kind: 'continuous', key: 'minglei.leibao.continuous' },
+    ],
+  },
+  '014': {
+    id: '014',
+    name: '惩戒',
+    weapon: '手甲',
+    column: 2,
+    distribution: { defense: [1, 4], attack: [2, 6], meditation: [3, 5] },
+    skills: [
+      { side: 'left', kind: 'activation', key: 'chengjie.jinghua' },
+      { side: 'right', kind: 'activation', key: 'chengjie.shuzui' },
+    ],
+  },
+  '015': {
+    id: '015',
+    name: '残响',
+    weapon: '项链',
+    column: 3,
+    life: 50,
+    chargeReq: 2,
+    skills: [
+      { side: 'only', kind: 'continuous', key: 'canxiang.juejing' },
+      { side: 'only', kind: 'ultimate', key: 'canxiang.juejing.ultimate' },
+    ],
+  },
 };
 
 export function makeArtifact(id: string): Artifact {
@@ -67,4 +103,5 @@ export const HEROES = {
   ying: { name: '永暗之刃 影', artifacts: ['004', '005', '006'] },
   batton: { name: '孤塔之王 巴顿二世', artifacts: ['007', '008', '009'] },
   tata: { name: '地狱的魔女 塔塔萝丝', artifacts: ['010', '011', '012'] },
+  zoray: { name: '轰鸣审判官 佐雷', artifacts: ['013', '014', '015'] },
 } as const;

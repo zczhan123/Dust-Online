@@ -32,6 +32,7 @@ function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } 
     will = Math.max(will, 1);
   }
   if (hasActiveSkill(p, 'tiebi.chariot')) will = Math.max(will, 1);
+  if (hasActiveSkill(p, 'canxiang.juejing')) will = Math.max(will, 1);
   return { speed, will };
 }
 
