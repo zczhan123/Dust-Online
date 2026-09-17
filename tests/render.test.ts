@@ -12,7 +12,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   convertPick: null,
   fengmangPick: null,
   dustFlow: null,
-  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, ...prefs },
+  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, zoomMode: 'off', zoomPercent: 90, ...prefs },
   settingsOpen: false,
   logOpen: false,
   detail: null,
@@ -330,22 +330,67 @@ describe('renderGame (read-only snapshot)', () => {
       )!;
     };
 
-    // 触屏模式：密度=舒适、战报收起
+    // 触屏模式：舒适密度 + 战报收起 + 省略卡图 + 技能隐藏
     rowBtn('预设组合', '触屏模式').click();
     expect(ui.prefs.preset).toBe('touch');
     expect(ui.prefs.density).toBe('comfortable');
     expect(ui.prefs.logCollapsed).toBe(true);
+    expect(ui.prefs.cardArt).toBe('none');
+    expect(ui.prefs.showSkillText).toBe(false);
+    // 省略卡图后仍可从卡片头部打开技能详情
+    expect(root.querySelectorAll('.card-art').length).toBe(0);
+    expect(root.querySelector('.card .card-head.detail-trigger')).not.toBeNull();
 
     // 手动改单项 → 自定义
     rowBtn('卡图', '完整').click();
     expect(ui.prefs.preset).toBe('custom');
-    expect(root.querySelector('.settings-row .settings-opt')!.textContent).toBeDefined();
 
-    // 电脑模式：密度=紧凑、战报显示
+    // 电脑模式：紧凑密度 + 战报显示 + 完整卡图 + 技能显示
     rowBtn('预设组合', '电脑模式').click();
     expect(ui.prefs.preset).toBe('desktop');
     expect(ui.prefs.density).toBe('compact');
     expect(ui.prefs.logCollapsed).toBe(false);
+    expect(ui.prefs.cardArt).toBe('full');
+    expect(ui.prefs.showSkillText).toBe(true);
+    expect(root.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
+  });
+
+  it('applies the 整屏缩放 setting (off / auto / manual with percent)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const ui = freshUi();
+    let hooks: RenderHooks;
+    hooks = {
+      ui,
+      onAction: () => {},
+      propose: () => {},
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+    };
+    renderGame(state, root, hooks);
+    expect(root.querySelector('.stage')).not.toBeNull();
+    expect(root.querySelector<HTMLElement>('.stage')!.style.transform).toBe('');
+
+    root.querySelector<HTMLButtonElement>('.btn-settings')!.click();
+    const rowBtn = (label: string, text: string) => {
+      const row = Array.from(root.querySelectorAll<HTMLElement>('.settings-row')).find(
+        (r) => r.querySelector('.settings-label')!.textContent === label,
+      )!;
+      return Array.from(row.querySelectorAll<HTMLButtonElement>('.settings-opt')).find(
+        (b) => b.textContent === text,
+      )!;
+    };
+
+    rowBtn('整屏缩放', '手动').click();
+    expect(ui.prefs.zoomMode).toBe('manual');
+    expect(root.querySelector<HTMLElement>('.stage')!.style.transform).toBe('scale(0.9)');
+
+    rowBtn('缩放比例 90%', '缩小').click();
+    expect(ui.prefs.zoomPercent).toBe(85);
+    expect(root.querySelector<HTMLElement>('.stage')!.style.transform).toBe('scale(0.85)');
+
+    rowBtn('整屏缩放', '关').click();
+    expect(ui.prefs.zoomMode).toBe('off');
+    expect(root.querySelector<HTMLElement>('.stage')!.style.transform).toBe('');
   });
 
   it('uses the bottom-sheet form of the detail popover on narrow screens', () => {
@@ -605,14 +650,18 @@ describe('renderGame (interaction)', () => {
     const reset = root.querySelector<HTMLButtonElement>('[data-act="settingsReset"]')!;
     reset.click();
     expect(ui.prefs).toEqual({
-      showSkillText: false,
-      cardArt: 'thumb',
+      showSkillText: true,
+      cardArt: 'full',
       density: 'compact',
       mirrorEnemy: false,
       preset: 'desktop',
       logCollapsed: false,
+      zoomMode: 'off',
+      zoomPercent: 90,
     });
-    expect(root.querySelectorAll('.skill-text').length).toBe(0);
+    // 恢复默认 = 电脑模式（技能显示 + 完整卡图）
+    expect(root.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
+    expect(root.querySelectorAll('.card-art--thumb').length).toBe(0);
 
     // 关闭
     root.querySelector<HTMLButtonElement>('.settings-close')!.click();

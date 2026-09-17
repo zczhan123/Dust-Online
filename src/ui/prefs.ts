@@ -1,37 +1,47 @@
 /** 界面偏好（与对局状态解耦，存 localStorage） */
 export interface Prefs {
-  /** 是否在卡面显示技能描述（默认：隐藏，仅显示技能名） */
+  /** 是否在卡面显示技能描述 */
   showSkillText: boolean;
   /** 卡图尺寸 */
-  cardArt: 'thumb' | 'full';
+  cardArt: 'thumb' | 'full' | 'none';
   /** 界面密度 */
   density: 'compact' | 'comfortable';
-  /** 镜像神器摆放：敌方按「列3、列2、列1」显示（默认关） */
+  /** 镜像神器摆放：敌方按「列3、列2、列1」显示 */
   mirrorEnemy: boolean;
   /** 当前预设组合（改任一单项即转为 custom） */
   preset: PresetId;
   /** 战报栏是否收起（收起后由贴边按钮拉出抽屉） */
   logCollapsed: boolean;
+  /** 整屏缩放：关 / 自动 / 手动 */
+  zoomMode: 'off' | 'auto' | 'manual';
+  /** 手动缩放百分比（80–100） */
+  zoomPercent: number;
 }
 
 export type PresetId = 'desktop' | 'touch' | 'custom';
 
-/** 电脑模式建议组合 */
-export const DESKTOP_PRESET: Omit<Prefs, 'preset'> = {
-  showSkillText: false,
-  cardArt: 'thumb',
+type PresetValues = Omit<Prefs, 'preset'>;
+
+/** 电脑模式建议组合：紧凑 + 战报显示 + 完整卡图 + 技能显示 */
+export const DESKTOP_PRESET: PresetValues = {
+  showSkillText: true,
+  cardArt: 'full',
   density: 'compact',
   mirrorEnemy: false,
   logCollapsed: false,
+  zoomMode: 'off',
+  zoomPercent: 90,
 };
 
-/** 触屏/手机建议组合（字与点按目标更大；战报收起） */
-export const TOUCH_PRESET: Omit<Prefs, 'preset'> = {
+/** 触屏/手机建议组合：舒适 + 战报收起 + 省略卡图 + 技能隐藏 */
+export const TOUCH_PRESET: PresetValues = {
   showSkillText: false,
-  cardArt: 'thumb',
+  cardArt: 'none',
   density: 'comfortable',
   mirrorEnemy: false,
   logCollapsed: true,
+  zoomMode: 'off',
+  zoomPercent: 90,
 };
 
 export const DEFAULT_PREFS: Prefs = { ...DESKTOP_PRESET, preset: 'desktop' };
@@ -44,6 +54,8 @@ export function clonePrefs(p: Prefs): Prefs {
     mirrorEnemy: p.mirrorEnemy,
     preset: p.preset,
     logCollapsed: p.logCollapsed,
+    zoomMode: p.zoomMode,
+    zoomPercent: p.zoomPercent,
   };
 }
 
@@ -81,10 +93,18 @@ export function loadPrefs(): Prefs {
     const data = JSON.parse(raw) as Partial<Prefs>;
     const out = fresh;
     if (typeof data?.showSkillText === 'boolean') out.showSkillText = data.showSkillText;
-    if (data?.cardArt === 'thumb' || data?.cardArt === 'full') out.cardArt = data.cardArt;
+    if (data?.cardArt === 'thumb' || data?.cardArt === 'full' || data?.cardArt === 'none') {
+      out.cardArt = data.cardArt;
+    }
     if (data?.density === 'compact' || data?.density === 'comfortable') out.density = data.density;
     if (typeof data?.mirrorEnemy === 'boolean') out.mirrorEnemy = data.mirrorEnemy;
     if (typeof data?.logCollapsed === 'boolean') out.logCollapsed = data.logCollapsed;
+    if (data?.zoomMode === 'off' || data?.zoomMode === 'auto' || data?.zoomMode === 'manual') {
+      out.zoomMode = data.zoomMode;
+    }
+    if (typeof data?.zoomPercent === 'number') {
+      out.zoomPercent = Math.min(100, Math.max(50, Math.round(data.zoomPercent)));
+    }
     if (data?.preset === 'desktop' || data?.preset === 'touch' || data?.preset === 'custom') {
       out.preset = data.preset;
     }

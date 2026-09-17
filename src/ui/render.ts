@@ -424,19 +424,24 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     head.appendChild(count);
   }
   card.appendChild(head);
+  // 卡片头部同样可点击/长按查看技能详情（省略卡图时这是唯一入口）
+  attachDetailTrigger(head, ctx, a.id);
 
-  const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
-  const artImg = document.createElement('img');
-  artImg.className = 'card-art-img';
-  artImg.src = `/cards/${a.id}.jpg`;
-  artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
-  artImg.addEventListener('error', () => {
-    art.classList.add('card-art--missing');
-    art.textContent = '（卡图占位）';
-  });
-  art.appendChild(artImg);
-  attachDetailTrigger(art, ctx, a.id);
-  card.appendChild(art);
+  // 卡图（可省略）；无论如何，卡片头部都可点击/长按查看技能详情
+  if (ctx.prefs.cardArt !== 'none') {
+    const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
+    const artImg = document.createElement('img');
+    artImg.className = 'card-art-img';
+    artImg.src = `/cards/${a.id}.jpg`;
+    artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
+    artImg.addEventListener('error', () => {
+      art.classList.add('card-art--missing');
+      art.textContent = '（卡图占位）';
+    });
+    art.appendChild(artImg);
+    attachDetailTrigger(art, ctx, a.id);
+    card.appendChild(art);
+  }
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
@@ -1512,6 +1517,7 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   row('卡图', [
     { text: '缩略', on: ui.prefs.cardArt === 'thumb', onClick: () => setPref(ctx, 'cardArt', 'thumb') },
     { text: '完整', on: ui.prefs.cardArt === 'full', onClick: () => setPref(ctx, 'cardArt', 'full') },
+    { text: '省略', on: ui.prefs.cardArt === 'none', onClick: () => setPref(ctx, 'cardArt', 'none') },
   ]);
   row('界面密度', [
     { text: '紧凑', on: ui.prefs.density === 'compact', onClick: () => setPref(ctx, 'density', 'compact') },
@@ -1534,6 +1540,32 @@ function settingsPanel(ctx: Ctx): HTMLElement {
     { text: '显示', on: !ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', false) },
     { text: '收起', on: ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', true) },
   ]);
+  row('整屏缩放', [
+    { text: '关', on: ui.prefs.zoomMode === 'off', onClick: () => setPref(ctx, 'zoomMode', 'off') },
+    { text: '自动', on: ui.prefs.zoomMode === 'auto', onClick: () => setPref(ctx, 'zoomMode', 'auto') },
+    { text: '手动', on: ui.prefs.zoomMode === 'manual', onClick: () => setPref(ctx, 'zoomMode', 'manual') },
+  ]);
+  if (ui.prefs.zoomMode === 'manual') {
+    const r = el('div', 'settings-row');
+    const lab = el('span', 'settings-label');
+    lab.textContent = `缩放比例 ${ui.prefs.zoomPercent}%`;
+    r.appendChild(lab);
+    const wrap = el('div', 'settings-opts');
+    const mk = (text: string, delta: number): void => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn settings-opt';
+      b.textContent = text;
+      b.addEventListener('click', () =>
+        setPref(ctx, 'zoomPercent', Math.min(100, Math.max(50, ui.prefs.zoomPercent + delta))),
+      );
+      wrap.appendChild(b);
+    };
+    mk('缩小', -5);
+    mk('放大', +5);
+    r.appendChild(wrap);
+    box.appendChild(r);
+  }
 
   const actions = el('div', 'settings-actions');
   const reset = document.createElement('button');
@@ -2219,6 +2251,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   };
 
   root.innerHTML = '';
+  const stage = el('div', 'stage');
   const app = el(
     'div',
     `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}`,
@@ -2282,7 +2315,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   main.appendChild(playerPanel(state.players[selfId], 'self', false, ctx));
   app.appendChild(main);
 
-  root.appendChild(app);
+  stage.appendChild(app);
+  root.appendChild(stage);
 
   if (state.phase === 'gameOver') {
     root.appendChild(gameOverModal(ctx));
@@ -2297,4 +2331,28 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     const pop = detailPopover(ctx);
     if (pop) root.appendChild(pop);
   }
+  applyZoom(stage, hooks.ui.prefs);
+}
+
+/** 整屏缩放：关 / 自动（内容高于视口时缩到一屏，下限 0.8）/ 手动 */
+function applyZoom(stage: HTMLElement, prefs: Prefs): void {
+  if (prefs.zoomMode === 'off') {
+    stage.style.transform = '';
+    stage.style.width = '';
+    return;
+  }
+  // 先复位再测量，避免以缩放后的尺寸计算
+  stage.style.transform = 'none';
+  stage.style.width = '100%';
+  let k = 1;
+  if (prefs.zoomMode === 'manual') {
+    k = Math.min(1, Math.max(0.5, prefs.zoomPercent / 100));
+  } else {
+    const h = stage.scrollHeight || 0;
+    const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
+    if (h > 0 && vh > 0 && h > vh) k = Math.max(0.8, Math.min(1, vh / h));
+  }
+  stage.style.transformOrigin = 'top left';
+  stage.style.transform = `scale(${k})`;
+  stage.style.width = `${100 / k}%`;
 }

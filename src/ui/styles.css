@@ -1021,3 +1021,6 @@ button.pay-die {
   .sidebar-head { display: none; }
   .detail-popover { font-size: 14px; }
 }
+
+/* 整屏缩放容器（transform 施加在 .stage 上；浮层不受影响） */
+.stage { width: 100%; }
