@@ -423,11 +423,16 @@ button.pay-die {
   border: 1px solid #9dc0e0;
   border-radius: 10px;
   padding: 8px 12px;
+  /* 横向流式：第一行标题（独占），第二行骰片 + 取消/确认 */
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
 }
 .selector-head {
+  flex: 1 1 100%; /* 独占第一行 */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -662,11 +667,16 @@ button.pay-die {
   border: 1px solid #9dc0e0;
   border-radius: 10px;
   padding: 8px 12px;
+  /* 横向流式：第一行标题（独占），第二行骰片 + 按钮 */
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
 }
 .paypanel-head {
+  flex: 1 1 100%; /* 独占第一行 */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -786,8 +796,16 @@ button.pay-die {
 }
 .pay-actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
 }
+/* 骰片行：第二行左（可收缩，放不下才换行） */
+.pay-dice { flex: 0 1 auto; min-width: 0; }
+/* 尘起支付面板的文本：可收缩 + 可断行（不靠裁剪兜底） */
+.dustflow-title,
+.dustflow-hint,
+.dustflow-label,
+.dustflow-empty { min-width: 0; overflow-wrap: anywhere; }
 /* 尘起流程面板：标题/提示与按钮同排，压缩纵向空间 */
 .dustflow {
   background: #fdf6e6;
@@ -1070,8 +1088,7 @@ button.pay-die {
 }
 .confirm-row { flex-wrap: wrap; }
 .actionlist,
-.confirm-row,
-.selector { min-height: 40px; }
+.confirm-row { min-height: 40px; }
 .confirm-label { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .confirm-row .btn { flex: 0 0 auto; }
 /* 生命值栏：宽度固定（不影响左侧），高度拉伸到与「快速操作栏」齐平；内容垂直居中 */
@@ -1086,20 +1103,9 @@ button.pay-die {
 .skill-part--spent { background: #cfd4db; border-left-color: var(--on); opacity: 0.95; }
 .badge-active--spent { background: #d1d5db; color: #4b5563; }
 
-/* 中央操作区：设定最小高度，进出面板时高度不跳变（只加高度，不改任何对齐/方向） */
-:root { --actionzone-min-h: 92px; }
-.actionzone { min-height: var(--actionzone-min-h); }
-.actionzone .actionlist,
-.actionzone .confirm-row,
-.actionzone .convertpick,
-.actionzone .selector,
-.actionzone .paypanel,
-.actionzone .dustflow {
-  min-height: 44px;
-}
-
-/* 其他含动态长文案的控件：可收缩 + 可断行 */
+/* 其他含动态长文案的控件：可收缩 + 可断行（正解：不靠裁剪兜底） */
 .convertpick-title,
 .convertpick-hint { min-width: 0; overflow-wrap: anywhere; }
-/* 安全网：操作区裁剪溢出，任何内容都不会再把「快速操作栏」顶宽 */
-.actionzone { overflow: hidden; }
+
+
+
