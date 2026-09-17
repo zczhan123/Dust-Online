@@ -170,6 +170,39 @@ describe('effects primitives', () => {
       expect(g.players.A.areas.defense).toHaveLength(0);
     });
 
+    it('logs a 「真实之剑」置换 line for a single converted slot', () => {
+      const g = setup();
+      g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+      g.players.A.areas.defense = [{ id: 'd1', value: 6, kind: 'defense' }];
+      paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a1', 'd1'] }]);
+      const last = g.log[g.log.length - 1].text;
+      expect(last).toContain('使用「真实之剑」置换');
+      expect(last).toContain('消耗 2 颗能力骰（2/6）');
+      expect(last).toContain('视为 1 颗攻击骰（点数按 5）');
+    });
+
+    it('logs a multi-slot 置换 summary line', () => {
+      const g = setup();
+      g.players.A.areas.attack = [
+        { id: 'a1', value: 1, kind: 'attack' },
+        { id: 'a2', value: 2, kind: 'attack' },
+      ];
+      g.players.A.areas.meditation = [
+        { id: 'm1', value: 3, kind: 'meditation' },
+        { id: 'm2', value: 4, kind: 'meditation' },
+      ];
+      paySlots(
+        g,
+        'A',
+        [{ kind: 'attack' }, { kind: 'attack' }],
+        [{ dieIds: ['a1', 'm1'] }, { dieIds: ['a2', 'm2'] }],
+      );
+      const last = g.log[g.log.length - 1].text;
+      expect(last).toContain('置换 2 格');
+      expect(last).toContain('另耗 4 颗任意能力骰：1/3/2/4');
+      expect(last).toContain('视为 2 颗攻击骰（点数按 5）');
+    });
+
     it('supports mixed real + converted slots', () => {
       const g = setup();
       g.players.A.areas.attack = [

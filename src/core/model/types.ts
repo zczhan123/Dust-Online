@@ -81,6 +81,8 @@ export interface Buff {
   attr: 'speed' | 'will' | 'attackDamage';
   add: number;
   duration: 'thisTurn' | 'permanent';
+  /** 显示用来源（技能名），仅用于文案；未填则文案只显示数值 */
+  source?: string;
 }
 
 export interface SkillDef {

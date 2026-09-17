@@ -473,6 +473,56 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.hint-phase')!.textContent).toContain('雷暴');
   });
 
+  it('block prompt shows real damage, bonus source and 请选择', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
+    skipInitialReroll(state);
+    const hint = () => root.querySelector('.hint-phase')!.textContent ?? '';
+    const setPA = (over: Record<string, unknown>): void => {
+      state.pendingAttack = {
+        attacker: 'A',
+        value: 3,
+        unblockable: false,
+        physical: true,
+        sourceDieId: 'sd',
+        sourceValue: 3,
+        ...over,
+      };
+      renderGame(state, root, hooksFor());
+    };
+
+    // 无加成
+    setPA({});
+    expect(hint()).toBe('被 3 点攻击骰攻击，本次 3 伤害；请选择');
+
+    // 计数类加成（004 锋芒）
+    const fm = state.players.A.artifacts.find((a) => a.id === '004')!;
+    fm.activeMarkerSide = 'right';
+    fm.count = 2;
+    setPA({ value: 5 });
+    expect(hint()).toBe('被 3 点攻击骰攻击，本次 5 伤害（「锋芒」加成 2 伤害）；请选择');
+
+    // 普通增益（带来源 008 王家之拳）
+    fm.activeMarkerSide = null;
+    fm.count = 0;
+    state.players.A.buffs.push({
+      attr: 'attackDamage',
+      add: 1,
+      duration: 'thisTurn',
+      source: '王家之拳',
+    });
+    setPA({ value: 4 });
+    expect(hint()).toBe('被 3 点攻击骰攻击，本次 4 伤害（「王家之拳」加成 1 伤害）；请选择');
+    state.players.A.buffs = [];
+
+    // 不可抵挡
+    setPA({ unblockable: true });
+    expect(hint()).toBe('被 3 点攻击骰攻击，本次 3 伤害（不可抵挡）；请选择');
+
+    // 虚拟攻击（无攻击骰）
+    setPA({ sourceDieId: undefined, sourceValue: undefined, physical: false });
+    expect(hint()).toBe('本次 3 伤害（技能攻击，无攻击骰）；请选择');
+  });
+
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
     const state = createGame({
       seed: 1,

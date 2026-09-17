@@ -137,7 +137,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           p.areas.defense.push(d);
         }
       }
-      p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn' });
+      p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '龙腾万丈' });
       logLine(
         g,
         `${pname(player)} 发动「龙腾万丈」：消耗 3 颗冥想骰（${vals(effective)}），获得 4 颗能力骰（${vals(
@@ -419,7 +419,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const missing = 2 - validDef.length;
       if (missing > 0) dealTrueDamage(g, player, missing * 2);
       for (let i = 0; i < 4; i++) p.areas.defense.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'defense' });
-      p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn' });
+      p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '王家之拳' });
       logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰，本回合攻击伤害 +1`);
     },
   },

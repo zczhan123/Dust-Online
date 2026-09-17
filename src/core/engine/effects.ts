@@ -8,6 +8,9 @@ import type {
   SlotSpec,
 } from '../model/types';
 import { newDieId } from '../model/dice';
+import { logLine, pname } from './log';
+
+const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
 export type { EffectiveDie, SlotFill, SlotSpec } from '../model/types';
 
@@ -67,6 +70,7 @@ export function paySlots(
   const used = new Set<string>();
   const effective: EffectiveDie[] = [];
   const toRemove: string[] = [];
+  const converted: { kind: DiceKind; values: number[] }[] = [];
   for (let i = 0; i < spec.length; i++) {
     const { kind } = spec[i];
     const ids = fills[i]?.dieIds ?? [];
@@ -81,6 +85,7 @@ export function paySlots(
       if (found.kind !== kind) throw new Error(`slot needs a ${kind} die, got ${found.kind}`);
       effective.push({ kind, value: found.die.value, source: 'real', realIds: [ids[0]] });
     } else {
+      converted.push({ kind, values: ids.map((id) => findDieOf(g, player, id)?.die.value ?? 0) });
       effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
     }
     toRemove.push(...ids);
@@ -89,6 +94,22 @@ export function paySlots(
   for (const id of toRemove) {
     for (const k of KINDS) {
       g.players[player].areas[k] = g.players[player].areas[k].filter((d) => d.id !== id);
+    }
+  }
+  // 「真实之剑」置换留痕（战报）
+  if (converted.length > 0) {
+    const kindCn = kindCnOf(converted[0].kind);
+    if (converted.length === 1) {
+      logLine(
+        g,
+        `${pname(player)} 使用「真实之剑」置换：消耗 2 颗能力骰（${converted[0].values.join('/')}）→ 视为 1 颗${kindCn}骰（点数按 5）`,
+      );
+    } else {
+      const allVals = converted.flatMap((c) => c.values);
+      logLine(
+        g,
+        `${pname(player)} 使用「真实之剑」置换：置换 ${converted.length} 格（另耗 ${allVals.length} 颗任意能力骰：${allVals.join('/')}）→ 视为 ${converted.length} 颗${kindCn}骰（点数按 5）`,
+      );
     }
   }
   reportConsumed?.(spec.length);

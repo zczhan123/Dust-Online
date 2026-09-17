@@ -12,6 +12,7 @@ import type {
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
 import { hasActiveSkill } from '../core/engine/skill-state';
+import { attackDamageBonus } from '../core/engine/combat';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, type Prefs } from './prefs';
 
@@ -738,7 +739,20 @@ function phaseHint(ctx: Ctx): HintPart[] {
     ];
   }
   if (state.pendingAttack) {
-    return [{ text: '对方可抵挡：在操作列表选「抵挡：用 X 点防御骰」或「不抵挡」。' }];
+    const pa = state.pendingAttack;
+    const bonus = attackDamageBonus(state, pa.attacker);
+    const parts: HintPart[] = [];
+    if (pa.sourceValue !== undefined) {
+      parts.push({ text: `被 ${pa.sourceValue} 点攻击骰攻击，本次 ${pa.value} 伤害` });
+    } else {
+      parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰）` });
+    }
+    if (bonus.value > 0) {
+      parts.push({ text: `（${bonus.label ? `「${bonus.label}」` : ''}加成 ${bonus.value} 伤害）` });
+    }
+    if (pa.unblockable) parts.push({ text: '（不可抵挡）' });
+    parts.push({ text: '；请选择' });
+    return parts;
   }
   switch (state.phase) {
     case 'initialReroll':

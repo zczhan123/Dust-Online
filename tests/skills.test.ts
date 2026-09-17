@@ -4,6 +4,40 @@ import { totalDice, effectiveWill } from '../src/core/engine/derive';
 import { virtualAttack } from '../src/core/engine/combat';
 import { applyTurnStartEffects } from '../src/core/engine/skills';
 
+describe('真实之剑置换（战报留痕）', () => {
+  it('置换攻击：战报记录一条「真实之剑」置换', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    g.players.A.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    g.players.A.areas.meditation = [{ id: 'm1', value: 6, kind: 'meditation' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['d1', 'm1'] }] });
+    const texts = g.log.map((l) => l.text).join('\n');
+    expect(texts).toContain('使用「真实之剑」置换');
+    expect(texts).toContain('视为 1 颗攻击骰（点数按 5）');
+  });
+
+  it('置换技能代价（淬炼）：战报同样留痕', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '004', '002'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    const gs = g.players.A.artifacts.find((a) => a.id === '010')!;
+    gs.activeMarkerSide = 'left';
+    const bx = g.players.A.artifacts.find((a) => a.id === '004')!;
+    bx.activeMarkerSide = 'left';
+    g.players.A.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    g.players.A.areas.meditation = [{ id: 'm1', value: 6, kind: 'meditation' }];
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '004',
+      side: 'left',
+      params: { costSlots: [{ dieIds: ['d1', 'm1'] }] },
+    });
+    expect(g.log.map((l) => l.text).join('\n')).toContain('使用「真实之剑」置换');
+  });
+});
+
 describe('basic activate skills', () => {
   it('淬炼 consumes an attack die and increments 不祥 count (cap 3)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });

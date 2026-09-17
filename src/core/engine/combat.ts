@@ -8,17 +8,30 @@ export function artifactWithSkill(p: PlayerState, key: string): Artifact | undef
   return p.artifacts.find((a) => a.skills.some((s) => s.key === key));
 }
 
-export function attackDamageBuff(g: GameState, player: PlayerId): number {
+/** 攻击伤害加成的来源（同属性取最大；label 供文案显示） */
+export function attackDamageBonus(
+  g: GameState,
+  player: PlayerId,
+): { value: number; label?: string } {
   const p = g.players[player];
-  const adds = p.buffs.filter((b) => b.attr === 'attackDamage').map((b) => b.add);
-  const buffMax = adds.length ? Math.max(...adds) : 0;
+  let best: { value: number; label?: string } = { value: 0 };
+  const consider = (value: number, label?: string): void => {
+    if (value > best.value) best = { value, label };
+  };
+  for (const b of p.buffs.filter((x) => x.attr === 'attackDamage')) consider(b.add, b.source);
   // 004 锋芒（持续）：攻击伤害 + 淬炼计数
-  const fmArt = artifactWithSkill(p, 'buxiang.fengmang');
-  const fengmang = hasActiveSkill(p, 'buxiang.fengmang') ? fmArt?.count ?? 0 : 0;
+  if (hasActiveSkill(p, 'buxiang.fengmang')) {
+    consider(artifactWithSkill(p, 'buxiang.fengmang')?.count ?? 0, '锋芒');
+  }
   // 015 绝境天神（持续）：攻击伤害 + 计数
-  const cxArt = artifactWithSkill(p, 'canxiang.juejing');
-  const canxiang = hasActiveSkill(p, 'canxiang.juejing') ? cxArt?.count ?? 0 : 0;
-  return Math.max(buffMax, fengmang, canxiang);
+  if (hasActiveSkill(p, 'canxiang.juejing')) {
+    consider(artifactWithSkill(p, 'canxiang.juejing')?.count ?? 0, '绝境天神');
+  }
+  return best;
+}
+
+export function attackDamageBuff(g: GameState, player: PlayerId): number {
+  return attackDamageBonus(g, player).value;
 }
 
 export function checkLifeEnd(g: GameState): void {
