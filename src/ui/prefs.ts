@@ -6,16 +6,24 @@ export interface Prefs {
   cardArt: 'thumb' | 'full';
   /** 界面密度 */
   density: 'compact' | 'comfortable';
+  /** 镜像神器摆放：敌方按「列3、列2、列1」显示（默认关） */
+  mirrorEnemy: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   showSkillText: false,
   cardArt: 'thumb',
   density: 'compact',
+  mirrorEnemy: false,
 };
 
 export function clonePrefs(p: Prefs): Prefs {
-  return { showSkillText: p.showSkillText, cardArt: p.cardArt, density: p.density };
+  return {
+    showSkillText: p.showSkillText,
+    cardArt: p.cardArt,
+    density: p.density,
+    mirrorEnemy: p.mirrorEnemy,
+  };
 }
 
 const KEY = 'dust.prefs.v1';
@@ -30,6 +38,7 @@ export function loadPrefs(): Prefs {
     if (typeof data?.showSkillText === 'boolean') out.showSkillText = data.showSkillText;
     if (data?.cardArt === 'thumb' || data?.cardArt === 'full') out.cardArt = data.cardArt;
     if (data?.density === 'compact' || data?.density === 'comfortable') out.density = data.density;
+    if (typeof data?.mirrorEnemy === 'boolean') out.mirrorEnemy = data.mirrorEnemy;
   } catch {
     return clonePrefs(DEFAULT_PREFS);
   }

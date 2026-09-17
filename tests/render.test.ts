@@ -12,7 +12,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   convertPick: null,
   fengmangPick: null,
   dustFlow: null,
-  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', ...prefs },
+  prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, ...prefs },
   settingsOpen: false,
   detail: null,
 });
@@ -247,6 +247,52 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.btn-settings')).not.toBeNull();
   });
 
+  it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['001', '002', '003'],
+      heroB: ['004', '005', '006'],
+    });
+    const cardIds = (sel: string) =>
+      Array.from(root.querySelectorAll<HTMLElement>(`${sel} .cards .card`)).map(
+        (e) => e.dataset.artifact,
+      );
+
+    // 默认关：双方都是 列1,列2,列3
+    renderGame(state, root, hooksFor());
+    expect(cardIds('.player--enemy')).toEqual(['004', '005', '006']);
+    expect(cardIds('.player--self')).toEqual(['001', '002', '003']);
+
+    // 开启：敌方镜像为 列3,列2,列1；自己不变
+    renderGame(state, root, hooksFor(() => {}, { mirrorEnemy: true }));
+    expect(cardIds('.player--enemy')).toEqual(['006', '005', '004']);
+    expect(cardIds('.player--self')).toEqual(['001', '002', '003']);
+  });
+
+  it('keeps mirroring attached to the on-top (enemy) panel when the active player flips', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['001', '002', '003'],
+      heroB: ['004', '005', '006'],
+    });
+    const cardIds = (sel: string) =>
+      Array.from(root.querySelectorAll<HTMLElement>(`${sel} .cards .card`)).map(
+        (e) => e.dataset.artifact,
+      );
+
+    // A 行动：上方=敌方 B（镜像）
+    renderGame(state, root, hooksFor(() => {}, { mirrorEnemy: true }));
+    expect(cardIds('.player--enemy')).toEqual(['006', '005', '004']);
+
+    // 切到 B 行动：上方=敌方 A（镜像），下方=自己 B（正常）
+    state.activePlayer = 'B';
+    renderGame(state, root, hooksFor(() => {}, { mirrorEnemy: true }));
+    expect(cardIds('.player--enemy')).toEqual(['003', '002', '001']);
+    expect(cardIds('.player--self')).toEqual(['004', '005', '006']);
+  });
+
   it('shows count and charge badges when present', () => {
     const state = setupGame({ seed: 1, firstPlayer: 'A' });
     state.players.B.artifacts.find((a) => a.id === '004')!.count = 2; // 不祥
@@ -438,7 +484,12 @@ describe('renderGame (interaction)', () => {
     // 恢复默认
     const reset = root.querySelector<HTMLButtonElement>('[data-act="settingsReset"]')!;
     reset.click();
-    expect(ui.prefs).toEqual({ showSkillText: false, cardArt: 'thumb', density: 'compact' });
+    expect(ui.prefs).toEqual({
+      showSkillText: false,
+      cardArt: 'thumb',
+      density: 'compact',
+      mirrorEnemy: false,
+    });
     expect(root.querySelectorAll('.skill-text').length).toBe(0);
 
     // 关闭

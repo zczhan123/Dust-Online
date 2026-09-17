@@ -627,7 +627,10 @@ function playerPanel(
   panel.dataset.player = player.id;
 
   const cards = el('div', 'cards');
-  for (const a of player.artifacts) cards.appendChild(artifactCard(a, ctx));
+  // 镜像神器摆放：敌方面板按「列3、列2、列1」显示（左右互搏下随上下角色自动跟随）
+  const artifacts =
+    mirrored && ctx.prefs.mirrorEnemy ? [...player.artifacts].reverse() : player.artifacts;
+  for (const a of artifacts) cards.appendChild(artifactCard(a, ctx));
 
   const areas = el('div', 'areas');
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
@@ -1506,6 +1509,10 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   row('界面密度', [
     { text: '紧凑', on: ui.prefs.density === 'compact', onClick: () => setPref(ctx, 'density', 'compact') },
     { text: '舒适', on: ui.prefs.density === 'comfortable', onClick: () => setPref(ctx, 'density', 'comfortable') },
+  ]);
+  row('镜像神器摆放', [
+    { text: '正常', on: !ui.prefs.mirrorEnemy, onClick: () => setPref(ctx, 'mirrorEnemy', false) },
+    { text: '镜像', on: ui.prefs.mirrorEnemy, onClick: () => setPref(ctx, 'mirrorEnemy', true) },
   ]);
 
   const actions = el('div', 'settings-actions');
