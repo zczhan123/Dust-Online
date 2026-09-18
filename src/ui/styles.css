@@ -171,12 +171,11 @@ body {
 }
 
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+/* 属性补正（速度 +1 / 意志 -2）：用玩家配色 */
+.sub-delta { font-weight: 600; }
 .badge-active { background: #d7e6fb; color: #1b4f9c; }
-.badge-charge { background: #fbe8c8; color: #8a5a05; }
-.badge-charge--full { background: #d9f0e1; color: #1d6b43; }
 .badge-count { background: #fadfd0; color: #a33a12; }
 .badge-seal { background: #e6dcf7; color: #5b3fa0; }
-.badge-full { background: #f0d7d7; color: #8a2b2b; }
 
 .skills { display: flex; flex-direction: column; gap: 4px; }
 .skill {
@@ -198,8 +197,6 @@ body {
 .skill-part--off { background: var(--off-bg); border-left-color: #cfc8ba; opacity: 0.62; }
 .skill-part--used { background: #ececec; border-left-color: #9ca3af; opacity: 0.5; }
 .skill-part--used .skill-name { text-decoration: line-through; color: #6b7280; }
-.skill-part--full { background: #f3ecec; border-left-color: #b75b5b; }
-.skill-part--full .skill-name { color: #8a2b2b; }
 /* 不能再激活/不能再使用（充能满、计数满、必杀已用）→ 更深的灰，区别于「未激活」 */
 .skill-part--disabled { background: #cfd4db; border-left-color: #6b7280; opacity: 0.95; }
 .badge-used { background: #d1d5db; color: #4b5563; }

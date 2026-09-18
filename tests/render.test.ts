@@ -675,6 +675,53 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.card[data-artifact="004"] .badge-count')!.textContent).toBe('计数 3/3');
   });
 
+  it('shows 速度/意志 bonuses inline in the player colour (速度 3+2 / 意志 7+1)', () => {
+    // 016 虚臾持续：速度 +2（A = 蓝）
+    const xiu = createGame({ seed: 1, firstPlayer: 'A', heroA: ['016', '017', '018'], heroB: ['001', '002', '003'] });
+    const v = xiu.players.A.artifacts.find((a) => a.id === '016')!;
+    v.activeMarkerSide = 'left';
+    v.armedSide = 'left';
+    renderGame(xiu, root, hooksFor());
+    const vsub = root.querySelector('.player--self .card[data-artifact="016"] .card-sub')!;
+    expect(vsub.textContent).toContain('速度 3+2');
+    const vdelta = vsub.querySelector('.sub-delta')!;
+    expect(vdelta.textContent).toBe('+2');
+    expect(vdelta.classList.contains('player-A')).toBe(true);
+
+    // 008 铁壁持续：意志 +1（第一列 007 显示 意志 7+1）
+    const bat = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '008', '009'], heroB: ['001', '002', '003'] });
+    const shield = bat.players.A.artifacts.find((a) => a.id === '008')!;
+    shield.activeMarkerSide = 'left';
+    shield.armedSide = 'left';
+    renderGame(bat, root, hooksFor());
+    const bsub = root.querySelector('.player--self .card[data-artifact="007"] .card-sub')!;
+    expect(bsub.textContent).toContain('意志 7+1');
+    expect(bsub.querySelector('.sub-delta')!.classList.contains('player-A')).toBe(true);
+  });
+
+  it('detail popover shares the same meta line (充能 inline, 计数 with cap, 速度補正)', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['016', '017', '018'], heroB: ['001', '002', '003'] });
+    const v = state.players.A.artifacts.find((a) => a.id === '016')!;
+    v.activeMarkerSide = 'left';
+    const card018 = state.players.A.artifacts.find((a) => a.id === '018')!;
+    card018.count = 5;
+    const { ui, hooks } = mount(state, root);
+    // 直接打开 018 的只读浮窗
+    ui.detail = { artifactId: '018', rect: { left: 0, top: 0, width: 10, height: 10 } as DOMRect };
+    hooks.requestRender();
+    const pop = root.querySelector('.detail-popover')!;
+    expect(pop.querySelector('.detail-sub')!.textContent).toContain('计数 5/5');
+    expect(pop.querySelector('.detail-sub')!.textContent).toContain('充能');
+  });
+
+  it('settings buttons have no gear icon', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    renderGame(state, root, hooksFor());
+    const btn = root.querySelector<HTMLElement>('[data-act="settingsOpen"]')!;
+    expect(btn.textContent).toBe('设置');
+    expect(root.textContent ?? '').not.toContain('⚙');
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
@@ -783,13 +830,21 @@ describe('renderGame (read-only snapshot)', () => {
 
   it('marks a fully charged column-3 artifact and does not offer charging', () => {
     const state = setupGame({ seed: 1, firstPlayer: 'A' });
-    state.players.A.artifacts.find((a) => a.id === '003')!.chargeLayer = 4; // 明镜 满充能
+    const mj = state.players.A.artifacts.find((a) => a.id === '003')!;
+    mj.chargeLayer = 4; // 明镜 满充能（真实流程会在完成充能时放上激活标记）
+    mj.activeMarkerSide = 'left';
+    mj.armedSide = 'left';
     renderGame(state, root, hooksFor());
-    expect(root.textContent ?? '').toContain('充能 4/4（已满）');
     const card = root.querySelector('.player--self .card[data-artifact="003"]')!;
-    const badge = card.querySelector('.badge-charge');
-    expect(badge).not.toBeNull();
-    expect(badge!.classList.contains('badge-charge--full')).toBe(true);
+    // 充能并入副标题（与「生命」同一样式、位于徽标之前），不再有单独的充能徽标与「（已满）」文案
+    expect(card.querySelector('.badge-charge')).toBeNull();
+    const sub = card.querySelector('.card-sub')!;
+    expect(sub.textContent).toContain('充能 4/4');
+    expect(sub.textContent).not.toContain('已满');
+    // 充能提示排在「已激活」徽标之前
+    const active = card.querySelector('.badge-active')!;
+    expect(active).not.toBeNull();
+    expect((sub.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
     expect(card.querySelectorAll('.clickable').length).toBe(0);
   });
 
@@ -807,8 +862,10 @@ describe('renderGame (read-only snapshot)', () => {
       '.player--self .card[data-artifact="004"] .skill-part--disabled',
     );
     expect(box).not.toBeNull();
-    expect(box!.classList.contains('skill-part--full')).toBe(true);
-    expect(box!.textContent).toContain('已满');
+    // 计数满：只靠「计数 3/3」+ 深灰禁用表达，不再有「已满」徽标/红底
+    expect((box!.textContent ?? '').includes('已满')).toBe(false);
+    expect(root.querySelector('.player--self .card[data-artifact="004"] .badge-count')!.textContent).toBe('计数 3/3');
+    expect(box!.classList.contains('skill-part--full')).toBe(false);
     expect(box!.classList.contains('clickable')).toBe(false);
   });
 });

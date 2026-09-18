@@ -11,6 +11,7 @@ import type {
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
+import { effectiveSpeed, effectiveWill } from '../core/engine/derive';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { attackDamageBonus } from '../core/engine/combat';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
@@ -437,7 +438,59 @@ function openDustFlow(ctx: Ctx, a: Artifact): void {
   ctx.hooks.requestRender();
 }
 
-function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
+/** 属性补正显示：0 不显示、正数 +N、负数自带 -（用于「速度 3+1」「意志 9-2」） */
+function deltaSuffix(delta: number): string {
+  if (delta === 0) return '';
+  return delta > 0 ? `+${delta}` : `${delta}`;
+}
+
+/** 属性补正的着色：用该玩家的配色（A 蓝 / B 红） */
+function deltaSpan(player: PlayerState, delta: number): HTMLElement {
+  const span = el('span', `sub-delta player-${player.id}`);
+  span.textContent = deltaSuffix(delta);
+  return span;
+}
+
+/** 神器属性摘要片段：第N列 / 速度 / 意志 / 生命 / 充能 / 分布 / 计数（卡头与卡图浮窗共用一处来源）
+ *  - 速度/意志带补正（玩家色）；充能与「生命」同一样式、位于徽标之前；计数带上限。 */
+function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLElement)[] {
+  const parts: (string | HTMLElement)[] = [`第${art.column}列`];
+  if (art.speed !== undefined) {
+    parts.push(`速度 ${art.speed}`);
+    const d = player ? effectiveSpeed(player) - art.speed : 0;
+    if (player && d !== 0) parts.push(deltaSpan(player, d));
+  }
+  if (art.will !== undefined) {
+    parts.push(`意志 ${art.will}`);
+    const d = player ? effectiveWill(player) - art.will : 0;
+    if (player && d !== 0) parts.push(deltaSpan(player, d));
+  }
+  if (art.life !== undefined) parts.push(`生命 ${art.life}`);
+  if (art.chargeReq !== undefined) parts.push(`充能 ${art.chargeLayer}/${art.chargeReq}`);
+  if (art.distribution) {
+    parts.push(
+      `分布 防${art.distribution.defense.join('/')} 攻${art.distribution.attack.join('/')} 冥${art.distribution.meditation.join('/')}`,
+    );
+  }
+  if (art.count > 0) {
+    const capKey = art.skills.find((s) => COUNT_CAP[s.key]);
+    const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
+    parts.push(cap ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`);
+  }
+  return parts;
+}
+
+/** 以全角空格连接文本/节点片段（属性补正 .sub-delta 紧贴前一个值，不插分隔） */
+function appendParts(parent: HTMLElement, parts: (string | HTMLElement)[]): void {
+  for (const [i, p] of parts.entries()) {
+    const inline = typeof p !== 'string' && p.classList.contains('sub-delta');
+    if (i > 0 && !inline) parent.appendChild(document.createTextNode('　'));
+    if (typeof p === 'string') parent.appendChild(document.createTextNode(p));
+    else parent.appendChild(p);
+  }
+}
+
+function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   const card = el('div', 'card');
   card.dataset.artifact = a.id;
 
@@ -446,18 +499,9 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   name.textContent = a.weapon ? `${a.name}（${a.weapon}）` : a.name;
   head.appendChild(name);
 
-  const subs: string[] = [`第${a.column}列`];
-  if (a.speed !== undefined) subs.push(`速度 ${a.speed}`);
-  if (a.will !== undefined) subs.push(`意志 ${a.will}`);
-  if (a.life !== undefined) subs.push(`生命 ${a.life}`);
-  if (a.chargeReq !== undefined) subs.push(`充能需求 ${a.chargeReq}`);
-  if (a.distribution) {
-    subs.push(
-      `分布 防${a.distribution.defense.join('/')} 攻${a.distribution.attack.join('/')} 冥${a.distribution.meditation.join('/')}`,
-    );
-  }
+  // 副标题：与「生命 50」同一字体/样式的纯文本（含充能；充能位于所有徽标之前）
   const sub = el('span', 'card-sub');
-  sub.textContent = subs.join('　');
+  appendParts(sub, metaParts(a, player));
   head.appendChild(sub);
 
   if (a.activeMarkerSide) {
@@ -467,15 +511,6 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
     act.textContent = `已激活·${activeName}`;
     if (activeSideSpent(ctx, a)) act.classList.add('badge-active--spent');
     head.appendChild(act);
-  }
-  if (a.chargeReq !== undefined) {
-    const charge = el('span', 'badge badge-charge');
-    const full = a.chargeLayer >= a.chargeReq;
-    charge.textContent = full
-      ? `充能 ${a.chargeLayer}/${a.chargeReq}（已满）`
-      : `充能 ${a.chargeLayer}/${a.chargeReq}`;
-    if (full) charge.classList.add('badge-charge--full');
-    head.appendChild(charge);
   }
   if (a.count > 0) {
     const count = el('span', 'badge badge-count');
@@ -533,9 +568,6 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         if (isUsedUltimate) part.classList.add('skill-part--used');
         const isForcedNow = zhihaiForcedFrame(ctx, a, s);
 
-        const isFull = key === 'buxiang.cuilian' && a.count >= 3;
-        if (isFull) part.classList.add('skill-part--full');
-
         const pHead = el('div', 'skill-part-head');
         const badge = el('span', 'skill-type');
         badge.textContent = s.type;
@@ -553,11 +585,6 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
           used.textContent = '已使用';
           pHead.appendChild(used);
         }
-        if (isFull) {
-          const full = el('span', 'badge badge-full');
-          full.textContent = '已满';
-          pHead.appendChild(full);
-        }
         if (ctx.prefs.showSkillText) {
           const body = el('div', 'skill-text');
           body.textContent = s.text;
@@ -569,7 +596,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
           (x): x is SkillAction =>
             x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
         );
-        if (skillAction && isActivatableType(s.type) && !isUsedUltimate && !isFull) {
+        if (skillAction && isActivatableType(s.type) && !isUsedUltimate) {
           part.classList.add('clickable');
           part.dataset.act = 'skill';
           part.title = '点击启动技能';
@@ -703,7 +730,7 @@ function playerPanel(
   // 镜像神器摆放：敌方面板按「列3、列2、列1」显示（左右互搏下随上下角色自动跟随）
   const artifacts =
     mirrored && ctx.prefs.mirrorEnemy ? [...player.artifacts].reverse() : player.artifacts;
-  for (const a of artifacts) cards.appendChild(artifactCard(a, ctx));
+  for (const a of artifacts) cards.appendChild(artifactCard(a, ctx, player));
 
   const areas = el('div', 'areas');
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
@@ -1670,7 +1697,7 @@ function resetPrefs(ctx: Ctx): void {
   applyPrefs(ctx, clonePrefs(DEFAULT_PREFS));
 }
 
-/** 设置面板（左上角 ⚙ 打开） */
+/** 设置面板（左上角「设置」按钮打开） */
 function settingsPanel(ctx: Ctx): HTMLElement {
   const ui = ctx.hooks.ui;
   const overlay = el('div', 'settings-overlay');
@@ -1795,7 +1822,7 @@ function logDrawer(ctx: Ctx): HTMLElement {
   set.type = 'button';
   set.className = 'btn btn-settings';
   set.dataset.act = 'drawerSettingsOpen';
-  set.textContent = '⚙ 设置';
+  set.textContent = '设置';
   set.addEventListener('click', () => {
     ctx.hooks.ui.logOpen = false;
     ctx.hooks.ui.settingsOpen = true;
@@ -1824,17 +1851,6 @@ function logDrawer(ctx: Ctx): HTMLElement {
   return overlay;
 }
 
-function detailSummary(art: Artifact): string {
-  const parts: string[] = [`第${art.column}列`];
-  if (art.speed !== undefined) parts.push(`速度 ${art.speed}`);
-  if (art.will !== undefined) parts.push(`意志 ${art.will}`);
-  if (art.life !== undefined) parts.push(`生命 ${art.life}`);
-  if (art.chargeReq !== undefined) parts.push(`充能 ${art.chargeLayer}/${art.chargeReq}`);
-  if (art.count > 0) parts.push(`计数 ${art.count}`);
-  return parts.join('　');
-}
-
-/** 浮窗里的技能全文（始终显示描述） */
 function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
   const box = el('div', 'skills');
   const text = ARTIFACT_TEXT[art.id];
@@ -1926,7 +1942,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   box.appendChild(head);
 
   const sub = el('div', 'detail-sub');
-  sub.textContent = detailSummary(art);
+  appendParts(sub, metaParts(art, ctx.state.players[found.owner]));
   box.appendChild(sub);
 
   if (art.activeMarkerSide) {
@@ -2469,7 +2485,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   edgeSettings.type = 'button';
   edgeSettings.className = 'btn edge-btn';
   edgeSettings.dataset.act = 'edgeSettingsOpen';
-  edgeSettings.textContent = '⚙ 设置';
+  edgeSettings.textContent = '设置';
   edgeSettings.addEventListener('click', () => {
     hooks.ui.settingsOpen = true;
     hooks.requestRender();
@@ -2494,7 +2510,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   settingsBtn.type = 'button';
   settingsBtn.className = 'btn btn-settings';
   settingsBtn.dataset.act = 'settingsOpen';
-  settingsBtn.textContent = '⚙ 设置';
+  settingsBtn.textContent = '设置';
   settingsBtn.addEventListener('click', () => {
     hooks.ui.settingsOpen = true;
     hooks.requestRender();
