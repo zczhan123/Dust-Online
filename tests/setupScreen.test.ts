@@ -12,7 +12,8 @@ const YING = ['004', '005', '006'];
 const BAT = ['007', '008', '009'];
 const TATA = ['010', '011', '012'];
 const ZORAY = ['013', '014', '015'];
-const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY];
+const XIU = ['016', '017', '018'];
+const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU];
 
 describe('renderSetup', () => {
   let root: HTMLElement;
@@ -26,8 +27,8 @@ describe('renderSetup', () => {
     expect(root.textContent).toContain('尘起时刻 · 开始新对局');
     expect(root.querySelector('.setup')).not.toBeNull();
     expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
-    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(6); // 5 英雄 + 随机
-    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(6); // 5 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(7); // 6 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(7); // 6 英雄 + 随机
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 

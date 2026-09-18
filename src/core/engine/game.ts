@@ -4,11 +4,12 @@ import { refillPhase, rerollPhase, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { doAttack, resolveBlock, checkLifeEnd, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
-import { setDieValue, heal, moveDice, paySlots } from './effects';
+import { applyLifeLoss, doAttack, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
+import { findDieOf, setDieValue, heal, moveDice, paySlots, withRngState } from './effects';
+import { pumpPending, queueRerollEndTriggers } from './pending';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
-import type { Action, GameState, PlayerId, PlayerState, SlotFill } from '../model/types';
+import type { Action, Artifact, GameState, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
 /** 校验：这些骰必须是该玩家自己的、互不重复的冥想骰（越界抛错，不静默修正） */
 function assertOwnMeditationDice(p: PlayerState, ids: string[]): void {
@@ -19,9 +20,7 @@ function assertOwnMeditationDice(p: PlayerState, ids: string[]): void {
 }
 
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
-  const rng = new SeededRng(g.rngState);
-  fn(rng);
-  g.rngState = rng.state();
+  withRngState(g, fn);
 }
 
 /** 若骰位中出现“置换”（2 颗真骰）填法，则要求该玩家已激活 010 深红的「真实之剑」 */
@@ -48,6 +47,10 @@ export function beginTurn(g: GameState): void {
   g.dunwuPulseUsedThisTurn = false;
   g.attackQueue = null;
   g.extraReroll = null;
+  g.pendingQueue = [];
+  // 018 至黑：每回合第一次受伤的判定在每回合开始时重置（任何玩家的回合开始时都重置，双方各自独立）
+  g.players.A.damagedThisTurn = false;
+  g.players.B.damagedThisTurn = false;
   const p = g.activePlayer;
   // 回合开始触发（补充之前，故获得的骰计入意志上限）：008 战车
   applyTurnStartEffects(g, p);
@@ -87,22 +90,24 @@ export function advancePhase(g: GameState): void {
   if (g.phase === 'gameOver') return;
   switch (g.phase) {
     case 'reroll': {
-      // 013 雷暴·持续：对方重掷阶段结束时，若你拥有该持续技能，先询问是否插入一个额外重掷阶段
       if (g.extraReroll) {
         // 额外重掷阶段结束：把行动权交还原玩家，继续其尘起阶段
+        const reroller = g.extraReroll.player;
         const resume = g.extraReroll.resume;
         g.extraReroll = null;
         g.activePlayer = resume;
         g.phase = 'dustRise';
         logLine(g, `额外重掷阶段结束，${pname(resume)} 继续尘起阶段`);
+        // 017 帷幕：该额外重掷阶段结束时同样触发（FAQ 17.1.2）；不再触发 013 以免循环
+        queueRerollEndTriggers(g, reroller, { includeLeibao: false });
+        pumpPending(g);
         break;
       }
-      const other: PlayerId = g.activePlayer === 'A' ? 'B' : 'A';
-      if (hasActiveSkill(g.players[other], 'minglei.leibao.continuous')) {
-        g.pending = { kind: 'leibaoReroll', player: other };
-        break;
-      }
+      // 先离开重掷阶段再处理触发，避免待决策解算完后重复触发
       g.phase = 'dustRise';
+      // 对方（非当前玩家）的重掷阶段结束时触发：013 雷暴·持续 / 017 帷幕
+      queueRerollEndTriggers(g, g.activePlayer);
+      pumpPending(g);
       break;
     }
     case 'dustRise':
@@ -190,14 +195,63 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   return acts;
 }
 
-/** 「激活」类技能：仅在该侧被“切入”的当回合可用一次 */
+/** 「激活」类技能：仅在该侧被“切入”的当回合生效（尘起装填即强制结算；此处用于校验/UI 显示） */
 function activationUsable(g: GameState, a: { armedSide: 'left' | 'right' | null; armedTurn: number }, s: { side: 'left' | 'right' | 'only' }): boolean {
   return a.armedSide === (s.side === 'only' ? 'left' : s.side) && a.armedTurn === g.turnIndex;
 }
 
-/** 该技能当前是否属于“可发动”类型（启动 / 激活 / 必杀） */
+/** 「激活」类技能的默认参数（供尘起装填后的强制结算使用；AI/测试同样走这里） */
+function activationDefaultAction(g: GameState, p: PlayerState, a: Artifact, s: SkillDef): Action {
+  const base = { t: 'skill' as const, artifactId: a.id, side: s.side };
+  if (s.key === 'xuyu.void') return { ...base, params: { kind: 'attack' } };
+  if (s.key === 'chengjie.jinghua') {
+    const opp: PlayerId = p.id === 'A' ? 'B' : 'A';
+    const pick = [...g.players[opp].areas.attack, ...g.players[opp].areas.defense, ...g.players[opp].areas.meditation].filter((d) => d.value === 1);
+    return { ...base, params: { targetDieIds: pick.slice(0, 2).map((d) => d.id) } };
+  }
+  if (s.key === 'chengjie.shuzui') {
+    const pick = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].filter((d) => d.value === 1);
+    return { ...base, params: { targetDieIds: pick.slice(0, 2).map((d) => d.id) } };
+  }
+  return { ...base, params: {} };
+}
+
+/** 尘起装填到某侧后，若该侧有「激活」技能：立即强制结算（无选择项则直接执行处理器） */
+function resolveActivationOnArm(g: GameState, player: PlayerId, artifactId: string, side: 'left' | 'right'): void {
+  const p = g.players[player];
+  const a = p.artifacts.find((x) => x.id === artifactId);
+  if (!a) return;
+  const armed: 'left' | 'right' = side;
+  const s = a.skills.find((x) => x.kind === 'activation' && (x.side === armed));
+  if (!s) return;
+  const handler = SKILL_HANDLERS[s.key];
+  if (!handler) return;
+  logLine(g, `「${a.name}」的「激活」技能立即结算`);
+  if (activationNeedsChoice(s.key)) {
+    g.pending = { kind: 'activationResolve', player, artifactId, side: armed };
+    return;
+  }
+  withRng(g, (rng) =>
+    handler.run({
+      g,
+      player,
+      artifact: a,
+      rng,
+      params: {},
+      endMainPhase: () => endMainPhase(g),
+      reportConsumed: () => {},
+    }),
+  );
+}
+
+/** 该「激活」技能是否需要玩家选择（需要则装填时弹出强制选择器） */
+function activationNeedsChoice(key: string): boolean {
+  return key === 'xuyu.void' || key === 'chengjie.jinghua' || key === 'chengjie.shuzui';
+}
+
+/** 该技能当前是否属于“可发动”类型（启动 / 必杀；「激活」由尘起装填时强制结算，不在此列） */
 function isUsableKind(kind: string): boolean {
-  return kind === 'activate' || kind === 'activation' || kind === 'ultimate';
+  return kind === 'activate' || kind === 'ultimate';
 }
 
 function activateSkillActions(g: GameState, p: PlayerState): Action[] {
@@ -328,6 +382,22 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             params: { to: 'attack', meditationDieIds: p.areas.meditation.slice(0, 3).map((d) => d.id) },
           });
         }
+      } else if (s.key === 'xuyu.sacrifice') {
+        // 016 献祭（启动）：受到 4 真伤 → 二选一（默认 ①获得 3 随机骰）
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { choice: 'dice' } });
+      } else if (s.key === 'youming.mingjie') {
+        // 017 冥界行走（启动）：消耗最多 3 冥想骰 → 获得同等数量随机攻击骰
+        if (p.areas.meditation.length >= 1) {
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: { costSlots: p.areas.meditation.slice(0, 3).map((d) => ({ dieIds: [d.id] })) },
+          });
+        }
+      } else if (s.key === 'zhihai.bloom.ultimate') {
+        // 018 漆黑绽放（必杀）：计数 ≥1 时可主动发动（FAQ 18.1.3）；计数=5 由引擎强制发动
+        if (a.count >= 1) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: {} });
       }
     }
   }
@@ -397,6 +467,33 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'leibao', accept: false },
         { t: 'leibao', dieIds: pick },
       ];
+    }
+    if (g.pending.kind === 'activationResolve') {
+      const pd = g.pending;
+      const p = g.players[pd.player];
+      const a = p.artifacts.find((x) => x.id === pd.artifactId);
+      const s = a?.skills.find((x) => x.kind === 'activation' && x.side === pd.side);
+      if (!a || !s) return [{ t: 'advance' }];
+      return [activationDefaultAction(g, p, a, s)];
+    }
+    if (g.pending.kind === 'weimu') {
+      const pd = g.pending;
+      const opp: PlayerId = pd.player === 'A' ? 'B' : 'A';
+      const acts: Action[] = [{ t: 'weimu', accept: false }];
+      const o = g.players[opp];
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        for (const d of o.areas[k]) acts.push({ t: 'weimu', accept: true, dieId: d.id });
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'zhihaiReroll') {
+      const pd = g.pending;
+      const p = g.players[pd.player];
+      const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
+      const acts: Action[] = [{ t: 'zhihaiReroll', dieIds: [] }];
+      const pick = all.slice(0, Math.min(pd.x, all.length)).map((d) => d.id);
+      if (pick.length > 0) acts.push({ t: 'zhihaiReroll', dieIds: pick });
+      return acts;
     }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
@@ -477,9 +574,26 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
   }
 }
 
+/** 每种「待决策」对应的解算动作类型（替代手写白名单，新增 pending 时只需在此登记） */
+const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
+  caiyuliu: 'caiyuliu',
+  fengmang: 'fengmang',
+  guwangCharge: 'guwangCharge',
+  guwangCancel: 'guwangCancel',
+  shenhongKill: 'shenhongKill',
+  dunwuHalve: 'dunwuHalve',
+  dunwuPulse: 'dunwuPulse',
+  leibaoReroll: 'leibaoReroll',
+  dianxing: 'dianxing',
+  leibao: 'leibao',
+  activationResolve: 'skill',
+  weimu: 'weimu',
+  zhihaiReroll: 'zhihaiReroll',
+};
+
 export function applyAction(g: GameState, action: Action): GameState {
   if (g.phase === 'gameOver') throw new Error('game is over');
-  if (g.pending && action.t !== 'caiyuliu' && action.t !== 'fengmang' && action.t !== 'guwangCharge' && action.t !== 'guwangCancel' && action.t !== 'shenhongKill' && action.t !== 'dunwuHalve' && action.t !== 'dunwuPulse' && action.t !== 'leibaoReroll' && action.t !== 'dianxing' && action.t !== 'leibao') {
+  if (g.pending && action.t !== PENDING_ACTION[g.pending.kind]) {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
@@ -599,6 +713,11 @@ export function applyAction(g: GameState, action: Action): GameState {
         `${pname(g.activePlayer)} 尘起：${desc}${action.useSeal ? '（消耗尘印标记）' : ''}`,
       );
       runChargeSkill(g, g.activePlayer, action.artifactId);
+      // 「激活」类技能：装填到该侧的瞬间立即强制结算（016 虚无形态 / 014 净化·数罪并罚）
+      const justArmed = g.players[g.activePlayer].artifacts.find((x) => x.id === action.artifactId);
+      if (justArmed?.armedSide === 'left' || justArmed?.armedSide === 'right') {
+        resolveActivationOnArm(g, g.activePlayer, action.artifactId, justArmed.armedSide);
+      }
       g.dustRiseActed = true;
       break;
     }
@@ -643,12 +762,11 @@ export function applyAction(g: GameState, action: Action): GameState {
         const mv = p.areas.meditation.find((d) => d.id === action.meditationDieId)?.value ?? 0;
         consumeDice(p, 'attack', [action.attackDieId]);
         consumeDice(p, 'meditation', [action.meditationDieId]);
-        g.players[pd.defenderId].life -= pd.value;
+        applyLifeLoss(g, pd.defenderId, pd.value);
         logLine(
           g,
           `${pname(pd.player)} 发动「锋芒」：消耗 1 颗攻击骰（${av}点）与 1 颗冥想骰（${mv}点），取消抵挡并追加 2 点真实伤害`,
         );
-        checkLifeEnd(g);
         if ((g.phase as string) !== 'gameOver') dealTrueDamage(g, pd.defenderId, 2);
       } else {
         logLine(g, `${pname(pd.player)} 放弃锋芒`);
@@ -735,8 +853,47 @@ export function applyAction(g: GameState, action: Action): GameState {
       }
       break;
     }
+    case 'weimu': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'weimu') throw new Error('no weimu pending');
+      g.pending = null;
+      if (action.accept === false) {
+        logLine(g, `${pname(pd.player)} 不发动「帷幕」`);
+        break;
+      }
+      const dieId = action.dieId;
+      if (!dieId) throw new Error('missing die');
+      const opp: PlayerId = pd.player === 'A' ? 'B' : 'A';
+      const found = findDieOf(g, opp, dieId);
+      if (!found) throw new Error(`not ${pname(opp)}'s ability die: ${dieId}`);
+      const val = found.die.value;
+      logLine(g, `${pname(pd.player)} 发动「帷幕」：受到 2 点真实伤害，弃置 ${pname(opp)} 的 1 个能力骰（${val}点）`);
+      dealTrueDamage(g, pd.player, 2);
+      consumeDice(g.players[opp], found.kind, [dieId]);
+      break;
+    }
+    case 'zhihaiReroll': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'zhihaiReroll') throw new Error('no zhihaiReroll pending');
+      const ids = action.dieIds;
+      if (ids.length > pd.x) throw new Error(`最多重掷 ${pd.x} 个能力骰`);
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      for (const id of ids) {
+        if (!findDieOf(g, pd.player, id)) throw new Error(`not your ability die: ${id}`);
+      }
+      g.pending = null;
+      if (ids.length === 0) {
+        logLine(g, `${pname(pd.player)} 「漆黑绽放」：不重掷`);
+        break;
+      }
+      withRng(g, (rng) => rerollPhase(g, pd.player, ids, rng));
+      break;
+    }
     case 'skill': {
-      if (g.phase !== 'main') throw new Error('not main phase');
+      const pendingSkill = g.pending && g.pending.kind === 'activationResolve' ? g.pending : null;
+      const resolvingActivation =
+        pendingSkill !== null && pendingSkill.artifactId === action.artifactId && pendingSkill.side === action.side;
+      if (g.phase !== 'main' && !resolvingActivation) throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
       const p = g.players[g.activePlayer];
       const a = p.artifacts.find((x) => x.id === action.artifactId);
@@ -750,7 +907,11 @@ export function applyAction(g: GameState, action: Action): GameState {
       );
       if (!s) throw new Error('no usable skill on that side');
       if (!skillActive(a, s)) throw new Error('skill not active');
-      if (s.kind === 'activation' && !activationUsable(g, a, s)) throw new Error('activation skill only usable in the turn it was armed');
+      if (s.kind === 'activation') {
+        // 「激活」类只能由尘起装填时的强制结算触发，不能手动发动
+        if (!resolvingActivation) throw new Error('激活类技能由尘起装填时立即强制结算，不能手动发动');
+        if (!activationUsable(g, a, s)) throw new Error('activation skill only usable in the turn it was armed');
+      }
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) throw new Error('ultimate already used');
       if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       assertConversionAllowed(g, g.activePlayer, action.params?.costSlots as SlotFill[] | undefined);
@@ -770,6 +931,8 @@ export function applyAction(g: GameState, action: Action): GameState {
           },
         }),
       );
+      // 非法参数在处理器内抛错时不清空待决策（非法动作不得改变状态）
+      if (resolvingActivation) g.pending = null;
       g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
       // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）
@@ -784,5 +947,7 @@ export function applyAction(g: GameState, action: Action): GameState {
       break;
     }
   }
+  // 每次动作结束后，把排队中的待决策/018 强制必杀弹出来（先于多段攻击的下一段）
+  pumpPending(g);
   return g;
 }

@@ -7,7 +7,8 @@ import type {
   SlotFill,
   SlotSpec,
 } from '../model/types';
-import { newDieId } from '../model/dice';
+import { newDieId, createDie, placeDieByDistribution } from '../model/dice';
+import { SeededRng } from '../rng/rng';
 import { logLine, pname } from './log';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
@@ -133,3 +134,34 @@ export function gainRandomDice(
   }
   return out;
 }
+
+/**
+ * 随机获得 count 颗**未指定类型**的能力骰：按「骰点分布」放入对应区域（规则书 §8）。
+ * 骰点分布取该玩家第二列神器。
+ */
+export function gainRandomAbilityDice(
+  g: GameState,
+  player: PlayerId,
+  count: number,
+  rng: { rollDie(): number },
+): Die[] {
+  const p = g.players[player];
+  const dist = p.artifacts.find((a) => a.column === 2)?.distribution;
+  if (!dist) throw new Error(`player ${player} has no distribution`);
+  const out: Die[] = [];
+  for (let i = 0; i < count; i++) {
+    const die = createDie(newDieId(`${player}-`), rng.rollDie());
+    placeDieByDistribution(p.areas, die, dist);
+    out.push(die);
+  }
+  return out;
+}
+
+/** 用玩家/游戏里的 rngState 执行一段需要随机数的逻辑（供引擎各处复用） */
+export function withRngState<T>(g: { rngState: number }, fn: (rng: SeededRng) => T): T {
+  const rng = new SeededRng(g.rngState);
+  const out = fn(rng);
+  g.rngState = rng.state();
+  return out;
+}
+

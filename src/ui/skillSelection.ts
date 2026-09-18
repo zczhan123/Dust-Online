@@ -161,6 +161,7 @@ const SPEC_FIST: CostSpec = { skill: '王家之拳', kind: 'meditation', maxSlot
 const SPEC_BARRIER: CostSpec = { skill: '灵能屏障', kind: 'defense', maxSlots: 3, variable: true };
 const SPEC_PULSE: CostSpec = { skill: '灵能脉冲', kind: 'attack', maxSlots: 3, variable: true };
 const SPEC_WANSHA: CostSpec = { skill: '零时枭首', kind: 'attack', maxSlots: 1, variable: false };
+const SPEC_MINGJIE: CostSpec = { skill: '冥界行走', kind: 'meditation', maxSlots: 3, variable: true };
 
 function ownDieValue(state: GameState, player: PlayerId, id: string | undefined): number | undefined {
   if (!id) return undefined;
@@ -502,6 +503,86 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         max: 2,
       },
     ],
+    buildParams: () => ({}),
+  },
+  // 016 虚臾·虚无形态（激活）：选 1 个能力骰类型 → 获得该类型 3 点骰直至能力骰总数达意志上限
+  'xuyu.void': {
+    steps: () => [
+      {
+        kind: 'option',
+        label: '选择「虚无形态」要获得的能力骰类型',
+        options: [
+          { value: 'attack', label: '攻击' },
+          { value: 'defense', label: '防御' },
+          { value: 'meditation', label: '冥想' },
+        ],
+      },
+    ],
+    buildParams: ({ options }) => ({ kind: options[0] }),
+  },
+  // 016 虚臾·献祭（启动）：受到 4 真伤 → 二选一
+  'xuyu.sacrifice': {
+    steps: () => [
+      {
+        kind: 'option',
+        label: '选择「献祭」要执行的项',
+        options: [
+          { value: 'dice', label: '① 获得 3 个随机点数能力骰（按其点数落区）' },
+          { value: 'damage', label: '② 本回合你的攻击伤害 +2' },
+        ],
+      },
+    ],
+    buildParams: ({ options }) => ({ choice: options[0] }),
+  },
+  // 017 幽冥·冥界行走（启动）：消耗最多 3 个冥想骰 → 获得同等数量随机攻击骰
+  'youming.mingjie': {
+    steps: ({ state, player, chosenDice, numbers }) =>
+      hasSword(state, player)
+        ? swordCostSteps(state, player, SPEC_MINGJIE, numbers, chosenDice)
+        : [
+            {
+              kind: 'dice',
+              label: '选择消耗的冥想骰（1–3 颗）',
+              owner: 'self',
+              areas: ['meditation'],
+              min: 1,
+              max: Math.min(3, state.players[player].areas.meditation.length),
+            },
+          ],
+    buildParams: ({ state, player, chosenDice, numbers }) => ({
+      costSlots: costPart(state, player, SPEC_MINGJIE, numbers, chosenDice).costSlots,
+    }),
+  },
+  // 017 幽冥·帷幕（待决策）：选对方 1 个能力骰弃置
+  '@weimu': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要弃置的对方能力骰（1 颗）',
+        owner: 'opponent',
+        areas: KINDS,
+        min: 1,
+        max: 1,
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // 018 至黑·漆黑绽放（待决策）：可重掷最多 X 颗能力骰（含刚获得的骰）
+  '@zhihaiReroll': {
+    steps: ({ state }) => {
+      const pd = state.pending;
+      const x = pd && pd.kind === 'zhihaiReroll' ? pd.x : 0;
+      return [
+        {
+          kind: 'dice' as const,
+          label: `选择要重掷的能力骰（0–${x} 颗；按新点数落区）`,
+          owner: 'self' as const,
+          areas: KINDS,
+          min: 0,
+          max: x,
+        },
+      ];
+    },
     buildParams: () => ({}),
   },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）

@@ -52,8 +52,8 @@ export interface UiState {
     slots: string[][];
     /** 「slots」步骤每格的填充模式 */
     slotModes: ('real' | 'convert')[];
-    /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴），确认时直接派发对应动作 */
-    pendingKind?: 'dianxing' | 'leibao';
+    /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴、017 帷幕、018 重掷），确认时直接派发对应动作 */
+    pendingKind?: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll';
   };
   pendingConfirm: null | { action: Action; label: string };
   /** 尘起 2 步流程：选择（激活时）启动侧 → 支付代价 */
@@ -361,7 +361,7 @@ function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
 }
 
 /** 为「待决策」（013 电刑/雷暴）打开选骰面板：一次列全部可选骰，选完确认即派发 */
-function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao'): void {
+function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll'): void {
   ctx.hooks.ui.selection = {
     key,
     artifactId: '',
@@ -701,6 +701,27 @@ interface HintPart {
 function phaseHint(ctx: Ctx): HintPart[] {
   const { state } = ctx;
   const pd = state.pending;
+  if (pd && pd.kind === 'activationResolve') {
+    const a = state.players[pd.player].artifacts.find((x) => x.id === pd.artifactId);
+    const skills = ARTIFACT_TEXT[pd.artifactId]?.skills ?? [];
+    const t = skills.find((s) => s.side === pd.side && s.type.includes('激活')) ?? skills.find((s) => s.side === pd.side);
+    return [
+      { text: t?.name ?? a?.name ?? '激活', color: pd.player },
+      { text: '：装填即强制结算，请完成选择后确认。' },
+    ];
+  }
+  if (pd && pd.kind === 'weimu') {
+    return [
+      { text: '帷幕', color: pd.player },
+      { text: '：可受到 2 点真实伤害，并弃置对方的 1 个能力骰；请选择。' },
+    ];
+  }
+  if (pd && pd.kind === 'zhihaiReroll') {
+    return [
+      { text: '漆黑绽放', color: pd.player },
+      { text: `：已获得 ${pd.x} 个随机能力骰，可重掷最多 ${pd.x} 个能力骰并按新点数落区。` },
+    ];
+  }
   if (pd && pd.kind === 'caiyuliu') {
     return [{ text: '裁雨流', color: pd.player }, { text: '：选择该骰去向。' }];
   }
@@ -971,23 +992,25 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
 
 function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
   const { state, hooks } = ctx;
-  const key = a.t === 'skill'
-    ? state.players[state.activePlayer].artifacts
+  const actor = actorOf(state);
+  const def = a.t === 'skill'
+    ? state.players[actor].artifacts
         .find((x) => x.id === a.artifactId)
-        ?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'))
-        ?.key
+        ?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'activation' || s.kind === 'ultimate'))
     : undefined;
+  const key = def?.key;
   const name = skillName(state, a);
+  const label = def?.kind === 'activation' ? `结算「${name}」（激活·立即生效）` : `启动技能：${name}`;
   if (key && SKILL_SELECTION[key]) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn btn-skill';
     b.dataset.act = 'skill';
-    b.textContent = `启动技能：${name}`;
+    b.textContent = label;
     b.addEventListener('click', () => startSkillSelection(ctx, a, key));
     return b;
   }
-  return button(`启动技能：${name}`, a, hooks, 'btn-skill');
+  return button(label, a, hooks, 'btn-skill');
 }
 
 function rerollButton(ctx: Ctx): HTMLButtonElement | null {
@@ -1139,6 +1162,8 @@ function operationList(ctx: Ctx): HTMLElement {
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
   let seenFengmang = false;
+  let seenWeimu = false;
+  let seenZhihaiReroll = false;
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1155,6 +1180,41 @@ function operationList(ctx: Ctx): HTMLElement {
       open.addEventListener('click', () => startPendingSelection(ctx, `@${a.t}`, a.t));
       box.appendChild(open);
       box.appendChild(button(a.t === 'dianxing' ? '不发动「电刑」' : '不发动「雷暴」', a, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'weimu') {
+      // 017 帷幕：唯一渲染来源；接受 → 打开选择器显式选对方 1 个能力骰
+      if (!a.accept) {
+        box.appendChild(button('不发动「帷幕」', a, ctx.hooks));
+        continue;
+      }
+      if (seenWeimu) continue; // 其余 accept 动作（每颗骰一条）仅供 AI，真人走选择器
+      seenWeimu = true;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'weimuOpen';
+      open.textContent = '发动「帷幕」（选择弃置对方 1 个能力骰）';
+      open.addEventListener('click', () => startPendingSelection(ctx, '@weimu', 'weimu'));
+      box.appendChild(open);
+      continue;
+    }
+    if (a.t === 'zhihaiReroll') {
+      // 018 漆黑绽放·必杀：获得 X 骰后可选重掷（含新骰）
+      const x = state.pending && state.pending.kind === 'zhihaiReroll' ? state.pending.x : 0;
+      if (a.dieIds.length === 0) {
+        box.appendChild(button('不重掷', a, ctx.hooks));
+        continue;
+      }
+      if (seenZhihaiReroll) continue; // 默认候选仅供 AI，真人走选择器
+      seenZhihaiReroll = true;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'zhihaiRerollOpen';
+      open.textContent = `重掷最多 ${x} 颗能力骰（可含刚获得的骰）`;
+      open.addEventListener('click', () => startPendingSelection(ctx, '@zhihaiReroll', 'zhihaiReroll'));
+      box.appendChild(open);
       continue;
     }
     if (a.t === 'skill') {
@@ -1287,7 +1347,8 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
 
 /** 技能选择器「dice」步骤的骰片（与骰区点选共享同一选中状态；双入口） */
 function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLElement {
-  const ownerId = step.owner === 'self' ? ctx.state.activePlayer : oppOf(ctx.state.activePlayer);
+  const actor = actorOf(ctx.state);
+  const ownerId = step.owner === 'self' ? actor : oppOf(actor);
   const owner = ctx.state.players[ownerId];
   const box = el('div', 'pay-dice');
   for (const k of AREA_ORDER) {
@@ -1319,8 +1380,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const spec = SKILL_SELECTION[sel.key];
   if (!spec) return null;
   const { state, hooks } = ctx;
-  const steps = spec.steps({ state, player: state.activePlayer, chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
-  const step = steps[sel.stepIndex];
+    const steps = spec.steps({ state, player: actorOf(state), chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
+    const step = steps[sel.stepIndex];
   const panel = el('div', 'selector');
   if (!step) return panel;
 
@@ -1419,7 +1480,7 @@ function confirmSelection(ctx: Ctx): void {
     return;
   }
   const { state, hooks } = ctx;
-  const player = state.activePlayer;
+  const player = actorOf(state);
   const steps = spec.steps({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
   const step = steps[sel.stepIndex];
   if (!step) {
@@ -1453,12 +1514,13 @@ function confirmSelection(ctx: Ctx): void {
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
     if (sel.pendingKind) {
-      // 013 待决策：确认后直接派发（询问本身已是确认，不再走确认条）
+      // 「待决策」直接派发：询问本身即确认（013 电刑/雷暴、017 帷幕、018 重掷）
       const ids = sel.chosenDice[0] ?? [];
-      const pendingAction: Action =
-        sel.pendingKind === 'dianxing'
-          ? { t: 'dianxing', dieIds: ids }
-          : { t: 'leibao', dieIds: ids };
+      let pendingAction: Action;
+      if (sel.pendingKind === 'dianxing') pendingAction = { t: 'dianxing', dieIds: ids };
+      else if (sel.pendingKind === 'leibao') pendingAction = { t: 'leibao', dieIds: ids };
+      else if (sel.pendingKind === 'weimu') pendingAction = { t: 'weimu', accept: true, dieId: ids[0] };
+      else pendingAction = { t: 'zhihaiReroll', dieIds: ids };
       hooks.ui.selection = null;
       hooks.onAction(pendingAction);
       return;
@@ -2286,7 +2348,7 @@ function dustFlowView(ctx: Ctx): HTMLElement {
 
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   const legal = getLegalActions(state);
-  const selfId: PlayerId = state.activePlayer;
+  const selfId: PlayerId = actorOf(state);
   const enemyId: PlayerId = oppOf(selfId);
 
   const rerollAction = legal.find((a): a is Extract<Action, { t: 'reroll' }> => a.t === 'reroll');
@@ -2299,7 +2361,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   if (sel && SKILL_SELECTION[sel.key]) {
     const steps = SKILL_SELECTION[sel.key].steps({
       state,
-      player: state.activePlayer,
+      player: actorOf(state),
       chosenDice: sel.chosenDice,
       options: sel.options,
       numbers: sel.numbers,

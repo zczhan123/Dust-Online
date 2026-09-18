@@ -21,6 +21,7 @@ function makePlayer(id: PlayerId, hero: [string, string, string]): PlayerState {
     markers: 0,
     hasDustSeal: false,
     buffs: [],
+    damagedThisTurn: false,
   };
 }
 
@@ -80,5 +81,6 @@ export function setupGame(opts: SetupOptions): GameState {
     dunwuPulseUsedThisTurn: false,
     attackQueue: null,
     extraReroll: null,
+    pendingQueue: [],
   };
 }

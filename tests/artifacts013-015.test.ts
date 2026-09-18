@@ -108,49 +108,50 @@ describe('015 残响（持续 + 必杀）', () => {
   });
 });
 
-describe('014 惩戒（激活类规则）', () => {
+describe('014 惩戒（激活类：装填即强制结算）', () => {
   const available = (g: GameState): string[] =>
     getLegalActions(g)
       .filter((a) => a.t === 'skill' && a.artifactId === '014')
       .map((a) => (a.t === 'skill' ? a.side : ''));
 
-  it('未激活时不可用；切入左侧后仅该侧可用；之后回合失效；切换/切回重新装填', () => {
+  it('未激活时无按钮；装填某侧后立即弹出强制选择器（不可跳过）；解算后本回合不再可手动发动', () => {
     const g = zorayGame();
     toMain(g);
-    expect(available(g)).toEqual([]); // 未激活任何一侧
+    expect(available(g)).toEqual([]); // 未激活 → 没有任何技能按钮
 
     const s = zorayGame();
-    // 回合 1：尘起切入左侧
     until(s, atA(s, 'dustRise'));
+    s.players.B.areas.attack.push({ id: 'b1', value: 1, kind: 'attack' });
     dustRise(s, '014', 'left');
+    // 装填即强制：立即出现待决策；advance / 其它动作都不能跳过
+    expect(s.pending?.kind).toBe('activationResolve');
+    expect(s.pending && s.pending.kind === 'activationResolve' ? s.pending.side : null).toBe('left');
     expect(art(s, '014').armedSide).toBe('left');
     expect(art(s, '014').armedTurn).toBe(s.turnIndex);
-    until(s, atA(s, 'main'));
-    expect(available(s)).toEqual(['left']); // 切入当回合可用
+    expect(() => applyAction(s, { t: 'advance' })).toThrow();
+    expect(() => applyAction(s, { t: 'attack', costSlots: [{ dieIds: ['nope'] }] })).toThrow();
 
-    // 结束本回合，并在下一个 A 回合「不尘起」直接进入主要阶段 → 上回合的激活已失效
-    toMain(s);
-    applyAction(s, { t: 'advance' });
-    until(s, atA(s, 'main'));
-    expect(available(s)).toEqual([]);
+    const life = s.players.A.life;
+    const med = s.players.A.areas.meditation.length;
+    applyAction(s, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: ['b1'] } });
+    expect(s.pending).toBeNull();
+    expect(s.players.B.areas.defense.some((d) => d.id === 'b1' && d.value === 6)).toBe(true);
+    expect(s.players.A.life).toBe(life - 2);
+    expect(s.players.A.areas.meditation.length).toBe(med + 2);
 
-    // 结束本回合；再下一个 A 回合：尘起切换 → 右侧可用
-    toMain(s);
-    applyAction(s, { t: 'advance' });
-    until(s, atA(s, 'dustRise'));
-    dustRise(s, '014'); // 无 side → 切换到另一侧
-    expect(art(s, '014').activeMarkerSide).toBe('right');
     until(s, atA(s, 'main'));
-    expect(available(s)).toEqual(['right']);
+    expect(available(s)).toEqual([]); // 已生效 → 本回合不再有手动按钮（不能重复发动）
 
-    // 结束本回合；再下一个 A 回合：切回左侧 → 重新装填
+    // 下一个 A 回合：切换右侧 → 再次立即强制弹出（切走再切回可重新装填）
     toMain(s);
     applyAction(s, { t: 'advance' });
     until(s, atA(s, 'dustRise'));
     dustRise(s, '014');
-    expect(art(s, '014').activeMarkerSide).toBe('left');
-    until(s, atA(s, 'main'));
-    expect(available(s)).toEqual(['left']);
+    expect(art(s, '014').activeMarkerSide).toBe('right');
+    expect(s.pending?.kind).toBe('activationResolve');
+    s.players.A.areas.meditation.push({ id: 'a1', value: 1, kind: 'meditation' });
+    applyAction(s, { t: 'skill', artifactId: '014', side: 'right', params: { targetDieIds: ['a1'] } });
+    expect(s.players.A.areas.attack.some((d) => d.id === 'a1' && d.value === 6)).toBe(true); // 014 分布：6 → 攻击区
   });
 
   it('「净化」：把对方 1 点骰变 6 点并按其分布落区；≥1 变更 → 自己得 2 冥想并受 2 真伤', () => {
@@ -162,8 +163,6 @@ describe('014 惩戒（激活类规则）', () => {
     });
     skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
-    dustRise(g, '014', 'left');
-    until(g, atA(g, 'main'));
 
     // 对方（B）第二列 = 002，分布 防{1,6} 攻{3,4} 冥{2,5} → 6 点落到「防御区」
     g.players.B.areas.attack = [
@@ -171,6 +170,9 @@ describe('014 惩戒（激活类规则）', () => {
       { id: 'b2', value: 2, kind: 'attack' },
     ];
     g.players.B.areas.meditation.push({ id: 'bm1', value: 1, kind: 'meditation' });
+
+    dustRise(g, '014', 'left');
+    expect(g.pending?.kind).toBe('activationResolve');
     const lifeBefore = g.players.A.life;
     const medBefore = g.players.A.areas.meditation.length;
 
@@ -187,7 +189,7 @@ describe('014 惩戒（激活类规则）', () => {
     expect(g.players.A.areas.meditation.length).toBe(medBefore + 2); // 获得 2 个随机冥想骰
   });
 
-  it('「净化」：选 0 个 → 不受伤、不得冥想骰（也校验只能改 1 点骰）', () => {
+  it('「净化」：选 0 个 → 不受伤、不得冥想骰；非 1 点骰抛错且不改变状态', () => {
     const g = createGame({
       seed: 1,
       firstPlayer: 'A',
@@ -196,39 +198,37 @@ describe('014 惩戒（激活类规则）', () => {
     });
     skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
-    dustRise(g, '014', 'left');
-    until(g, atA(g, 'main'));
 
-    g.players.B.areas.attack = [{ id: 'b9', value: 3, kind: 'attack' }];
+    g.players.B.areas.attack.push({ id: 'b9', value: 3, kind: 'attack' });
+    dustRise(g, '014', 'left');
     const lifeBefore = g.players.A.life;
     const medBefore = g.players.A.areas.meditation.length;
 
+    // 非 1 点骰不可变更（引擎抛错，不静默；且待决策不被清空）
+    expect(() =>
+      applyAction(g, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: ['b9'] } }),
+    ).toThrow();
+    expect(g.pending?.kind).toBe('activationResolve');
+
+    // 选 0 个 → 无副作用
     applyAction(g, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
     expect(g.players.A.life).toBe(lifeBefore);
     expect(g.players.A.areas.meditation.length).toBe(medBefore);
-
-    // 非 1 点骰不可变更（引擎抛错，不静默）
-    expect(() =>
-      applyAction(g, {
-        t: 'skill',
-        artifactId: '014',
-        side: 'left',
-        params: { targetDieIds: ['b9'] },
-      }),
-    ).toThrow();
+    expect(g.pending).toBeNull();
   });
 
   it('「数罪并罚」：改自己的 1 点骰为 6 点并按 014 分布（6 → 攻击区）落区', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
     skipInitialReroll(g);
     until(g, atA(g, 'dustRise'));
-    dustRise(g, '014', 'left'); // 先激活左侧
-    until(g, atA(g, 'main'));
+    dustRise(g, '014', 'left'); // 先装填左侧
+    applyAction(g, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
+    toMain(g);
     applyAction(g, { t: 'advance' }); // 结束回合
     until(g, atA(g, 'dustRise'));
     dustRise(g, '014'); // 切换 → 右侧（数罪并罚）
     expect(art(g, '014').activeMarkerSide).toBe('right');
-    until(g, atA(g, 'main'));
+    expect(g.pending?.kind).toBe('activationResolve');
 
     g.players.A.areas.meditation.push({ id: 'a1', value: 1, kind: 'meditation' });
     const lifeBefore = g.players.A.life;

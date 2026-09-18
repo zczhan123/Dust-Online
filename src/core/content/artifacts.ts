@@ -75,6 +75,43 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
       { side: 'only', kind: 'ultimate', key: 'canxiang.juejing.ultimate' },
     ],
   },
+  '016': {
+    id: '016',
+    name: '虚臾',
+    weapon: '镰刀',
+    column: 1,
+    speed: 3,
+    will: 8,
+    skills: [
+      { side: 'left', kind: 'activation', key: 'xuyu.void' },
+      { side: 'left', kind: 'continuous', key: 'xuyu.void.continuous' },
+      { side: 'right', kind: 'activate', key: 'xuyu.sacrifice' },
+    ],
+  },
+  '017': {
+    id: '017',
+    name: '幽冥',
+    weapon: '书',
+    column: 2,
+    distribution: { defense: [3, 4], attack: [1, 6], meditation: [2, 5] },
+    skills: [
+      { side: 'left', kind: 'trigger', key: 'youming.weimu' },
+      { side: 'right', kind: 'activate', key: 'youming.mingjie' },
+      { side: 'right', kind: 'continuous', key: 'youming.mingjie.continuous' },
+    ],
+  },
+  '018': {
+    id: '018',
+    name: '至黑',
+    weapon: '钥匙',
+    column: 3,
+    life: 45,
+    chargeReq: 1,
+    skills: [
+      { side: 'only', kind: 'continuous', key: 'zhihai.bloom' },
+      { side: 'only', kind: 'ultimate', key: 'zhihai.bloom.ultimate' },
+    ],
+  },
 };
 
 export function makeArtifact(id: string): Artifact {
@@ -104,4 +141,5 @@ export const HEROES = {
   batton: { name: '孤塔之王 巴顿二世', artifacts: ['007', '008', '009'] },
   tata: { name: '地狱的魔女 塔塔萝丝', artifacts: ['010', '011', '012'] },
   zoray: { name: '轰鸣审判官 佐雷', artifacts: ['013', '014', '015'] },
+  xiu: { name: '漆黑死神 修', artifacts: ['016', '017', '018'] },
 } as const;

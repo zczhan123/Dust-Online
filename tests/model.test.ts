@@ -19,6 +19,7 @@ describe('model types', () => {
       lifeMax: 50,
       markers: 0,
       hasDustSeal: false,
+    damagedThisTurn: false,
       buffs: [],
     };
     const g: GameState = {
@@ -47,6 +48,7 @@ describe('model types', () => {
       dunwuPulseUsedThisTurn: false,
       attackQueue: null,
       extraReroll: null,
+    pendingQueue: [],
     };
     expect(g.players.A.life).toBe(50);
     expect(g.skillConsumedThisAction).toBe(0);

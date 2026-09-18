@@ -420,21 +420,18 @@ describe('renderGame (read-only snapshot)', () => {
       heroB: ['001', '002', '003'],
     });
     skipInitialReroll(state);
-    // 尘起阶段切入 014 左侧
+    // 尘起阶段装填 014 左侧 →「激活」类立即强制结算（弹出待决策）
     const med = { id: 'med-act', value: 4, kind: 'meditation' as const };
     state.players.A.areas.meditation.push(med);
     applyAction(state, { t: 'dustRise', artifactId: '014', side: 'left', costSlots: [{ dieIds: [med.id] }] });
-    applyAction(state, { t: 'advance' }); // -> 主要阶段
+    expect(state.pending?.kind).toBe('activationResolve');
 
     renderGame(state, root, hooksFor());
     const partSel = '.player--self .card[data-artifact="014"] .skill-part[data-key="chengjie.jinghua"]';
-    // 切入当回合未使用：绿色可用
+    // 正在结算：显示为可用（绿色）
     expect(root.querySelector(partSel)!.classList.contains('skill-part--on')).toBe(true);
-    expect(
-      root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!.classList.contains('badge-active--spent'),
-    ).toBe(false);
 
-    // 发动「净化」（不选任何骰）
+    // 解算「净化」（不选任何骰）
     applyAction(state, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
     renderGame(state, root, hooksFor());
     const spent = root.querySelector<HTMLElement>(partSel)!;
@@ -469,9 +466,7 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.hint-phase')!.textContent).toContain('电刑');
 
     // 点「发动」→ 打开选骰面板（一次列全部可选骰，不再逐颗询问）
-    const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
-      (b.textContent ?? '').includes('发动「电刑」'),
-    )!;
+    const open = root.querySelector<HTMLButtonElement>('.actionlist [data-act="dianxingOpen"]')!;
     open.click();
     expect(ui.selection?.pendingKind).toBe('dianxing');
     expect(root.querySelector('.selector')).not.toBeNull();
@@ -497,6 +492,113 @@ describe('renderGame (read-only snapshot)', () => {
       '不发动「雷暴」',
     ]);
     expect(root.querySelector('.hint-phase')!.textContent).toContain('雷暴');
+  });
+
+  it('017 帷幕 ask: 非当前玩家也能正确操作（按钮精确、选择器里是对方的能力骰）', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    // A 持帷幕、轮到的却是 B（跨回合触发的场景）
+    state.activePlayer = 'B';
+    state.pending = { kind: 'weimu', player: 'A' };
+    const bDice = [...state.players.B.areas.attack, ...state.players.B.areas.defense, ...state.players.B.areas.meditation];
+    expect(bDice.length).toBeGreaterThan(0);
+
+    const { ui, onAction } = mount(state, root);
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    // 精确断言：只允许这两个（重复按钮会让测试失败）
+    expect(labels.filter((l) => (l ?? '').includes('帷幕'))).toEqual([
+      '不发动「帷幕」',
+      '发动「帷幕」（选择弃置对方 1 个能力骰）',
+    ]);
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('帷幕');
+
+    const open = root.querySelector<HTMLButtonElement>('.actionlist [data-act="weimuOpen"]')!;
+    open.click();
+    expect(ui.selection?.pendingKind).toBe('weimu');
+    // 选择器里应是「对方」（= 操作者 A 的对手 B）的能力骰
+    const chips = Array.from(root.querySelectorAll<HTMLElement>('.selector [data-id]')).map((n) => n.dataset.id);
+    for (const d of bDice) expect(chips).toContain(d.id);
+    const target = bDice[0].id;
+    root.querySelector<HTMLElement>(`.selector [data-id="${target}"]`)!.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'weimu', accept: true, dieId: target });
+  });
+
+  it('018 漆黑绽放 ask: 必杀获得 X 骰后可重掷（非当前玩家也能选）', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    state.activePlayer = 'A';
+    state.pending = { kind: 'zhihaiReroll', player: 'A', x: 3 };
+    const { ui, onAction } = mount(state, root);
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels.filter((l) => (l ?? '').includes('重掷'))).toEqual([
+      '不重掷',
+      '重掷最多 3 颗能力骰（可含刚获得的骰）',
+    ]);
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('漆黑绽放');
+
+    const open = root.querySelector<HTMLButtonElement>('.actionlist [data-act="zhihaiRerollOpen"]')!;
+    open.click();
+    expect(ui.selection?.pendingKind).toBe('zhihaiReroll');
+    const own = [...state.players.A.areas.attack, ...state.players.A.areas.defense, ...state.players.A.areas.meditation];
+    const pick = own.slice(0, 2).map((d) => d.id);
+    for (const id of pick) root.querySelector<HTMLElement>(`.selector [data-id="${id}"]`)!.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    ok.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'zhihaiReroll', dieIds: pick });
+  });
+
+  it('「激活」类装填后：操作栏给出「结算（激活·立即生效）」并打开选择器', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    // 尘起装填 016 左侧 → 强制待决策
+    const med = { id: 'med-v', value: 4, kind: 'meditation' as const };
+    state.players.A.areas.meditation.push(med);
+    applyAction(state, { t: 'dustRise', artifactId: '016', side: 'left', costSlots: [{ dieIds: [med.id] }] });
+    expect(state.pending?.kind).toBe('activationResolve');
+
+    const { ui, onAction } = mount(state, root);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('虚无形态'),
+    );
+    expect(btn).toBeTruthy();
+    expect(btn!.textContent).toContain('激活·立即生效');
+    btn!.click();
+    expect(ui.selection?.key).toBe('xuyu.void');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    // 选择「防御」→ 确认 → 走确认条 → 确认后派发 skill 动作（参数由选择器给出）
+    const opt = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) =>
+      (b.textContent ?? '').includes('防御'),
+    )!;
+    opt.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    ok.click();
+    const confirm = root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!;
+    confirm.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '016',
+      side: 'left',
+      params: { kind: 'defense' },
+    });
   });
 
   it('block prompt shows real damage, bonus source and 请选择', () => {

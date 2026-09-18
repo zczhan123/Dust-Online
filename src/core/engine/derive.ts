@@ -33,6 +33,8 @@ function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } 
   }
   if (hasActiveSkill(p, 'tiebi.chariot')) will = Math.max(will, 1);
   if (hasActiveSkill(p, 'canxiang.juejing')) will = Math.max(will, 1);
+  // 016 虚臾·虚无形态（持续）：你的速度 +2（仅激活该侧时）
+  if (hasActiveSkill(p, 'xuyu.void.continuous')) speed = Math.max(speed, 2);
   return { speed, will };
 }
 

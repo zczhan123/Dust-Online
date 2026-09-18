@@ -8,7 +8,8 @@ function player(ids: string[]): PlayerState {
     id: 'A',
     areas: { attack: [], defense: [], meditation: [] },
     artifacts: ids.map(makeArtifact),
-    life: 50, lifeMax: 50, markers: 0, hasDustSeal: false, buffs: [],
+    life: 50, lifeMax: 50, markers: 0, hasDustSeal: false,
+    damagedThisTurn: false, buffs: [],
   };
 }
 

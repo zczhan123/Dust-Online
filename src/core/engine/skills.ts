@@ -2,7 +2,8 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
-import { moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
+import { gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
+import { queuePending } from './pending';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
@@ -491,6 +492,77 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         g,
         `${pname(player)} 发动必杀「绝境天神」：计数设为 ${layers}（生命 ${p.life}/${p.lifeMax}，每低 10 点计数 +1，上限 4）`,
       );
+    },
+  },
+  // 016 虚臾·虚无形态（激活，装填即立即强制结算）：受到 10 真实伤害 → 选 1 个能力骰类型 → 获得该类型 3 点骰直至总数达意志上限
+  'xuyu.void': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const kind = params.kind as DiceKind;
+      if (kind !== 'attack' && kind !== 'defense' && kind !== 'meditation') throw new Error('invalid dice kind');
+      logLine(g, `${pname(player)} 「虚无形态」激活：受到 10 点真实伤害`);
+      dealTrueDamage(g, player, 10);
+      if (g.phase === 'gameOver') return;
+      const cap = effectiveWill(p);
+      const n = Math.max(0, cap - totalDice(p));
+      const gained: Die[] = [];
+      const name = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
+      for (let i = 0; i < n; i++) {
+        const d = createDie(newDieId(`${player}-`), 3, kind);
+        p.areas[kind].push(d);
+        gained.push(d);
+      }
+      logLine(
+        g,
+        `「虚无形态」：获得 ${n} 个 3 点${name}骰（能力骰总数 ${cap - n} → ${totalDice(p)}，意志上限 ${cap}）`,
+      );
+    },
+  },
+  // 016 虚臾·献祭（启动）：受到 4 真实伤害 → ①获得 3 个随机点数能力骰（按分布落区）／②本回合攻击伤害 +2
+  'xuyu.sacrifice': {
+    run({ g, player, rng, params }) {
+      const p = g.players[player];
+      const choice = params.choice === 'damage' ? 'damage' : 'dice';
+      logLine(g, `${pname(player)} 发动「献祭」：受到 4 点真实伤害`);
+      dealTrueDamage(g, player, 4);
+      if (g.phase === 'gameOver') return;
+      if (choice === 'damage') {
+        p.buffs.push({ attr: 'attackDamage', add: 2, duration: 'thisTurn', source: '献祭' });
+        logLine(g, `「献祭」：本回合你的攻击伤害 +2`);
+      } else {
+        const gained = gainRandomAbilityDice(g, player, 3, rng);
+        logLine(g, `「献祭」：获得 3 个随机点数能力骰（${vals(gained)}），按其点数移动到对应区域`);
+      }
+    },
+  },
+  // 017 幽冥·冥界行走（启动）：消耗最多 3 个冥想骰 → 获得同等数量的随机点数攻击骰
+  'youming.mingjie': {
+    run({ g, player, rng, params, reportConsumed }) {
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
+      const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
+      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const n = effective.length;
+      const gained = gainRandomDice(g, player, 'attack', n, rng);
+      logLine(
+        g,
+        `${pname(player)} 发动「冥界行走」：消耗 ${n} 个冥想骰（${vals(effective)}），获得 ${n} 个随机点数攻击骰（${vals(gained)}）`,
+      );
+    },
+  },
+  // 018 至黑·漆黑绽放（必杀）：获得 X 个随机点数能力骰（X=计数）→ 弹出「可重掷最多 X 颗」；此后失去持续式
+  'zhihai.bloom.ultimate': {
+    run({ g, player, artifact, rng }) {
+      const x = artifact.count;
+      if (x < 1) throw new Error('计数为 0，无法发动必杀');
+      artifact.continuousLost = true;
+      const gained = gainRandomAbilityDice(g, player, x, rng);
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「漆黑绽放」：计数 ${x}，获得 ${x} 个随机点数能力骰（${vals(gained)}）`,
+      );
+      logLine(g, `「${artifact.name}」：本神器失去持续式效果`);
+      queuePending(g, { kind: 'zhihaiReroll', player, x });
     },
   },
 };

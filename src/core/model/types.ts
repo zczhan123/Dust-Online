@@ -48,6 +48,8 @@ export type Action =
   | { t: 'leibaoReroll'; accept: boolean }
   | { t: 'dianxing'; accept?: false; dieIds?: string[] }
   | { t: 'leibao'; accept?: false; dieIds?: string[] }
+  | { t: 'weimu'; accept: boolean; dieId?: string }
+  | { t: 'zhihaiReroll'; dieIds: string[] }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -57,6 +59,8 @@ export interface PendingAttack {
   physical: boolean;
   sourceDieId?: string;
   sourceValue?: number;
+  /** 攻击的有效点数（物理=骰点；技能发起的攻击=该技能指定的点数）。供 017 持续判定，不受伤害加成影响 */
+  baseValue?: number;
 }
 
 export type Pending =
@@ -69,7 +73,13 @@ export type Pending =
   | { kind: 'dunwuPulse'; player: PlayerId; amount: number }
   | { kind: 'leibaoReroll'; player: PlayerId }
   | { kind: 'dianxing'; player: PlayerId }
-  | { kind: 'leibao'; player: PlayerId };
+  | { kind: 'leibao'; player: PlayerId }
+  /** 「激活」类技能：尘起装填到该侧后立即强制结算（待玩家选完） */
+  | { kind: 'activationResolve'; player: PlayerId; artifactId: string; side: 'left' | 'right' | 'only' }
+  /** 017 帷幕：对方重掷阶段结束时，可受 2 真实伤害并弃置对方 1 个能力骰 */
+  | { kind: 'weimu'; player: PlayerId }
+  /** 018 漆黑绽放·必杀：获得 X 骰后，可选重掷最多 X 颗 */
+  | { kind: 'zhihaiReroll'; player: PlayerId; x: number };
 
 export interface Distribution {
   defense: number[];
@@ -109,6 +119,8 @@ export interface Artifact {
   armedTurn: number;
   count: number;
   chargeLayer: number;
+  /** 「在接下来的游戏中，本神器失去持续式效果」（018 必杀等） */
+  continuousLost?: boolean;
   skills: SkillDef[];
 }
 
@@ -121,6 +133,8 @@ export interface PlayerState {
   markers: number;
   hasDustSeal: boolean;
   buffs: Buff[];
+  /** 本回合是否已受过伤害（018 至黑：每回合第一次受伤才计数） */
+  damagedThisTurn: boolean;
 }
 
 export interface LogEntry {
@@ -157,4 +171,6 @@ export interface GameState {
   attackQueue: { player: PlayerId; values: number[] } | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;
+  /** 待弹出的待决策队列（多个触发同时排队时按序弹出，避免互相覆盖） */
+  pendingQueue: Pending[];
 }

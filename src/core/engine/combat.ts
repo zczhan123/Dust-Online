@@ -1,6 +1,7 @@
 import type { Artifact, GameState, PlayerId, PlayerState } from '../model/types';
 import { hasActiveSkill } from './skill-state';
-import { paySlots, type SlotFill } from './effects';
+import { pumpPending } from './pending';
+import { paySlots, heal, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -32,6 +33,27 @@ export function attackDamageBonus(
 
 export function attackDamageBuff(g: GameState, player: PlayerId): number {
   return attackDamageBonus(g, player).value;
+}
+
+/** 统一受伤入口：扣血 → 判胜负 → 018 至黑「每回合第一次受伤」计数。
+ *  所有扣血点（物理伤害/真实伤害/延后真伤/锋芒取消）都必须走这里。 */
+export function applyLifeLoss(g: GameState, target: PlayerId, amount: number): void {
+  g.players[target].life -= amount;
+  checkLifeEnd(g);
+  noteDamageTaken(g, target);
+}
+
+/** 018 至黑·持续：每当你于任何玩家的回合中第一次受到伤害后，计数 +1（上限 5） */
+function noteDamageTaken(g: GameState, target: PlayerId): void {
+  const p = g.players[target];
+  if (p.damagedThisTurn) return;
+  p.damagedThisTurn = true;
+  const card = artifactWithSkill(p, 'zhihai.bloom');
+  if (!card || card.continuousLost) return;
+  if (!hasActiveSkill(p, 'zhihai.bloom')) return;
+  const before = card.count;
+  card.count = Math.min(5, card.count + 1);
+  logLine(g, `「${card.name}」：本回合首次受到伤害，计数 ${before} → ${card.count}`);
 }
 
 export function checkLifeEnd(g: GameState): void {
@@ -67,6 +89,7 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[]):
     physical: true,
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
+    baseValue: effDie.value,
   };
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${value} 点）` : '';
@@ -88,6 +111,7 @@ export function virtualAttack(g: GameState, player: PlayerId, baseValue: number)
     value: baseValue + attackDamageBuff(g, player),
     unblockable: g.unblockableThisTurn,
     physical: false,
+    baseValue,
   };
 }
 
@@ -104,9 +128,10 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
     logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点防御骰抵挡了攻击`);
   } else {
     const before = defender.life;
-    defender.life -= pa.value;
+    applyLifeLoss(g, defenderId, pa.value);
     logLine(g, `${pname(defenderId)} 未抵挡，受到 ${pa.value} 点伤害（生命 ${before} → ${defender.life}）`);
-    checkLifeEnd(g);
+    // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后 → 按攻击点数回血 / 6 点则受 3 真伤
+    if (pa.value > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
   }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;
@@ -139,12 +164,31 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
 
 /** 若存在多段攻击队列且当前无待决策/待抵挡，则发起下一段虚拟攻击 */
 export function pumpAttackQueue(g: GameState): void {
+  pumpPending(g); // 先弹出排队中的待决策/018 强制必杀，保证「攻击与攻击之间可中断」
   const q = g.attackQueue;
   if (!q || g.pendingAttack || g.pending || g.phase === 'gameOver') return;
   const value = q.values.shift()!;
   if (q.values.length === 0) g.attackQueue = null;
   logLine(g, `${pname(q.player)} 「电刑」第 ${value} 点攻击（依次结算）`);
   virtualAttack(g, q.player, value);
+}
+
+/** 017 幽冥·冥界行走（持续）：你的攻击造成伤害后，按「攻击的有效点数」结算 */
+function onAttackDamage(g: GameState, attacker: PlayerId, value: number): void {
+  const atk = g.players[attacker];
+  if (!hasActiveSkill(atk, 'youming.mingjie.continuous')) return;
+  if (value === 6) {
+    logLine(g, `${pname(attacker)} 「冥界行走」：攻击点数为 6，受到 3 点真实伤害`);
+    dealTrueDamage(g, attacker, 3);
+    return;
+  }
+  const n = heal(g, attacker, Math.ceil(value / 2));
+  logLine(
+    g,
+    n > 0
+      ? `${pname(attacker)} 「冥界行走」：攻击造成伤害，回复 ${n} 点生命（攻击点数 ${value}，不受加成影响）`
+      : `${pname(attacker)} 「冥界行走」：生命已满，未回复`,
+  );
 }
 
 /** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消） */
@@ -160,15 +204,13 @@ export function dealTrueDamage(g: GameState, target: PlayerId, amount: number): 
     g.pending = { kind: 'guwangCancel', player: target, amount };
     return; // 伤害延后到决策解决时结算
   }
-  p.life -= amount;
-  checkLifeEnd(g);
+  applyLifeLoss(g, target, amount);
 }
 
 /** 结算被延后的真实伤害（由 guwangCancel 决策在放弃取消时调用） */
 export function applyDeferredTrueDamage(g: GameState, target: PlayerId, amount: number): void {
   const p = g.players[target];
   const before = p.life;
-  p.life -= amount;
+  applyLifeLoss(g, target, amount);
   logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${p.life}）`);
-  checkLifeEnd(g);
 }
