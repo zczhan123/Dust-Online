@@ -87,6 +87,8 @@ export interface UiState {
     artifactId: string;
     rect: { left: number; top: number; width: number; height: number };
   };
+  /** UI 层的临时错误提示（非法操作等）——**只属于界面**，绝不写进引擎状态/战报 */
+  error: string | null;
 }
 
 export interface RenderHooks {
@@ -907,6 +909,12 @@ function hintBox(ctx: Ctx): HTMLElement {
     }
   }
   left.appendChild(phase);
+  // UI 层错误提示（非法操作等）：只在这里显示，不落进引擎状态/战报
+  if (ctx.hooks.ui.error) {
+    const err = el('span', 'hint-error');
+    err.textContent = `｜${ctx.hooks.ui.error}`;
+    left.appendChild(err);
+  }
   hint.appendChild(left);
   // 尘落计数：操作栏右上角（零额外高度）
   const dust = el('span', 'hint-dust');

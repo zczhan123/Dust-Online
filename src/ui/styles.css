@@ -207,6 +207,8 @@ body {
 .badge-used { background: #d1d5db; color: #4b5563; }
 .badge-forced { background: #dcfce7; color: #15803d; font-weight: 600; }
 .hint-forced { color: #6b7280; }
+/* UI 层错误提示（非法操作等）：只属于界面，不落进引擎状态/战报 */
+.hint-error { color: #b3261e; font-weight: 600; }
 
 /* 技能行：徽标 + 技能名 + 描述按“行内流”排列 → 描述换行后的续行贴左端（不缩进） */
 .skill-part-head { display: block; }

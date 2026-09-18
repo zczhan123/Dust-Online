@@ -20,8 +20,8 @@ const ui: UiState = {
   settingsOpen: false,
   logOpen: false,
   detail: null,
+  error: null,
 };
-let lastError = '';
 
 const render = () => {
   if (!state) return;
@@ -35,7 +35,7 @@ const render = () => {
       if (!state) return;
       try {
         applyAction(state, a);
-        lastError = '';
+        ui.error = null;
         ui.rerollSelected.clear();
         ui.selection = null;
         ui.pendingConfirm = null;
@@ -45,8 +45,8 @@ const render = () => {
         ui.settingsOpen = false;
         ui.detail = null;
       }
-      catch (e) { lastError = e instanceof Error ? e.message : String(e); }
-      if (lastError) state.log.push({ turn: state.turnIndex, phase: state.phase, text: `非法操作：${lastError}` });
+      // 非法操作只在 UI 层提示（不写进引擎状态/战报）
+      catch (e) { ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`; }
       render();
     },
   });

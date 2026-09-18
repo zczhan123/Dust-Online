@@ -16,6 +16,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   settingsOpen: false,
   logOpen: false,
   detail: null,
+  error: null,
 });
 
 const hooksFor = (
@@ -779,6 +780,25 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(state, root, hooksFor());
     const spent = root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!;
     expect(spent.classList.contains('badge-active--spent')).toBe(true);
+  });
+
+  it('UI-layer errors render in the hint bar and never touch the game log', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    const { ui, hooks } = mount(state, root);
+    const logBefore = state.log.length;
+    expect(root.querySelector('.hint-error')).toBeNull();
+
+    ui.error = '非法操作：not main phase';
+    hooks.requestRender();
+    const err = root.querySelector('.hint-error')!;
+    expect(err.textContent).toContain('非法操作：not main phase');
+    // 只属于界面：引擎状态与战报不受影响
+    expect(state.log.length).toBe(logBefore);
+    expect((state.log.map((l) => l.text).join('\n') ?? '').includes('非法操作')).toBe(false);
+
+    ui.error = null;
+    hooks.requestRender();
+    expect(root.querySelector('.hint-error')).toBeNull();
   });
 
   it('block prompt shows real damage, bonus source and 请选择', () => {
