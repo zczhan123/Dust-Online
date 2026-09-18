@@ -751,6 +751,36 @@ describe('renderGame (read-only snapshot)', () => {
     expect(c04.querySelector('.badge-count')!.textContent).toBe('计数 3/3');
   });
 
+  it('「已激活」徽标双方统一用绿色家族（不带玩家色），已生效时转灰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const med = { id: 'med-x', value: 4, kind: 'meditation' as const };
+    state.players.A.areas.meditation.push(med);
+    applyAction(state, { t: 'dustRise', artifactId: '014', side: 'left', costSlots: [{ dieIds: [med.id] }] });
+    // B 方也放一个已完成的第三列神器，用于对比"双方同款"
+    const b3 = state.players.B.artifacts.find((a) => a.id === '003')!;
+    b3.chargeLayer = b3.chargeReq ?? 0;
+    b3.activeMarkerSide = 'left';
+    renderGame(state, root, hooksFor());
+
+    const badgeA = root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!;
+    const badgeB = root.querySelector('.player--enemy .card[data-artifact="003"] .badge-active')!;
+    expect(badgeA.textContent).toContain('已激活·');
+    expect(badgeB.textContent).toContain('已激活·');
+    // 双方一致：绿色家族（CSS 决定），不带玩家色类
+    for (const b of [badgeA, badgeB]) {
+      expect(b.classList.contains('player-A')).toBe(false);
+      expect(b.classList.contains('player-B')).toBe(false);
+    }
+    expect(badgeA.classList.contains('badge-active--spent')).toBe(false);
+
+    // 「已生效」→ 灰态
+    applyAction(state, { t: 'skill', artifactId: '014', side: 'left', params: { targetDieIds: [] } });
+    renderGame(state, root, hooksFor());
+    const spent = root.querySelector('.player--self .card[data-artifact="014"] .badge-active')!;
+    expect(spent.classList.contains('badge-active--spent')).toBe(true);
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
