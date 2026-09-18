@@ -687,6 +687,7 @@ describe('renderGame (read-only snapshot)', () => {
     const vdelta = vsub.querySelector('.sub-delta')!;
     expect(vdelta.textContent).toBe('+2');
     expect(vdelta.classList.contains('player-A')).toBe(true);
+    expect(vdelta.classList.contains('sub-delta')).toBe(true);
 
     // 008 铁壁持续：意志 +1（第一列 007 显示 意志 7+1）
     const bat = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '008', '009'], heroB: ['001', '002', '003'] });
@@ -841,6 +842,11 @@ describe('renderGame (read-only snapshot)', () => {
     const sub = card.querySelector('.card-sub')!;
     expect(sub.textContent).toContain('充能 4/4');
     expect(sub.textContent).not.toContain('已满');
+    // 「充能」是纯文本；只有 y/x 是黄色药丸，且满充能也不换绿色变体
+    const chargePill = sub.querySelector('.sub-charge')!;
+    expect(chargePill).not.toBeNull();
+    expect(chargePill.textContent).toBe('4/4');
+    expect(chargePill.classList.contains('sub-charge--full')).toBe(false);
     // 充能提示排在「已激活」徽标之前
     const active = card.querySelector('.badge-active')!;
     expect(active).not.toBeNull();

@@ -171,8 +171,12 @@ body {
 }
 
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
-/* 属性补正（速度 +1 / 意志 -2）：用玩家配色 */
-.sub-delta { font-weight: 600; }
+/* 属性补正（速度/意志 +N/-N）：玩家色药丸；上下内边距 0 → 不撑高行盒（与充能药丸一致） */
+.sub-delta { font-weight: 700; padding: 0 6px; border-radius: 999px; }
+.sub-delta.player-A { background: #dbeafe; color: #2563eb; }
+.sub-delta.player-B { background: #fee2e2; color: #dc2626; }
+/* 充能 y/x：旧黄色药丸；上下内边距同样为 0（满充能保持黄色，不另做绿色变体） */
+.sub-charge { background: #fbe8c8; color: #8a5a05; font-weight: 700; padding: 0 7px; border-radius: 999px; }
 .badge-active { background: #d7e6fb; color: #1b4f9c; }
 .badge-count { background: #fadfd0; color: #a33a12; }
 .badge-seal { background: #e6dcf7; color: #5b3fa0; }

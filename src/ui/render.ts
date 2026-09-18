@@ -466,7 +466,13 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
     if (player && d !== 0) parts.push(deltaSpan(player, d));
   }
   if (art.life !== undefined) parts.push(`生命 ${art.life}`);
-  if (art.chargeReq !== undefined) parts.push(`充能 ${art.chargeLayer}/${art.chargeReq}`);
+  if (art.chargeReq !== undefined) {
+    // 「充能」为纯文本（与「生命」同样式）；y/x 用旧黄色药丸（`充能 ` 末尾保留半角空格 → 文案仍是「充能 0/1」）
+    parts.push('充能 ');
+    const charge = el('span', 'sub-charge');
+    charge.textContent = `${art.chargeLayer}/${art.chargeReq}`;
+    parts.push(charge);
+  }
   if (art.distribution) {
     parts.push(
       `分布 防${art.distribution.defense.join('/')} 攻${art.distribution.attack.join('/')} 冥${art.distribution.meditation.join('/')}`,
@@ -480,10 +486,11 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
   return parts;
 }
 
-/** 以全角空格连接文本/节点片段（属性补正 .sub-delta 紧贴前一个值，不插分隔） */
+/** 以全角空格连接文本/节点片段（药丸类补正/充能紧贴前一个值，不插分隔） */
 function appendParts(parent: HTMLElement, parts: (string | HTMLElement)[]): void {
   for (const [i, p] of parts.entries()) {
-    const inline = typeof p !== 'string' && p.classList.contains('sub-delta');
+    const inline =
+      typeof p !== 'string' && (p.classList.contains('sub-delta') || p.classList.contains('sub-charge'));
     if (i > 0 && !inline) parent.appendChild(document.createTextNode('　'));
     if (typeof p === 'string') parent.appendChild(document.createTextNode(p));
     else parent.appendChild(p);
