@@ -723,6 +723,34 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.textContent ?? '').not.toContain('⚙');
   });
 
+  it('count appears exactly once per card (badge only, no duplication with the meta line)', () => {
+    const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+
+    // 018：充能 1/1 已满 + 计数 1/5（有激活标记）
+    const xiu = createGame({ seed: 1, firstPlayer: 'A', heroA: ['016', '017', '018'], heroB: ['001', '002', '003'] });
+    const card018 = xiu.players.A.artifacts.find((a) => a.id === '018')!;
+    card018.chargeLayer = 1;
+    card018.activeMarkerSide = 'left';
+    card018.armedSide = 'left';
+    card018.count = 1;
+    renderGame(xiu, root, hooksFor());
+    const c18 = root.querySelector('.player--self .card[data-artifact="018"]')!;
+    const text18 = c18.textContent ?? '';
+    expect(occurrences(text18, '计数 1/5')).toBe(1);
+    expect(occurrences(text18, '充能 1/1')).toBe(1);
+    // 计数仍是独立徽标（橙），不与副标题/充能药丸混淆
+    expect(c18.querySelector('.badge-count')!.textContent).toBe('计数 1/5');
+    expect(c18.querySelector('.card-sub')!.textContent).not.toContain('计数');
+
+    // 004：计数 3/3（淬炼满）
+    const ying = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '005', '006'], heroB: ['001', '002', '003'] });
+    ying.players.A.artifacts.find((a) => a.id === '004')!.count = 3;
+    renderGame(ying, root, hooksFor());
+    const c04 = root.querySelector('.player--self .card[data-artifact="004"]')!;
+    expect(occurrences(c04.textContent ?? '', '计数 3/3')).toBe(1);
+    expect(c04.querySelector('.badge-count')!.textContent).toBe('计数 3/3');
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);

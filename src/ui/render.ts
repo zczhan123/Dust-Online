@@ -478,12 +478,14 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
       `分布 防${art.distribution.defense.join('/')} 攻${art.distribution.attack.join('/')} 冥${art.distribution.meditation.join('/')}`,
     );
   }
-  if (art.count > 0) {
-    const capKey = art.skills.find((s) => COUNT_CAP[s.key]);
-    const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
-    parts.push(cap ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`);
-  }
   return parts;
+}
+
+/** 计数文案的唯一来源（计数与充能是两种属性：计数用独立徽标、会升会降） */
+function countText(art: Artifact): string {
+  const capKey = art.skills.find((s) => COUNT_CAP[s.key]);
+  const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
+  return cap ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`;
 }
 
 /** 以全角空格连接文本/节点片段（药丸类补正/充能紧贴前一个值，不插分隔） */
@@ -521,9 +523,7 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   }
   if (a.count > 0) {
     const count = el('span', 'badge badge-count');
-    const capKey = a.skills.find((s) => COUNT_CAP[s.key]);
-    const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
-    count.textContent = cap ? `计数 ${a.count}/${cap}` : `计数 ${a.count}`;
+    count.textContent = countText(a);
     head.appendChild(count);
   }
   card.appendChild(head);
@@ -1949,7 +1949,10 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   box.appendChild(head);
 
   const sub = el('div', 'detail-sub');
-  appendParts(sub, metaParts(art, ctx.state.players[found.owner]));
+  const meta = metaParts(art, ctx.state.players[found.owner]);
+  // 浮窗没有徽标：计数在此补上（与卡头徽标同文案，两个视图各自只出现一次）
+  if (art.count > 0) meta.push(countText(art));
+  appendParts(sub, meta);
   box.appendChild(sub);
 
   if (art.activeMarkerSide) {
