@@ -461,8 +461,11 @@ describe('renderGame (read-only snapshot)', () => {
     const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
       (b) => b.textContent,
     );
-    expect(labels).toContain('不发动「电刑」');
-    expect(labels).toContain('发动「电刑」（选择 2 颗冥想骰）');
+    // 精确断言（含数量）：这类列表只允许一个渲染来源，重复按钮必须让测试失败
+    expect(labels.filter((l) => (l ?? '').includes('电刑'))).toEqual([
+      '发动「电刑」（选择 2 颗冥想骰）',
+      '不发动「电刑」',
+    ]);
     expect(root.querySelector('.hint-phase')!.textContent).toContain('电刑');
 
     // 点「发动」→ 打开选骰面板（一次列全部可选骰，不再逐颗询问）
@@ -489,8 +492,10 @@ describe('renderGame (read-only snapshot)', () => {
     const labels2 = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
       (b) => b.textContent,
     );
-    expect(labels2).toContain('不发动「雷暴」');
-    expect(labels2).toContain('发动「雷暴」（选择要移动的冥想骰）');
+    expect(labels2.filter((l) => (l ?? '').includes('雷暴'))).toEqual([
+      '发动「雷暴」（选择要移动的冥想骰）',
+      '不发动「雷暴」',
+    ]);
     expect(root.querySelector('.hint-phase')!.textContent).toContain('雷暴');
   });
 

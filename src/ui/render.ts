@@ -1139,33 +1139,24 @@ function operationList(ctx: Ctx): HTMLElement {
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
   let seenFengmang = false;
-  // 013 待决策（电刑/雷暴）：只给「发动（选骰）」+「不发动」两个入口，开选择器一次选完
-  const dxPending = ctx.legal.find((a) => a.t === 'dianxing' && a.accept === false);
-  if (dxPending) {
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'btn btn-skill';
-    open.dataset.act = 'dianxingOpen';
-    open.textContent = '发动「电刑」（选择 2 颗冥想骰）';
-    open.addEventListener('click', () => startPendingSelection(ctx, '@dianxing', 'dianxing'));
-    box.appendChild(open);
-    box.appendChild(button('不发动「电刑」', dxPending, ctx.hooks));
-  }
-  const lbPending = ctx.legal.find((a) => a.t === 'leibao' && a.accept === false);
-  if (lbPending) {
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'btn btn-skill';
-    open.dataset.act = 'leibaoOpen';
-    open.textContent = '发动「雷暴」（选择要移动的冥想骰）';
-    open.addEventListener('click', () => startPendingSelection(ctx, '@leibao', 'leibao'));
-    box.appendChild(open);
-    box.appendChild(button('不发动「雷暴」', lbPending, ctx.hooks));
-  }
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
+    if (a.t === 'dianxing' || a.t === 'leibao') {
+      // 013 待决策（电刑/雷暴）：唯一渲染来源（勿在循环外再渲染一份，否则重复）
+      if (a.accept !== false) continue; // 默认 dieIds 动作仅供 AI/测试，真人走选择器
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = `${a.t}Open`;
+      open.textContent =
+        a.t === 'dianxing' ? '发动「电刑」（选择 2 颗冥想骰）' : '发动「雷暴」（选择要移动的冥想骰）';
+      open.addEventListener('click', () => startPendingSelection(ctx, `@${a.t}`, a.t));
+      box.appendChild(open);
+      box.appendChild(button(a.t === 'dianxing' ? '不发动「电刑」' : '不发动「雷暴」', a, ctx.hooks));
+      continue;
+    }
     if (a.t === 'skill') {
       const sig = `${a.artifactId}:${a.side}`;
       if (seenSkill.has(sig)) continue;
