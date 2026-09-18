@@ -203,6 +203,8 @@ body {
 /* 不能再激活/不能再使用（充能满、计数满、必杀已用）→ 更深的灰，区别于「未激活」 */
 .skill-part--disabled { background: #cfd4db; border-left-color: #6b7280; opacity: 0.95; }
 .badge-used { background: #d1d5db; color: #4b5563; }
+.badge-forced { background: #dcfce7; color: #15803d; font-weight: 600; }
+.hint-forced { color: #6b7280; }
 
 /* 技能行：徽标 + 技能名 + 描述按“行内流”排列 → 描述换行后的续行贴左端（不缩进） */
 .skill-part-head { display: block; }

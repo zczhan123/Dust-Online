@@ -33,7 +33,7 @@ function checkZhihaiForced(g: GameState): boolean {
       );
     });
     logLine(g, `「${card.name}」：本神器失去持续式效果`);
-    g.pending = { kind: 'zhihaiReroll', player: id, x };
+    g.pending = { kind: 'zhihaiReroll', player: id, x, forced: true };
     return true;
   }
   return false;

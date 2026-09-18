@@ -236,6 +236,21 @@ function looksLikeInternalKey(s: string): boolean {
 }
 
 /** 单条技能行的展示状态：可用(绿) / 未激活(浅灰) / 不能再使用(深灰) / 激活侧但本次已用完(灰底绿边) */
+/** 018 至黑：必杀「强制发动」进行中（计数达 5 被引擎强制启动，尚在选择重掷骰） */
+function zhihaiForcedFrame(ctx: Ctx, a: Artifact, s: { type: string }): boolean {
+  const pd = ctx.state.pending;
+  if (!pd || pd.kind !== 'zhihaiReroll' || !pd.forced) return false;
+  if (!s.type.includes('必杀')) return false;
+  return ctx.state.players[pd.player].artifacts.includes(a);
+}
+
+/** 计数类神器的上限（用于卡面徽标显示 计数 N/上限） */
+const COUNT_CAP: Record<string, number> = {
+  'zhihai.bloom': 5,
+  'canxiang.juejing': 4,
+  'buxiang.fengmang': 3,
+};
+
 function skillPartState(
   ctx: Ctx,
   a: Artifact,
@@ -243,6 +258,8 @@ function skillPartState(
 ): 'on' | 'off' | 'disabled' | 'spent' {
   const key = findSkillKey(a, s.side, s.type);
   const markerOk = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
+  // 必杀「强制发动」进行中：该行临时显示为绿色（发动的一瞬间）
+  if (zhihaiForcedFrame(ctx, a, s)) return 'on';
   if (key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key)) return 'disabled';
   if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
   if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
@@ -462,7 +479,9 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
   }
   if (a.count > 0) {
     const count = el('span', 'badge badge-count');
-    count.textContent = `计数 ${a.count}`;
+    const capKey = a.skills.find((s) => COUNT_CAP[s.key]);
+    const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
+    count.textContent = cap ? `计数 ${a.count}/${cap}` : `计数 ${a.count}`;
     head.appendChild(count);
   }
   card.appendChild(head);
@@ -512,6 +531,7 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         const isUsedUltimate =
           key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
         if (isUsedUltimate) part.classList.add('skill-part--used');
+        const isForcedNow = zhihaiForcedFrame(ctx, a, s);
 
         const isFull = key === 'buxiang.cuilian' && a.count >= 3;
         if (isFull) part.classList.add('skill-part--full');
@@ -524,7 +544,11 @@ function artifactCard(a: Artifact, ctx: Ctx): HTMLElement {
         const nameEl = el('span', 'skill-name');
         nameEl.textContent = groupName;
         pHead.appendChild(nameEl);
-        if (isUsedUltimate) {
+        if (isForcedNow) {
+          const forced = el('span', 'badge badge-forced');
+          forced.textContent = '强制发动';
+          pHead.appendChild(forced);
+        } else if (isUsedUltimate) {
           const used = el('span', 'badge badge-used');
           used.textContent = '已使用';
           pHead.appendChild(used);
@@ -713,13 +737,17 @@ function phaseHint(ctx: Ctx): HintPart[] {
   if (pd && pd.kind === 'weimu') {
     return [
       { text: '帷幕', color: pd.player },
-      { text: '：可受到 2 点真实伤害，并弃置对方的 1 个能力骰；请选择。' },
+      { text: '（对方的重掷阶段结束时）：可受到 2 点真实伤害，并弃置对方的 1 个能力骰；请选择' },
     ];
   }
   if (pd && pd.kind === 'zhihaiReroll') {
     return [
       { text: '漆黑绽放', color: pd.player },
-      { text: `：已获得 ${pd.x} 个随机能力骰，可重掷最多 ${pd.x} 个能力骰并按新点数落区。` },
+      {
+        text: pd.forced
+          ? `计数达 5 · 必杀强制发动（无论现在是谁的回合）：已获得 ${pd.x} 个随机能力骰；请选择要重掷的骰子（0–${pd.x} 颗，可含刚获得的骰）`
+          : `：已获得 ${pd.x} 个随机能力骰；请选择要重掷的骰子（0–${pd.x} 颗，可含刚获得的骰）`,
+      },
     ];
   }
   if (pd && pd.kind === 'caiyuliu') {
@@ -827,6 +855,12 @@ function hintBox(ctx: Ctx): HTMLElement {
   who.textContent = `玩家${actor}`;
   turn.appendChild(who);
   turn.appendChild(document.createTextNode(' 操作'));
+  // 待决策属于非当前玩家（跨回合强制触发，如 018 强制必杀 / 017 帷幕）→ 明确标注
+  if (ctx.state.pending && ctx.state.pending.player !== ctx.state.activePlayer) {
+    const forced = el('span', 'hint-forced');
+    forced.textContent = '（强制执行）';
+    turn.appendChild(forced);
+  }
   left.appendChild(turn);
   const phase = el('span', 'hint-phase');
   for (const part of phaseHint(ctx)) {

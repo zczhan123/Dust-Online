@@ -562,7 +562,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         `${pname(player)} 发动必杀「漆黑绽放」：计数 ${x}，获得 ${x} 个随机点数能力骰（${vals(gained)}）`,
       );
       logLine(g, `「${artifact.name}」：本神器失去持续式效果`);
-      queuePending(g, { kind: 'zhihaiReroll', player, x });
+      queuePending(g, { kind: 'zhihaiReroll', player, x, forced: false });
     },
   },
 };

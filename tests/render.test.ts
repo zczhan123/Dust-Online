@@ -516,6 +516,9 @@ describe('renderGame (read-only snapshot)', () => {
       '发动「帷幕」（选择弃置对方 1 个能力骰）',
     ]);
     expect(root.querySelector('.hint-phase')!.textContent).toContain('帷幕');
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('对方的重掷阶段结束时');
+    // 待决策属于非当前玩家 → 明确标注「（强制执行）」
+    expect(root.querySelector('.hint-turn')!.textContent).toContain('（强制执行）');
 
     const open = root.querySelector<HTMLButtonElement>('.actionlist [data-act="weimuOpen"]')!;
     open.click();
@@ -540,7 +543,7 @@ describe('renderGame (read-only snapshot)', () => {
     });
     skipInitialReroll(state);
     state.activePlayer = 'A';
-    state.pending = { kind: 'zhihaiReroll', player: 'A', x: 3 };
+    state.pending = { kind: 'zhihaiReroll', player: 'A', x: 3, forced: false };
     const { ui, onAction } = mount(state, root);
     const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
     expect(labels.filter((l) => (l ?? '').includes('重掷'))).toEqual([
@@ -599,6 +602,77 @@ describe('renderGame (read-only snapshot)', () => {
       side: 'left',
       params: { kind: 'defense' },
     });
+  });
+
+  it('018 强制发动：提示栏标注「计数达 5·强制发动」，卡面必杀行显示绿帧「强制发动」，解算后转「已使用」', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '018')!;
+    card.chargeLayer = 1;
+    card.activeMarkerSide = 'left';
+    card.armedSide = 'left';
+    card.armedTurn = state.turnIndex;
+    card.count = 5;
+    state.ultimatesUsed.push('zhihai.bloom.ultimate');
+    state.pending = { kind: 'zhihaiReroll', player: 'A', x: 5, forced: true };
+    renderGame(state, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('强制发动');
+    expect(hint).toContain('计数达 5');
+    expect(hint).toContain('无论现在是谁的回合');
+    const rowSel = '.player--self .card[data-artifact="018"] .skill-part[data-key="zhihai.bloom.ultimate"]';
+    expect(root.querySelector(rowSel)!.classList.contains('skill-part--on')).toBe(true);
+    expect(root.querySelector(rowSel)!.textContent).toContain('强制发动');
+
+    applyAction(state, { t: 'zhihaiReroll', dieIds: [] });
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector(rowSel)!.classList.contains('skill-part--disabled')).toBe(true);
+    expect(root.querySelector(rowSel)!.textContent).toContain('已使用');
+    expect((root.querySelector('.hint-phase')!.textContent ?? '').includes('强制发动')).toBe(false);
+  });
+
+  it('018 主动发动：提示不含「强制发动」，卡面不显示绿帧', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '018')!;
+    card.chargeLayer = 1;
+    card.activeMarkerSide = 'left';
+    card.count = 2;
+    state.pending = { kind: 'zhihaiReroll', player: 'A', x: 2, forced: false };
+    renderGame(state, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('漆黑绽放');
+    expect(hint.includes('强制发动')).toBe(false);
+    const rowSel = '.player--self .card[data-artifact="018"] .skill-part[data-key="zhihai.bloom.ultimate"]';
+    expect((root.querySelector(rowSel)!.textContent ?? '').includes('强制发动')).toBe(false);
+  });
+
+  it('计数徽标带上限：018 → 计数 5/5、015 → 计数 4/4、004 → 计数 3/3', () => {
+    const xiu = createGame({ seed: 1, firstPlayer: 'A', heroA: ['016', '017', '018'], heroB: ['001', '002', '003'] });
+    xiu.players.A.artifacts.find((a) => a.id === '018')!.count = 5;
+    renderGame(xiu, root, hooksFor());
+    expect(root.querySelector('.card[data-artifact="018"] .badge-count')!.textContent).toBe('计数 5/5');
+
+    // 015 的计数为 0 时不显示徽标；置 4 后应显示 /4
+    const zoray = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '014', '015'], heroB: ['001', '002', '003'] });
+    zoray.players.A.artifacts.find((a) => a.id === '015')!.count = 4;
+    renderGame(zoray, root, hooksFor());
+    expect(root.querySelector('.card[data-artifact="015"] .badge-count')!.textContent).toBe('计数 4/4');
+
+    const ying = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '005', '006'], heroB: ['001', '002', '003'] });
+    ying.players.A.artifacts.find((a) => a.id === '004')!.count = 3;
+    renderGame(ying, root, hooksFor());
+    expect(root.querySelector('.card[data-artifact="004"] .badge-count')!.textContent).toBe('计数 3/3');
   });
 
   it('block prompt shows real damage, bonus source and 请选择', () => {

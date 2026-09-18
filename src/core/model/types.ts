@@ -79,7 +79,7 @@ export type Pending =
   /** 017 帷幕：对方重掷阶段结束时，可受 2 真实伤害并弃置对方 1 个能力骰 */
   | { kind: 'weimu'; player: PlayerId }
   /** 018 漆黑绽放·必杀：获得 X 骰后，可选重掷最多 X 颗 */
-  | { kind: 'zhihaiReroll'; player: PlayerId; x: number };
+  | { kind: 'zhihaiReroll'; player: PlayerId; x: number; forced: boolean };
 
 export interface Distribution {
   defense: number[];
