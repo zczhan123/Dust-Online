@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
 import { effectiveSpeed, effectiveWill, totalDice, emptyDistribution } from '../src/core/engine/derive';
+import { hasActiveSkill } from '../src/core/engine/skill-state';
 import { areaOf } from '../src/core/model/dice';
 import type { DiceKind, GameState, PlayerId } from '../src/core/model/types';
 
@@ -365,6 +366,20 @@ describe('018 至黑（漆黑绽放）', () => {
     applyAction(g, { t: 'zhihaiReroll', dieIds: [] });
     // 用过一次后不再提供
     expect(skillActions(g, '018')).toEqual([]);
+  });
+
+  it('必杀用后「失去持续式效果」：持续不再算作激活（hasActiveSkill 为假）', () => {
+    const g = xiuGame();
+    charge(g, 'A', '018');
+    toMain(g);
+    const card = art(g, 'A', '018');
+    card.count = 2;
+    expect(hasActiveSkill(g.players.A, 'zhihai.bloom')).toBe(true);
+    applyAction(g, { t: 'skill', artifactId: '018', side: 'only', params: {} });
+    applyAction(g, { t: 'zhihaiReroll', dieIds: [] });
+    expect(card.continuousLost).toBe(true);
+    expect(hasActiveSkill(g.players.A, 'zhihai.bloom')).toBe(false); // 通用规则：持续技能一律失效
+    expect(card.count).toBe(2); // 计数保留
   });
 
   it('计数为 0 时不提供主动必杀按钮（X=0 无收益却会失去持续）', () => {

@@ -801,6 +801,49 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector('.hint-error')).toBeNull();
   });
 
+  it('018 必杀用后：持续行与「已激活」徽标一起转灰（计数保留）', () => {
+    const state = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['016', '017', '018'],
+      heroB: ['001', '002', '003'],
+    });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '018')!;
+    card.chargeLayer = 1;
+    card.activeMarkerSide = 'left';
+    card.armedSide = 'left';
+    card.armedTurn = state.turnIndex;
+    card.count = 2;
+    const { hooks } = mount(state, root);
+    applyAction(state, { t: 'advance' }); // 尘起 → 主要阶段
+    hooks.requestRender();
+    const sel = '.player--self .card[data-artifact="018"]';
+    // 用之前：持续行绿色、已激活徽标不灰
+    const durSel = `${sel} .skill-part[data-key="zhihai.bloom"]`;
+    const ultSel = `${sel} .skill-part[data-key="zhihai.bloom.ultimate"]`;
+    expect(root.querySelector(durSel)!.classList.contains('skill-part--on')).toBe(true);
+    expect(root.querySelector(`${sel} .badge-active`)!.classList.contains('badge-active--spent')).toBe(false);
+
+    // 主动发动必杀（计数 2 → 得 2 骰；跳过重掷）
+    applyAction(state, { t: 'skill', artifactId: '018', side: 'only', params: {} });
+    applyAction(state, { t: 'zhihaiReroll', dieIds: [] });
+    hooks.requestRender();
+
+    expect(state.players.A.artifacts.find((a) => a.id === '018')!.continuousLost).toBe(true);
+    // 持续行 → 深灰；必杀行 → 已使用灰
+    expect(root.querySelector(durSel)!.classList.contains('skill-part--disabled')).toBe(true);
+    expect(root.querySelector(durSel)!.classList.contains('skill-part--on')).toBe(false);
+    expect(root.querySelector(ultSel)!.textContent).toContain('已使用');
+    // 已激活徽标 → 同样转灰（文案不变、不加文字）
+    const act = root.querySelector(`${sel} .badge-active`)!;
+    expect(act.classList.contains('badge-active--spent')).toBe(true);
+    expect(act.textContent).toContain('已激活·');
+    expect((act.textContent ?? '').includes('失效')).toBe(false);
+    // 计数保留
+    expect(root.querySelector(`${sel} .badge-count`)!.textContent).toBe('计数 2/5');
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);

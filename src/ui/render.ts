@@ -215,10 +215,12 @@ function skillLabel(
   return t?.name;
 }
 
-/** 激活侧是否为「激活」类技能、且当前已不可用（用于「已激活·xx」徽标变灰） */
+/** 激活侧是否为「激活」类技能、且当前已不可用（用于「已激活·xx」徽标变灰）；或无剩余生效能力 */
 function activeSideSpent(ctx: Ctx, a: Artifact): boolean {
   const side = a.activeMarkerSide;
   if (!side) return false;
+  // 该神器已无生效能力（持续失效、必杀用尽）→「已激活」徽标同样转灰
+  if (a.continuousLost) return true;
   const skills = ARTIFACT_TEXT[a.id]?.skills;
   const t =
     skills?.find((s) => s.side === side && s.type.includes('激活')) ??
@@ -264,6 +266,8 @@ function skillPartState(
   // 必杀「强制发动」进行中：该行临时显示为绿色（发动的一瞬间）
   if (zhihaiForcedFrame(ctx, a, s)) return 'on';
   if (key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key)) return 'disabled';
+  // 「在接下来的游戏中失去持续式效果」（018 必杀用后）：该持续技能行转深灰
+  if (a.continuousLost && s.type.includes('持续')) return 'disabled';
   if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
   if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
   // 「激活」类：只有被“切入该侧”的当回合、且本回合未用过时才可用；否则为“已用完”（灰底 + 保留绿色左边线）
