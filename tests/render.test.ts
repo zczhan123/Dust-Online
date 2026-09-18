@@ -445,7 +445,7 @@ describe('renderGame (read-only snapshot)', () => {
     ).toBe(true);
   });
 
-  it('shows 电刑/雷暴 ask options with skill names and dice chips', () => {
+  it('013 电刑/雷暴 ask: 发动 opens the chooser, one pick-set dispatches directly on 确认', () => {
     const state = createGame({
       seed: 1,
       firstPlayer: 'A',
@@ -454,22 +454,43 @@ describe('renderGame (read-only snapshot)', () => {
     });
     skipInitialReroll(state);
     state.players.A.areas.meditation.push({ id: 'm1', value: 4, kind: 'meditation' });
+    state.players.A.areas.meditation.push({ id: 'm2', value: 6, kind: 'meditation' });
 
-    state.pending = { kind: 'dianxing', player: 'A', picked: [] };
-    renderGame(state, root, hooksFor());
+    state.pending = { kind: 'dianxing', player: 'A' };
+    const { ui, onAction } = mount(state, root);
     const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
       (b) => b.textContent,
     );
     expect(labels).toContain('不发动「电刑」');
-    expect(root.querySelector('.actionlist-chips .pay-die[data-id="m1"]')!.textContent).toBe('冥4');
+    expect(labels).toContain('发动「电刑」（选择 2 颗冥想骰）');
     expect(root.querySelector('.hint-phase')!.textContent).toContain('电刑');
 
-    state.pending = { kind: 'leibao', player: 'A', picked: [] };
+    // 点「发动」→ 打开选骰面板（一次列全部可选骰，不再逐颗询问）
+    const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('发动「电刑」'),
+    )!;
+    open.click();
+    expect(ui.selection?.pendingKind).toBe('dianxing');
+    expect(root.querySelector('.selector')).not.toBeNull();
+
+    root.querySelector<HTMLElement>('.player--self .die[data-id="m1"]')!.click();
+    root.querySelector<HTMLElement>('.player--self .die[data-id="m2"]')!.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    expect(ok.disabled).toBe(false);
+    ok.click();
+    // 询问本身即确认：直接派发，不再经过确认条
+    expect(onAction).toHaveBeenCalledWith({ t: 'dianxing', dieIds: ['m1', 'm2'] });
+    expect(ui.selection).toBeNull();
+
+    state.pending = { kind: 'leibao', player: 'A' };
     renderGame(state, root, hooksFor());
     const labels2 = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map(
       (b) => b.textContent,
     );
     expect(labels2).toContain('不发动「雷暴」');
+    expect(labels2).toContain('发动「雷暴」（选择要移动的冥想骰）');
     expect(root.querySelector('.hint-phase')!.textContent).toContain('雷暴');
   });
 

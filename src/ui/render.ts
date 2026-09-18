@@ -52,6 +52,8 @@ export interface UiState {
     slots: string[][];
     /** 「slots」步骤每格的填充模式 */
     slotModes: ('real' | 'convert')[];
+    /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴），确认时直接派发对应动作 */
+    pendingKind?: 'dianxing' | 'leibao';
   };
   pendingConfirm: null | { action: Action; label: string };
   /** 尘起 2 步流程：选择（激活时）启动侧 → 支付代价 */
@@ -356,6 +358,24 @@ function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
     player.id === ctx.state.activePlayer &&
     ctx.maxReroll > 0
   );
+}
+
+/** 为「待决策」（013 电刑/雷暴）打开选骰面板：一次列全部可选骰，选完确认即派发 */
+function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao'): void {
+  ctx.hooks.ui.selection = {
+    key,
+    artifactId: '',
+    side: 'only',
+    stepIndex: 0,
+    chosenDice: [],
+    options: [],
+    currentSel: new Set<string>(),
+    numbers: [],
+    slots: [],
+    slotModes: [],
+    pendingKind: kind,
+  };
+  ctx.hooks.requestRender();
 }
 
 function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
@@ -933,11 +953,9 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dianxing':
-      return a.accept === false ? '不发动「电刑」' : '发动「电刑」';
+      return a.accept === false ? '不发动「电刑」' : '发动「电刑」（选择 2 颗冥想骰）';
     case 'leibao':
-      if (a.accept === false) return '不发动「雷暴」';
-      if (a.done) return '完成（移动这些冥想骰）';
-      return '发动「雷暴」';
+      return a.accept === false ? '不发动「雷暴」' : '发动「雷暴」（选择要移动的冥想骰）';
     case 'dunwuPulse': {
       const pd = state.pending;
       const amount = pd && pd.kind === 'dunwuPulse' ? pd.amount : 0;
@@ -1045,18 +1063,6 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const owner: PlayerId = pd && pd.kind === 'guwangCharge' ? opponent(pd.player) : state.activePlayer;
       return { parts: ['改为 1 点 ', ''], dice: [{ id: a.dieId, owner }] };
     }
-    case 'dianxing': {
-      // 013 电刑：逐颗选消耗的冥想骰（骰片）
-      if (!a.pick) return null;
-      const owner: PlayerId = state.pending?.player ?? state.activePlayer;
-      return { parts: ['消耗 ', ''], dice: [{ id: a.pick, owner }] };
-    }
-    case 'leibao': {
-      // 013 雷暴·触发：逐颗选要移动到攻击骰区的冥想骰（骰片）
-      if (!a.pick) return null;
-      const owner: PlayerId = state.pending?.player ?? state.activePlayer;
-      return { parts: ['移到攻击区 ', ''], dice: [{ id: a.pick, owner }] };
-    }
     default:
       return null;
   }
@@ -1133,6 +1139,29 @@ function operationList(ctx: Ctx): HTMLElement {
   const seenSkill = new Set<string>();
   const seenDust = new Set<string>();
   let seenFengmang = false;
+  // 013 待决策（电刑/雷暴）：只给「发动（选骰）」+「不发动」两个入口，开选择器一次选完
+  const dxPending = ctx.legal.find((a) => a.t === 'dianxing' && a.accept === false);
+  if (dxPending) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn btn-skill';
+    open.dataset.act = 'dianxingOpen';
+    open.textContent = '发动「电刑」（选择 2 颗冥想骰）';
+    open.addEventListener('click', () => startPendingSelection(ctx, '@dianxing', 'dianxing'));
+    box.appendChild(open);
+    box.appendChild(button('不发动「电刑」', dxPending, ctx.hooks));
+  }
+  const lbPending = ctx.legal.find((a) => a.t === 'leibao' && a.accept === false);
+  if (lbPending) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn btn-skill';
+    open.dataset.act = 'leibaoOpen';
+    open.textContent = '发动「雷暴」（选择要移动的冥想骰）';
+    open.addEventListener('click', () => startPendingSelection(ctx, '@leibao', 'leibao'));
+    box.appendChild(open);
+    box.appendChild(button('不发动「雷暴」', lbPending, ctx.hooks));
+  }
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1432,6 +1461,17 @@ function confirmSelection(ctx: Ctx): void {
       .map((s, i) => (s.kind === 'number' ? i : -1))
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
+    if (sel.pendingKind) {
+      // 013 待决策：确认后直接派发（询问本身已是确认，不再走确认条）
+      const ids = sel.chosenDice[0] ?? [];
+      const pendingAction: Action =
+        sel.pendingKind === 'dianxing'
+          ? { t: 'dianxing', dieIds: ids }
+          : { t: 'leibao', dieIds: ids };
+      hooks.ui.selection = null;
+      hooks.onAction(pendingAction);
+      return;
+    }
     const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers, slots: sel.slots });
     const action: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
     hooks.ui.selection = null;

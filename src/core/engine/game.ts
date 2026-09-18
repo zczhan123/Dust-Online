@@ -10,6 +10,14 @@ import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasAct
 import { logLine, pname } from './log';
 import type { Action, GameState, PlayerId, PlayerState, SlotFill } from '../model/types';
 
+/** 校验：这些骰必须是该玩家自己的、互不重复的冥想骰（越界抛错，不静默修正） */
+function assertOwnMeditationDice(p: PlayerState, ids: string[]): void {
+  if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+  for (const id of ids) {
+    if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
+  }
+}
+
 function withRng(g: GameState, fn: (rng: SeededRng) => void): void {
   const rng = new SeededRng(g.rngState);
   fn(rng);
@@ -23,9 +31,6 @@ function assertConversionAllowed(g: GameState, player: PlayerId, fills?: SlotFil
     throw new Error('conversion requires 真实之剑');
   }
 }
-
-/** 013 触发类技能：以「技能动作」形式暴露（便于玩家显式选择骰子），且可每回合多次使用 */
-const TRIGGER_ACTION_KEYS = ['minglei.dianxing', 'minglei.leibao.trigger'];
 
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
@@ -378,22 +383,20 @@ export function getLegalActions(g: GameState): Action[] {
       ];
     }
     if (g.pending.kind === 'dianxing') {
-      const pd = g.pending;
-      const p = g.players[pd.player];
-      const acts: Action[] = pd.picked.length === 0 ? [{ t: 'dianxing', accept: false }] : [];
-      for (const d of p.areas.meditation) {
-        if (!pd.picked.includes(d.id)) acts.push({ t: 'dianxing', pick: d.id });
-      }
+      const p = g.players[g.pending.player];
+      const acts: Action[] = [{ t: 'dianxing', accept: false }];
+      // 默认动作（供 AI / 测试）：取前 2 颗冥想骰；真人由 UI 打开选骰面板显式选择
+      const first2 = p.areas.meditation.slice(0, 2).map((d) => d.id);
+      if (first2.length === 2) acts.push({ t: 'dianxing', dieIds: first2 });
       return acts;
     }
     if (g.pending.kind === 'leibao') {
-      const pd = g.pending;
-      const p = g.players[pd.player];
-      const acts: Action[] = pd.picked.length === 0 ? [{ t: 'leibao', accept: false }] : [{ t: 'leibao', done: true }];
-      for (const d of p.areas.meditation) {
-        if (!pd.picked.includes(d.id)) acts.push({ t: 'leibao', pick: d.id });
-      }
-      return acts;
+      const p = g.players[g.pending.player];
+      const pick = p.areas.meditation.slice(0, 2).map((d) => d.id);
+      return [
+        { t: 'leibao', accept: false },
+        { t: 'leibao', dieIds: pick },
+      ];
     }
     const pp = g.players[g.pending.player];
     const acts: Action[] = [{ t: 'fengmang', accept: false }];
@@ -536,22 +539,18 @@ export function applyAction(g: GameState, action: Action): GameState {
         pumpAttackQueue(g);
         break;
       }
-      const id = action.pick;
-      if (!id) throw new Error('missing die');
-      if (pd.picked.includes(id)) throw new Error('duplicate die id');
-      if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
-      pd.picked.push(id);
-      if (pd.picked.length === 2) {
-        const pickedVals = pd.picked.map((x) => p.areas.meditation.find((d) => d.id === x)?.value ?? 0);
-        consumeDice(p, 'meditation', pd.picked);
-        g.pending = null;
-        g.attackQueue = { player: pd.player, values: [1, 2, 3] };
-        logLine(
-          g,
-          `${pname(pd.player)} 发动「电刑」：消耗 2 个冥想骰（${pickedVals.join('/')}点），依次以 1、2、3 点各进行一次攻击`,
-        );
-        pumpAttackQueue(g);
-      }
+      const ids = action.dieIds ?? [];
+      if (ids.length !== 2) throw new Error('电刑需消耗恰好 2 个冥想骰');
+      assertOwnMeditationDice(p, ids);
+      g.pending = null;
+      const pickedVals = ids.map((x) => p.areas.meditation.find((d) => d.id === x)?.value ?? 0);
+      consumeDice(p, 'meditation', ids);
+      g.attackQueue = { player: pd.player, values: [1, 2, 3] };
+      logLine(
+        g,
+        `${pname(pd.player)} 发动「电刑」：消耗 2 个冥想骰（${pickedVals.join('/')}点），依次以 1、2、3 点各进行一次攻击`,
+      );
+      pumpAttackQueue(g);
       break;
     }
     case 'leibao': {
@@ -564,23 +563,16 @@ export function applyAction(g: GameState, action: Action): GameState {
         pumpAttackQueue(g);
         break;
       }
-      if (action.done) {
-        if (pd.picked.length === 0) throw new Error('nothing picked');
-        moveDice(g, pd.player, pd.picked, 'attack');
-        logLine(
-          g,
-          `${pname(pd.player)} 发动「雷暴」：将 ${pd.picked.length} 个冥想骰移动到攻击骰区（保留点数）`,
-        );
-        g.pending = null;
-        pumpAttackQueue(g);
-        break;
-      }
-      const id = action.pick;
-      if (!id) throw new Error('missing die');
-      if (pd.picked.includes(id)) throw new Error('duplicate die id');
-      if (!p.areas.meditation.some((d) => d.id === id)) throw new Error(`not your meditation die: ${id}`);
-      if (pd.picked.length >= 2) throw new Error('at most 2 dice');
-      pd.picked.push(id);
+      const ids = action.dieIds ?? [];
+      if (ids.length > 2) throw new Error('雷暴最多移动 2 个冥想骰');
+      assertOwnMeditationDice(p, ids);
+      g.pending = null;
+      if (ids.length > 0) moveDice(g, pd.player, ids, 'attack');
+      logLine(
+        g,
+        `${pname(pd.player)} 发动「雷暴」：将 ${ids.length} 个冥想骰移动到攻击骰区（保留点数）`,
+      );
+      pumpAttackQueue(g);
       break;
     }
     case 'dustRise': {
@@ -754,15 +746,13 @@ export function applyAction(g: GameState, action: Action): GameState {
           x.side === action.side &&
           (x.kind === 'activate' ||
             x.kind === 'activation' ||
-            x.kind === 'ultimate' ||
-            false),
+            x.kind === 'ultimate'),
       );
       if (!s) throw new Error('no usable skill on that side');
       if (!skillActive(a, s)) throw new Error('skill not active');
       if (s.kind === 'activation' && !activationUsable(g, a, s)) throw new Error('activation skill only usable in the turn it was armed');
       if (s.kind === 'ultimate' && g.ultimatesUsed.includes(s.key)) throw new Error('ultimate already used');
-      const repeatable = s.kind === 'trigger' && TRIGGER_ACTION_KEYS.includes(s.key);
-      if (!repeatable && g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
+      if (g.skillsUsedThisTurn.includes(s.key)) throw new Error('skill already used this turn');
       assertConversionAllowed(g, g.activePlayer, action.params?.costSlots as SlotFill[] | undefined);
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
@@ -780,7 +770,7 @@ export function applyAction(g: GameState, action: Action): GameState {
           },
         }),
       );
-      if (!repeatable) g.skillsUsedThisTurn.push(s.key);
+      g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
       // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）
       if (

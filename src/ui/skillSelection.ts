@@ -476,6 +476,34 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ chosenDice }) => ({ targetDieIds: chosenDice[0] ?? [] }),
   },
+  // 013 电刑（待决策）：一次选完 2 颗消耗的冥想骰（伪 key，由 UI 派发 dianxing 动作）
+  '@dianxing': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择消耗的 2 个冥想骰（电刑）',
+        owner: 'self',
+        areas: ['meditation'],
+        min: 2,
+        max: 2,
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // 013 雷暴·触发（待决策）：一次选完要移动到攻击骰区的冥想骰（1–2 颗；不想移动就用「不发动」）
+  '@leibao': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要移动到攻击骰区的冥想骰（1–2 颗，保留点数）',
+        owner: 'self',
+        areas: ['meditation'],
+        min: 1,
+        max: 2,
+      },
+    ],
+    buildParams: () => ({}),
+  },
   // 尘起行动的代价：玩家自选 1 颗冥想骰（伪 key，由 UI 特殊处理为 dustRise 动作）
   '@dustRise': {
     steps: () => [

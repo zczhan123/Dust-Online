@@ -46,8 +46,8 @@ export type Action =
   | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string }
   | { t: 'dunwuPulse'; accept: boolean }
   | { t: 'leibaoReroll'; accept: boolean }
-  | { t: 'dianxing'; accept?: false; pick?: string }
-  | { t: 'leibao'; accept?: false; pick?: string; done?: true }
+  | { t: 'dianxing'; accept?: false; dieIds?: string[] }
+  | { t: 'leibao'; accept?: false; dieIds?: string[] }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -68,8 +68,8 @@ export type Pending =
   | { kind: 'dunwuHalve'; player: PlayerId }
   | { kind: 'dunwuPulse'; player: PlayerId; amount: number }
   | { kind: 'leibaoReroll'; player: PlayerId }
-  | { kind: 'dianxing'; player: PlayerId; picked: string[] }
-  | { kind: 'leibao'; player: PlayerId; picked: string[] };
+  | { kind: 'dianxing'; player: PlayerId }
+  | { kind: 'leibao'; player: PlayerId };
 
 export interface Distribution {
   defense: number[];

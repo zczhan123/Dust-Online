@@ -128,9 +128,9 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
     const med = atk.areas.meditation.length;
     const usedAttackDie = pa.physical && pa.sourceDieId !== undefined;
     if (usedAttackDie && hasActiveSkill(atk, 'minglei.dianxing') && med >= 2) {
-      g.pending = { kind: 'dianxing', player: pa.attacker, picked: [] };
+      g.pending = { kind: 'dianxing', player: pa.attacker };
     } else if (blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
-      g.pending = { kind: 'leibao', player: pa.attacker, picked: [] };
+      g.pending = { kind: 'leibao', player: pa.attacker };
     }
   }
   // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
