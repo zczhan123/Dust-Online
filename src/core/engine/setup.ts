@@ -82,5 +82,7 @@ export function setupGame(opts: SetupOptions): GameState {
     attackQueue: null,
     extraReroll: null,
     pendingQueue: [],
+    chenaiUsed: { A: false, B: false },
+    freeNoCostRise: 0,
   };
 }

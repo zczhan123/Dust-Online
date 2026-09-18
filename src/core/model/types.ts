@@ -35,7 +35,7 @@ export interface EffectiveDie {
 export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
-  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; costSlots?: SlotFill[] }
+  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; free?: boolean; costSlots?: SlotFill[] }
   | { t: 'attack'; costSlots: SlotFill[] }
   | { t: 'block'; costSlots?: SlotFill[] }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
@@ -50,6 +50,10 @@ export type Action =
   | { t: 'leibao'; accept?: false; dieIds?: string[] }
   | { t: 'weimu'; accept: boolean; dieId?: string }
   | { t: 'zhihaiReroll'; dieIds: string[] }
+  /** 019 尘哀·尘起：是否接受赠送的 1 次「无需冥想骰的额外尘起行动」 */
+  | { t: 'chenaiFreeRise'; accept: boolean }
+  /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
+  | { t: 'shouhunCancel'; cancel: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -61,6 +65,8 @@ export interface PendingAttack {
   sourceValue?: number;
   /** 攻击的有效点数（物理=骰点；技能发起的攻击=该技能指定的点数）。供 017 持续判定，不受伤害加成影响 */
   baseValue?: number;
+  /** 本次伤害是否已被「减半」（同种削减不叠加：屏障 / 021 满计数只减半一次） */
+  halved?: boolean;
 }
 
 export type Pending =
@@ -79,7 +85,11 @@ export type Pending =
   /** 017 帷幕：对方重掷阶段结束时，可受 2 真实伤害并弃置对方 1 个能力骰 */
   | { kind: 'weimu'; player: PlayerId }
   /** 018 漆黑绽放·必杀：获得 X 骰后，可选重掷最多 X 颗 */
-  | { kind: 'zhihaiReroll'; player: PlayerId; x: number; forced: boolean };
+  | { kind: 'zhihaiReroll'; player: PlayerId; x: number; forced: boolean }
+  /** 019 尘哀·尘起：自己回合造成伤害后可立即进行 1 次「无需冥想骰」的额外尘起行动（每回合 1 次） */
+  | { kind: 'chenaiFreeRise'; player: PlayerId }
+  /** 020 兽魂：攻击方选择「取消本次伤害（持有者计数 −1）」还是「正常造成伤害」 */
+  | { kind: 'shouhunCancel'; player: PlayerId; owner: PlayerId; attack: PendingAttack };
 
 export interface Distribution {
   defense: number[];
@@ -97,9 +107,11 @@ export interface Buff {
 
 export interface SkillDef {
   side: 'left' | 'right' | 'only';
-  /** continuous=持续 trigger=触发 activate=启动 charge=充能 ultimate=必杀 activation=激活（仅在“切入该侧”的当回合可用一次） */
+  /** continuous=持续 trigger=触发 activate=启动 charge=充能 ultimate=必杀 activation=激活（装填到该侧即立即强制结算） */
   kind: 'activate' | 'activation' | 'continuous' | 'charge' | 'ultimate' | 'trigger';
   key: string;
+  /** 启动后刷新自身「每回合一次」计数（019 蛮王之牙） */
+  refresh?: boolean;
 }
 
 export interface Artifact {
@@ -118,6 +130,10 @@ export interface Artifact {
   /** 执行上述切入时的回合号（与 GameState.turnIndex 比较） */
   armedTurn: number;
   count: number;
+  /** 本神器计数的上限（卡面 `计数 N/上限` 与续充判定用；未填 = 不显示上限） */
+  countCap?: number;
+  /** 第三列神器：完成充能（已激活）后仍可被尘起选中继续充能（021 决意「续充」） */
+  chargeExtend?: boolean;
   chargeLayer: number;
   /** 「在接下来的游戏中，本神器失去持续式效果」（018 必杀等） */
   continuousLost?: boolean;
@@ -173,4 +189,8 @@ export interface GameState {
   extraReroll: { player: PlayerId; resume: PlayerId } | null;
   /** 待弹出的待决策队列（多个触发同时排队时按序弹出，避免互相覆盖） */
   pendingQueue: Pending[];
+  /** 019 尘哀·尘起：本回合该玩家是否已触发过（每回合最多 1 次） */
+  chenaiUsed: Record<PlayerId, boolean>;
+  /** 本回合可用的「无需冥想骰的额外尘起行动」次数（019 尘起赠予） */
+  freeNoCostRise: number;
 }

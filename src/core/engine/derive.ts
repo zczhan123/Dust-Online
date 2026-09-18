@@ -35,7 +35,20 @@ function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } 
   if (hasActiveSkill(p, 'canxiang.juejing')) will = Math.max(will, 1);
   // 016 虚臾·虚无形态（持续）：你的速度 +2（仅激活该侧时）
   if (hasActiveSkill(p, 'xuyu.void.continuous')) speed = Math.max(speed, 2);
+  // 020 兽魂·狼之血（持续）：你的速度 + 计数
+  if (hasActiveSkill(p, 'shouhun.lang.continuous')) {
+    speed = Math.max(speed, artifactByKey(p, 'shouhun.lang.continuous')?.count ?? 0);
+  }
+  // 021 决意·野火燎原（持续·计数 3+）：你的速度 +1
+  if (hasActiveSkill(p, 'jueyi.wildfire.continuous')) {
+    if ((artifactByKey(p, 'jueyi.wildfire.continuous')?.count ?? 0) >= 3) speed = Math.max(speed, 1);
+  }
   return { speed, will };
+}
+
+/** 找到拥有某技能 key 的神器 */
+function artifactByKey(p: PlayerState, key: string) {
+  return p.artifacts.find((a) => a.skills.some((s) => s.key === key));
 }
 
 export function effectiveSpeed(p: PlayerState): number {

@@ -63,6 +63,8 @@ export interface UiState {
     kind: 'activate' | 'switch' | 'charge';
     side?: 'left' | 'right';
     step: 'side' | 'pay';
+    /** 019 尘起赠予的免费额外尘起（无需冥想骰，且不占每回合 1 次） */
+    free?: boolean;
     /** 「真实之剑」置换：已选中的 2 颗能力骰 */
     convertPick?: string[];
   };
@@ -249,13 +251,6 @@ function zhihaiForcedFrame(ctx: Ctx, a: Artifact, s: { type: string }): boolean 
   return ctx.state.players[pd.player].artifacts.includes(a);
 }
 
-/** 计数类神器的上限（用于卡面徽标显示 计数 N/上限） */
-const COUNT_CAP: Record<string, number> = {
-  'zhihai.bloom': 5,
-  'canxiang.juejing': 4,
-  'buxiang.fengmang': 3,
-};
-
 function skillPartState(
   ctx: Ctx,
   a: Artifact,
@@ -299,8 +294,12 @@ function dustSideSkillName(artifactId: string, side: 'left' | 'right'): string {
   return text?.skills.find((s) => s.side === side)?.name ?? (side === 'left' ? '左侧' : '右侧');
 }
 
-function dustEntryLabel(a: Artifact): string {
-  return `${DUST_KIND_LABEL[dustFlowKind(a)]}「${a.name}」`;
+function dustEntryLabel(a: Artifact, free = false): string {
+  if (a.column === 3 && a.chargeLayer >= (a.chargeReq ?? 0)) {
+    return `续充「${a.name}」（计数 +1、回复生命）`;
+  }
+  const base = `${DUST_KIND_LABEL[dustFlowKind(a)]}「${a.name}」`;
+  return free ? `${base}（免费）` : base;
 }
 
 function skillName(state: GameState, a: SkillAction): string {
@@ -434,8 +433,19 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
   ctx.hooks.requestRender();
 }
 
-function openDustFlow(ctx: Ctx, a: Artifact): void {
+function openDustFlow(ctx: Ctx, a: Artifact, free = false): void {
   const kind = dustFlowKind(a);
+  if (free) {
+    // 019 尘起赠予的免费尘起：切换/充能无需选侧与支付，直接派发；激活仍需选侧
+    if (kind !== 'activate') {
+      const side = kind === 'switch' ? (a.activeMarkerSide === 'left' ? 'right' : 'left') : undefined;
+      ctx.hooks.onAction({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side } : {}) });
+      return;
+    }
+    ctx.hooks.ui.dustFlow = { artifactId: a.id, kind, step: 'side', free: true };
+    ctx.hooks.requestRender();
+    return;
+  }
   ctx.hooks.ui.dustFlow = {
     artifactId: a.id,
     kind,
@@ -489,9 +499,7 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
 
 /** 计数文案的唯一来源（计数与充能是两种属性：计数用独立徽标、会升会降） */
 function countText(art: Artifact): string {
-  const capKey = art.skills.find((s) => COUNT_CAP[s.key]);
-  const cap = capKey ? COUNT_CAP[capKey.key] : undefined;
-  return cap ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`;
+  return art.countCap !== undefined ? `计数 ${art.count}/${art.countCap}` : `计数 ${art.count}`;
 }
 
 /** 以全角空格连接文本/节点片段（药丸类补正/充能紧贴前一个值，不插分隔） */
@@ -772,6 +780,20 @@ function phaseHint(ctx: Ctx): HintPart[] {
     return [
       { text: t?.name ?? a?.name ?? '激活', color: pd.player },
       { text: '：装填即强制结算，请完成选择后确认。' },
+    ];
+  }
+  if (pd && pd.kind === 'chenaiFreeRise') {
+    return [
+      { text: '尘起', color: pd.player },
+      { text: '：你通过攻击造成了伤害，可以立即进行 1 次无需冥想骰的额外尘起行动；是否发动？' },
+    ];
+  }
+  if (pd && pd.kind === 'shouhunCancel') {
+    return [
+      { text: '兽魂', color: pd.owner },
+      { text: '：' },
+      { text: `玩家${pd.owner}`, color: pd.owner },
+      { text: ` 将受到 ${pd.attack.value} 点攻击伤害，且「兽魂」计数 ≥1；你可以取消该伤害（令其计数 −1）。` },
     ];
   }
   if (pd && pd.kind === 'weimu') {
@@ -1114,14 +1136,15 @@ function rerollButton(ctx: Ctx): HTMLButtonElement | null {
   return b;
 }
 
-function dustEntryButton(ctx: Ctx, a: Artifact): HTMLButtonElement {
+function dustEntryButton(ctx: Ctx, a: Artifact, free = false): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'btn btn-dust';
   b.dataset.act = 'dustRise';
   b.dataset.artifact = a.id;
-  b.textContent = dustEntryLabel(a);
-  b.addEventListener('click', () => openDustFlow(ctx, a));
+  if (free) b.dataset.free = '1';
+  b.textContent = dustEntryLabel(a, free);
+  b.addEventListener('click', () => openDustFlow(ctx, a, free));
   return b;
 }
 
@@ -1244,6 +1267,8 @@ function operationList(ctx: Ctx): HTMLElement {
   let seenFengmang = false;
   let seenWeimu = false;
   let seenZhihaiReroll = false;
+  let seenChenaiRise = false;
+  let seenShouhun = false;
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1260,6 +1285,22 @@ function operationList(ctx: Ctx): HTMLElement {
       open.addEventListener('click', () => startPendingSelection(ctx, `@${a.t}`, a.t));
       box.appendChild(open);
       box.appendChild(button(a.t === 'dianxing' ? '不发动「电刑」' : '不发动「雷暴」', a, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'chenaiFreeRise') {
+      // 019 尘起：是否接受免费额外尘起（唯一渲染来源）
+      if (seenChenaiRise) continue;
+      seenChenaiRise = true;
+      box.appendChild(button('发动「尘起」：立即进行 1 次免费尘起行动', { t: 'chenaiFreeRise', accept: true }, ctx.hooks));
+      box.appendChild(button('不发动「尘起」', { t: 'chenaiFreeRise', accept: false }, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'shouhunCancel') {
+      // 020 兽魂：攻击方选择取消伤害 vs 正常造成伤害（唯一渲染来源）
+      if (seenShouhun) continue;
+      seenShouhun = true;
+      box.appendChild(button('取消这次伤害（「兽魂」计数 −1）', { t: 'shouhunCancel', cancel: true }, ctx.hooks));
+      box.appendChild(button('不取消，正常造成伤害', { t: 'shouhunCancel', cancel: false }, ctx.hooks));
       continue;
     }
     if (a.t === 'weimu') {
@@ -1308,7 +1349,9 @@ function operationList(ctx: Ctx): HTMLElement {
       if (seenDust.has(a.artifactId)) continue;
       seenDust.add(a.artifactId);
       const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
-      if (art) box.appendChild(dustEntryButton(ctx, art));
+      // 019 尘起赠予的免费额外尘起：同一次尘起入口按「免费」处理
+      const free = state.freeNoCostRise > 0;
+      if (art) box.appendChild(dustEntryButton(ctx, art, free));
       continue;
     }
     if (a.t === 'fengmang') {
@@ -2293,6 +2336,13 @@ function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
     b.textContent = dustSideSkillName(art.id, side);
     b.addEventListener('click', () => {
       flow.side = side;
+      if (flow.free) {
+        // 免费尘起：选侧后直接派发（无需支付冥想骰）
+        const action: DustRiseAction = { t: 'dustRise', artifactId: flow.artifactId, side, free: true };
+        ctx.hooks.ui.dustFlow = null;
+        ctx.hooks.onAction(action);
+        return;
+      }
       flow.step = 'pay';
       ctx.hooks.requestRender();
     });

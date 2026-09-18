@@ -7,9 +7,10 @@ export const HEROES = {
   tata: ['010', '011', '012'] as [string, string, string], // 地狱的魔女 塔塔萝丝
   zoray: ['013', '014', '015'] as [string, string, string], // 轰鸣审判官 佐雷
   xiu: ['016', '017', '018'] as [string, string, string], // 漆黑死神 修
+  nisa: ['019', '020', '021'] as [string, string, string], // 荒野行者 尼萨
 };
 
-const HERO_KEYS = ['kong', 'ying', 'batton', 'tata', 'zoray', 'xiu'] as const;
+const HERO_KEYS = ['kong', 'ying', 'batton', 'tata', 'zoray', 'xiu', 'nisa'] as const;
 const HERO_LABELS: Record<(typeof HERO_KEYS)[number], string> = {
   kong: '雨中剑圣·空',
   ying: '永暗之刃·影',
@@ -17,6 +18,7 @@ const HERO_LABELS: Record<(typeof HERO_KEYS)[number], string> = {
   tata: '地狱的魔女·塔塔萝丝',
   zoray: '轰鸣审判官·佐雷',
   xiu: '漆黑死神·修',
+  nisa: '荒野行者·尼萨',
 };
 
 export interface SetupOptions {

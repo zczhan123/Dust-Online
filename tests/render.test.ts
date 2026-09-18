@@ -844,6 +844,110 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.querySelector(`${sel} .badge-count`)!.textContent).toBe('计数 2/5');
   });
 
+  it('019 蛮王之牙：选择器按「X → 种类组合 → 每种 1 颗 → 选 X 项」推进并派发参数', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 尘起 → 主要
+    const card = state.players.A.artifacts.find((a) => a.id === '019')!;
+    card.activeMarkerSide = 'right'; // 蛮王之牙侧激活
+    card.armedSide = 'right';
+    state.players.A.areas.attack = [{ id: 'k1', value: 2, kind: 'attack' }];
+    const { ui, onAction } = mount(state, root);
+    const stepBtns = () => Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).map((b) => b.textContent);
+    const clickBtn = (text: string): void => {
+      const b = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((x) =>
+        (x.textContent ?? '').includes(text),
+      );
+      if (!b) throw new Error(`no selector button: ${text} @ ${String(stepBtns())}`);
+      b.click();
+    };
+    const btn = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')!;
+    expect(btn.textContent).toContain('蛮王之牙');
+    btn.click();
+    expect(ui.selection?.key).toBe('chenai.fang');
+    // ① 选 X = 1
+    expect(stepBtns()).toEqual(expect.arrayContaining(['1 个（选 1 项）', '2 个（选 2 项）', '3 个（选 3 项）']));
+    clickBtn('1 个（选 1 项）');
+    clickBtn('确认');
+    // ② 选种类组合：攻击
+    expect(stepBtns()).toEqual(expect.arrayContaining(['攻击', '防御', '冥想']));
+    clickBtn('攻击');
+    clickBtn('确认');
+    // ③ 选 1 颗攻击骰
+    root.querySelector<HTMLElement>('.player--self .die[data-id="k1"]')!.click();
+    clickBtn('确认');
+    // ④ 选第 1 项：② 获得 1 个 3 点攻击骰
+    clickBtn('②');
+    clickBtn('确认');
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    const calls = (onAction as unknown as {
+      mock: { calls: [{ t: string; artifactId: string; side: string; params: { costSlots: unknown; picks: string[] } }][] };
+    }).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const act = calls[calls.length - 1][0];
+    expect(act.t).toBe('skill');
+    expect(act.artifactId).toBe('019');
+    expect(act.side).toBe('right');
+    expect(act.params.picks).toEqual(['gain']);
+    expect(act.params.costSlots).toEqual([{ dieIds: ['k1'] }]);
+  });
+
+  it('020 兽魂：攻击方选择「取消伤害 / 正常造成伤害」（按钮精确，经确认条派发）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['019', '020', '021'] });
+    skipInitialReroll(state);
+    state.players.B.artifacts.find((a) => a.id === '020')!.count = 2;
+    state.pending = {
+      kind: 'shouhunCancel',
+      player: 'A',
+      owner: 'B',
+      attack: { attacker: 'A', value: 3, unblockable: false, physical: true },
+    };
+    const { onAction } = mount(state, root);
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels.filter((l) => (l ?? '').includes('取消'))).toEqual([
+      '取消这次伤害（「兽魂」计数 −1）',
+      '不取消，正常造成伤害',
+    ]);
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('兽魂');
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="shouhunCancel"]')!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'shouhunCancel', cancel: true });
+  });
+
+  it('021：计数徽标带上限（计数 5/5），已激活后的尘起入口显示「续充」', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '021')!;
+    card.chargeLayer = 1;
+    card.activeMarkerSide = 'left';
+    card.count = 5;
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.player--self .card[data-artifact="021"] .badge-count')!.textContent).toBe('计数 5/5');
+    // 计数已满 → 不再出现尘起入口
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels.some((l) => (l ?? '').includes('续充'))).toBe(false);
+    // 计数降到 2 → 出现「续充」入口
+    card.count = 2;
+    renderGame(state, root, hooksFor());
+    const labels2 = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels2.some((l) => (l ?? '').includes('续充「决意」'))).toBe(true);
+  });
+
+  it('019 免费额外尘起：入口标注「（免费）」，切换类神器点击后直接派发 free 动作', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // 主要阶段
+    state.freeNoCostRise = 1;
+    state.players.A.artifacts.find((a) => a.id === '020')!.activeMarkerSide = 'left'; // 020 有标记 → 切换
+    const { onAction } = mount(state, root);
+    const free = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="dustRise"][data-artifact="020"]');
+    expect(free).not.toBeNull();
+    expect(free!.dataset.free).toBe('1');
+    expect(free!.textContent).toContain('（免费）');
+    free!.click(); // 切换类神器：直接派发（无需选侧/支付）
+    expect(onAction).toHaveBeenCalledWith({ t: 'dustRise', artifactId: '020', free: true, side: 'right' });
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);

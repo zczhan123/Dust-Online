@@ -49,6 +49,8 @@ describe('model types', () => {
       attackQueue: null,
       extraReroll: null,
     pendingQueue: [],
+    chenaiUsed: { A: false, B: false },
+    freeNoCostRise: 0,
     };
     expect(g.players.A.life).toBe(50);
     expect(g.skillConsumedThisAction).toBe(0);

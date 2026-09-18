@@ -9,7 +9,7 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
   '001': { id: '001', name: '雨切', weapon: '武士刀', column: 1, speed: 4, will: 7, skills: [{ side: 'left', kind: 'activate', key: 'yuqie.breakthrough' }, { side: 'right', kind: 'trigger', key: 'yuqie.caiyuliu' }] },
   '002': { id: '002', name: '游龙', weapon: '刀鞘', column: 2, distribution: { defense: [1, 6], attack: [3, 4], meditation: [2, 5] }, skills: [{ side: 'left', kind: 'continuous', key: 'youlong.wanxiang' }, { side: 'right', kind: 'activate', key: 'youlong.tengwan' }] },
   '003': { id: '003', name: '明镜', weapon: '玉佩', column: 3, life: 50, chargeReq: 4, skills: [{ side: 'only', kind: 'charge', key: 'mingjing.charge' }, { side: 'only', kind: 'ultimate', key: 'mingjing.ultimate' }] },
-  '004': { id: '004', name: '不祥', weapon: '双刀', column: 1, speed: 4, will: 8, skills: [{ side: 'left', kind: 'activate', key: 'buxiang.cuilian' }, { side: 'right', kind: 'continuous', key: 'buxiang.fengmang' }, { side: 'right', kind: 'trigger', key: 'buxiang.fengmang.trigger' }] },
+  '004': { id: '004', name: '不祥', weapon: '双刀', column: 1, speed: 4, will: 8, countCap: 3, skills: [{ side: 'left', kind: 'activate', key: 'buxiang.cuilian' }, { side: 'right', kind: 'continuous', key: 'buxiang.fengmang' }, { side: 'right', kind: 'trigger', key: 'buxiang.fengmang.trigger' }] },
   '005': { id: '005', name: '影掠', weapon: '飞刀', column: 2, distribution: { defense: [3], attack: [1, 2, 6], meditation: [4, 5] }, skills: [{ side: 'left', kind: 'activate', key: 'yingle.yingxi' }, { side: 'right', kind: 'activate', key: 'yingle.qianxing' }] },
   '006': { id: '006', name: '完杀', weapon: '戒指', column: 3, life: 50, chargeReq: 4, skills: [{ side: 'only', kind: 'charge', key: 'wansha.charge' }, { side: 'only', kind: 'ultimate', key: 'wansha.ultimate' }] },
   '007': { id: '007', name: '主宰', weapon: '长戟', column: 1, speed: 4, will: 7, skills: [
@@ -70,6 +70,7 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
     column: 3,
     life: 50,
     chargeReq: 2,
+    countCap: 4,
     skills: [
       { side: 'only', kind: 'continuous', key: 'canxiang.juejing' },
       { side: 'only', kind: 'ultimate', key: 'canxiang.juejing.ultimate' },
@@ -107,9 +108,50 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
     column: 3,
     life: 45,
     chargeReq: 1,
+    countCap: 5,
     skills: [
       { side: 'only', kind: 'continuous', key: 'zhihai.bloom' },
       { side: 'only', kind: 'ultimate', key: 'zhihai.bloom.ultimate' },
+    ],
+  },
+  '019': {
+    id: '019',
+    name: '尘哀',
+    weapon: '斧',
+    column: 1,
+    speed: 4,
+    will: 7,
+    skills: [
+      { side: 'left', kind: 'trigger', key: 'chenai.rise' },
+      { side: 'right', kind: 'activate', key: 'chenai.fang', refresh: true },
+    ],
+  },
+  '020': {
+    id: '020',
+    name: '兽魂',
+    weapon: '爪',
+    column: 2,
+    distribution: { defense: [1, 6], attack: [3, 5], meditation: [2, 4] },
+    countCap: 2,
+    skills: [
+      { side: 'left', kind: 'activation', key: 'shouhun.xiong' },
+      { side: 'left', kind: 'continuous', key: 'shouhun.xiong.continuous' },
+      { side: 'right', kind: 'activation', key: 'shouhun.lang' },
+      { side: 'right', kind: 'continuous', key: 'shouhun.lang.continuous' },
+    ],
+  },
+  '021': {
+    id: '021',
+    name: '决意',
+    weapon: '护符',
+    column: 3,
+    life: 50,
+    chargeReq: 1,
+    chargeExtend: true,
+    countCap: 5,
+    skills: [
+      { side: 'only', kind: 'activation', key: 'jueyi.wildfire' },
+      { side: 'only', kind: 'continuous', key: 'jueyi.wildfire.continuous' },
     ],
   },
 };
@@ -142,4 +184,5 @@ export const HEROES = {
   tata: { name: '地狱的魔女 塔塔萝丝', artifacts: ['010', '011', '012'] },
   zoray: { name: '轰鸣审判官 佐雷', artifacts: ['013', '014', '015'] },
   xiu: { name: '漆黑死神 修', artifacts: ['016', '017', '018'] },
+  nisa: { name: '荒野行者 尼萨', artifacts: ['019', '020', '021'] },
 } as const;

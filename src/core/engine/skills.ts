@@ -2,7 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
-import { gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
+import { findDieOf, gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
 import { queuePending } from './pending';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
@@ -550,7 +550,84 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
     },
   },
-  // 018 至黑·漆黑绽放（必杀）：获得 X 个随机点数能力骰（X=计数）→ 弹出「可重掷最多 X 颗」；此后失去持续式
+  // 021 决意·野火燎原（激活，首次充能完成时立即强制结算）：受到 8 真实伤害 + 计数 +1
+  'jueyi.wildfire': {
+    run({ g, player, artifact }) {
+      logLine(g, `${pname(player)} 「野火燎原」激活：受到 8 点真实伤害`);
+      dealTrueDamage(g, player, 8);
+      if (g.phase === 'gameOver') return;
+      const cap = artifact.countCap ?? Infinity;
+      artifact.count = Math.min(cap, artifact.count + 1);
+      logLine(g, `「野火燎原」：计数 +1（${artifact.count}${Number.isFinite(cap) ? `/${cap}` : ''}）`);
+    },
+  },
+  // 020 兽魂·熊之心（激活）：将本神器的计数重设为 2
+  'shouhun.xiong': {
+    run({ g, player, artifact }) {
+      artifact.count = 2;
+      logLine(g, `${pname(player)} 「熊之心」激活：本神器计数重设为 ${artifact.count}`);
+    },
+  },
+  // 020 兽魂·狼之血（激活）：将本神器的计数重设为 2
+  'shouhun.lang': {
+    run({ g, player, artifact }) {
+      artifact.count = 2;
+      logLine(g, `${pname(player)} 「狼之血」激活：本神器计数重设为 ${artifact.count}`);
+    },
+  },
+  // 019 尘哀·蛮王之牙（启动）：消耗 X 个种类各不相同的能力骰 → 选 X 项（①②可重复）→ 刷新启动次数 + 标记移到另一侧
+  'chenai.fang': {
+    run({ g, player, artifact, params }) {
+      const p = g.players[player];
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      const picks = (params.picks as string[] | undefined) ?? [];
+      const x = fills.length;
+      if (x < 1 || x > 3) throw new Error('costSlots must be 1..3');
+      // 种类必须各不相同（由规格保证，这里校验）
+      const kinds = fills.map((f) => {
+        if (f.dieIds.length !== 1) throw new Error('each slot needs exactly 1 die');
+        const found = findDieOf(g, player, f.dieIds[0]);
+        if (!found) throw new Error(`not your die: ${f.dieIds[0]}`);
+        return found.kind;
+      });
+      if (new Set(kinds).size !== kinds.length) throw new Error('消耗的能力骰种类必须各不相同');
+      if (picks.length !== x) throw new Error(`必须选择 ${x} 项`);
+      for (const pk of picks) if (pk !== 'discard' && pk !== 'gain') throw new Error(`invalid pick: ${pk}`);
+      const spec: SlotSpec[] = kinds.map((k) => ({ kind: k }));
+      const effective = paySlots(g, player, spec, fills);
+      let discarded = 0;
+      let gained = 0;
+      const gainedDice: Die[] = [];
+      for (const pk of picks) {
+        if (pk === 'discard') {
+          const target = g.players[opp].areas.defense[0];
+          if (target) {
+            consumeDice(g.players[opp], 'defense', [target.id]);
+            discarded += 1;
+          }
+        } else {
+          const d = createDie(newDieId(`${player}-`), 3, 'attack');
+          p.areas.attack.push(d);
+          gainedDice.push(d);
+          gained += 1;
+        }
+      }
+      logLine(
+        g,
+        `${pname(player)} 发动「蛮王之牙」：消耗 ${x} 个种类各不相同的骰（${vals(effective)}）→ ${
+          discarded > 0 ? `弃置对方 ${discarded} 个防御骰` : ''
+        }${discarded > 0 && gained > 0 ? '、' : ''}${gained > 0 ? `获得 ${gained} 个 3 点攻击骰（${vals(gainedDice)}）` : ''}${
+          '；刷新启动次数，激活标记移至另一侧'
+        }`,
+      );
+      // 刷新本技能的启动次数（每回合可再次启动）+ 标记移到另一侧
+      g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== 'chenai.fang');
+      artifact.activeMarkerSide = artifact.activeMarkerSide === 'left' ? 'right' : 'left';
+      artifact.armedSide = artifact.activeMarkerSide;
+      artifact.armedTurn = g.turnIndex;
+    },
+  },
   'zhihai.bloom.ultimate': {
     run({ g, player, artifact, rng }) {
       const x = artifact.count;

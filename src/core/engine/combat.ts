@@ -1,6 +1,6 @@
-import type { Artifact, GameState, PlayerId, PlayerState } from '../model/types';
-import { hasActiveSkill } from './skill-state';
-import { pumpPending } from './pending';
+import type { Artifact, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
+import { hasActiveSkill, skillActive } from './skill-state';
+import { pumpPending, queuePending } from './pending';
 import { paySlots, heal, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 
@@ -27,6 +27,15 @@ export function attackDamageBonus(
   // 015 绝境天神（持续）：攻击伤害 + 计数
   if (hasActiveSkill(p, 'canxiang.juejing')) {
     consider(artifactWithSkill(p, 'canxiang.juejing')?.count ?? 0, '绝境天神');
+  }
+  // 020 兽魂·熊之心（持续）：攻击伤害 + 计数
+  if (hasActiveSkill(p, 'shouhun.xiong.continuous')) {
+    consider(artifactWithSkill(p, 'shouhun.xiong.continuous')?.count ?? 0, '熊之心');
+  }
+  // 021 决意·野火燎原（持续·计数 1+）：攻击伤害 +1
+  if (hasActiveSkill(p, 'jueyi.wildfire.continuous')) {
+    const jy = artifactWithSkill(p, 'jueyi.wildfire.continuous');
+    if ((jy?.count ?? 0) >= 1) consider(1, '野火燎原');
   }
   return best;
 }
@@ -115,51 +124,129 @@ export function virtualAttack(g: GameState, player: PlayerId, baseValue: number)
   };
 }
 
-/** 结算待处理攻击：支付防御骰位=抵挡（无伤害）；不给/不可抵挡=造成伤害 */
+/**
+ * 结算待处理攻击：
+ * - 支付防御骰位 = 抵挡（伤害 0；021 满计数时例外，仍造成一半伤害）
+ * - 不给 / 不可抵挡 = 造成伤害；若防守方有 020「兽魂」持续且计数 ≥1，改由**攻击方**决定是否取消（延后结算）
+ */
 export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   const pa = g.pendingAttack;
   if (!pa) throw new Error('no pending attack');
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   const defender = g.players[defenderId];
   let blocked = false;
+  let damageDealt = 0;
+
   if (!pa.unblockable && costSlots && costSlots.length > 0) {
     const eff = paySlots(g, defenderId, [{ kind: 'defense' }], costSlots);
     blocked = true;
     logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点防御骰抵挡了攻击`);
+    // 021 决意（持续·计数 5）：被抵挡时仍造成一半伤害
+    damageDealt = count5HalfDamage(g, pa);
   } else {
+    // 020 兽魂：由攻击方选择「取消伤害（持有者计数 −1）」还是「正常造成伤害」——时机在抵挡决定之后
+    const sh = shouhunCard(g, defenderId);
+    if (sh && g.pending === null) {
+      g.pendingAttack = null;
+      queuePending(g, { kind: 'shouhunCancel', player: pa.attacker, owner: defenderId, attack: pa });
+      pumpPending(g);
+      return;
+    }
+    damageDealt = pa.value;
+  }
+
+  if (damageDealt > 0 || !blocked) {
     const before = defender.life;
-    applyLifeLoss(g, defenderId, pa.value);
-    logLine(g, `${pname(defenderId)} 未抵挡，受到 ${pa.value} 点伤害（生命 ${before} → ${defender.life}）`);
-    // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后 → 按攻击点数回血 / 6 点则受 3 真伤
-    if (pa.value > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
+    applyLifeLoss(g, defenderId, damageDealt);
+    logLine(
+      g,
+      blocked
+        ? `${pname(defenderId)} 被抵挡，但「野火燎原」仍造成 ${damageDealt} 点伤害（生命 ${before} → ${defender.life}）`
+        : `${pname(defenderId)} 未抵挡，受到 ${damageDealt} 点伤害（生命 ${before} → ${defender.life}）`,
+    );
   }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;
+  afterAttackResolved(g, pa, { blocked, damageDealt });
+  // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
+  pumpAttackQueue(g);
+}
 
-  if (blocked) {
-    // 锋芒·触发：你的攻击被防御骰抵挡后
-    if (hasActiveSkill(g.players[pa.attacker], 'buxiang.fengmang.trigger')) {
-      g.pending = { kind: 'fengmang', player: pa.attacker, defenderId, value: pa.value };
-    }
-  } else if (pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined) {
-    // 裁雨流：当你使用攻击骰造成伤害后
-    if (hasActiveSkill(g.players[pa.attacker], 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
-      g.pending = { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue };
+/** 021 决意「野火燎原」（持续·计数 5）：被抵挡时仍造成一半伤害（向下取整；同种削减不叠加） */
+function count5HalfDamage(g: GameState, pa: PendingAttack): number {
+  const card = artifactWithSkill(g.players[pa.attacker], 'jueyi.wildfire.continuous');
+  if (!card || card.count < 5) return 0;
+  const def = card.skills.find((s) => s.key === 'jueyi.wildfire.continuous');
+  if (!def || !skillActive(card, def)) return 0;
+  // 同种削减不叠加（FAQ 21.1.5）：已被「灵能屏障」减半 → 不再二次减半，直接按已减半的伤害结算
+  if (pa.halved) {
+    logLine(
+      g,
+      `${pname(pa.attacker)} 「野火燎原」：本次攻击被抵挡，仍造成 ${pa.value} 点伤害（与减半不叠加，只减半一次）`,
+    );
+    return pa.value;
+  }
+  pa.halved = true;
+  const half = Math.floor(pa.value / 2);
+  logLine(
+    g,
+    half > 0
+      ? `${pname(pa.attacker)} 「野火燎原」：本次攻击被抵挡，仍造成一半伤害 ${half} 点（向下取整）`
+      : `${pname(pa.attacker)} 「野火燎原」：半伤为 0 → 本次既不算被抵挡、也不算造成伤害`,
+  );
+  return half > 0 ? half : 0;
+}
+
+/** 020 兽魂：该玩家是否有「兽魂」持续处于激活状态且计数 ≥1（用于「攻击方可取消伤害」） */
+function shouhunCard(g: GameState, player: PlayerId): Artifact | null {
+  const card = artifactWithSkill(g.players[player], 'shouhun.xiong.continuous');
+  if (!card || card.count < 1) return null;
+  const anyActive = card.skills.some((s) => s.kind === 'continuous' && skillActive(card, s));
+  return anyActive ? card : null;
+}
+
+/**
+ * 一次攻击结算完成后的**事件点**（供正常结算与「兽魂」延后结算共用）：
+ * 造成伤害后（冥界行走/裁雨流/尘起）、被抵挡后（锋芒）、使用攻击骰后（电刑/雷暴）。
+ */
+export function afterAttackResolved(
+  g: GameState,
+  pa: PendingAttack,
+  res: { blocked: boolean; damageDealt: number },
+): void {
+  const atk = g.players[pa.attacker];
+  // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
+  if (res.damageDealt > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
+  // 001 裁雨流：当你使用攻击骰造成伤害后（每回合最多 3 次）
+  if (res.damageDealt > 0 && pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined) {
+    if (hasActiveSkill(atk, 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
+      queuePending(g, { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue });
     }
   }
+  // 019 尘哀·尘起：你在自己的回合中通过攻击造成伤害后（每回合最多 1 次）
+  if (
+    res.damageDealt > 0 &&
+    g.activePlayer === pa.attacker &&
+    !g.chenaiUsed[pa.attacker] &&
+    hasActiveSkill(atk, 'chenai.rise')
+  ) {
+    g.chenaiUsed[pa.attacker] = true;
+    queuePending(g, { kind: 'chenaiFreeRise', player: pa.attacker });
+  }
+  // 004 锋芒·触发：你的攻击被防御骰抵挡后
+  if (res.blocked && hasActiveSkill(atk, 'buxiang.fengmang.trigger')) {
+    queuePending(g, { kind: 'fengmang', player: pa.attacker, defenderId: pa.attacker === 'A' ? 'B' : 'A', value: pa.value });
+  }
   // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
-  if (g.pending === null && !g.attackQueue) {
-    const atk = g.players[pa.attacker];
+  if (g.pending === null && g.pendingQueue.length === 0 && !g.attackQueue) {
     const med = atk.areas.meditation.length;
     const usedAttackDie = pa.physical && pa.sourceDieId !== undefined;
     if (usedAttackDie && hasActiveSkill(atk, 'minglei.dianxing') && med >= 2) {
-      g.pending = { kind: 'dianxing', player: pa.attacker };
-    } else if (blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
-      g.pending = { kind: 'leibao', player: pa.attacker };
+      queuePending(g, { kind: 'dianxing', player: pa.attacker });
+    } else if (res.blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
+      queuePending(g, { kind: 'leibao', player: pa.attacker });
     }
   }
-  // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
-  pumpAttackQueue(g);
 }
 
 /** 若存在多段攻击队列且当前无待决策/待抵挡，则发起下一段虚拟攻击 */

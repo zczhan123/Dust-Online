@@ -1,8 +1,13 @@
 import type { Artifact, GameState, PlayerId } from '../model/types';
+import { heal } from './effects';
 
-/** 第三列神器是否还能被尘起行动选中（未完成充能才行） */
+/** 第三列神器是否还能被尘起行动选中：未完成充能，或（021 决意等）完成后仍可「续充」且计数未满 */
 export function canTargetForDustRise(a: Artifact): boolean {
-  if (a.column === 3) return a.chargeLayer < (a.chargeReq ?? 0);
+  if (a.column === 3) {
+    if (a.chargeLayer < (a.chargeReq ?? 0)) return true;
+    if (a.chargeExtend && a.count < (a.countCap ?? Infinity)) return true;
+    return false;
+  }
   return true;
 }
 
@@ -25,10 +30,22 @@ export function applyDustRiseToArtifact(
   const sideLabel = (s: 'left' | 'right'): string => (s === 'left' ? '左' : '右');
 
   if (a.column === 3) {
-    a.chargeLayer += 1;
     const req = a.chargeReq ?? 0;
-    let desc = `为「${a.name}」充能（${a.chargeLayer}/${req}）`;
+    // 已完成充能（已激活）：021 决意「续充」——改为计数 +1（上限），并回复等同计数的生命
     if (a.chargeLayer >= req) {
+      if (!a.chargeExtend) throw new Error(`artifact ${artifactId} cannot be dust-risen anymore`);
+      const cap = a.countCap ?? Infinity;
+      if (a.count >= cap) throw new Error(`artifact ${artifactId} count is full`);
+      a.count += 1;
+      const healed = heal(g, player, a.count);
+      return `为「${a.name}」继续充能：计数 +1（${a.count}${Number.isFinite(cap) ? `/${cap}` : ''}）${
+        healed > 0 ? `，回复 ${healed} 点生命` : ''
+      }`;
+    }
+    a.chargeLayer += 1;
+    const req2 = req;
+    let desc = `为「${a.name}」充能（${a.chargeLayer}/${req2}）`;
+    if (a.chargeLayer >= req2) {
       a.activeMarkerSide = 'left';
       a.armedSide = 'left';
       a.armedTurn = g.turnIndex;

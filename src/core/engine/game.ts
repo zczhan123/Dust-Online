@@ -4,7 +4,7 @@ import { refillPhase, rerollPhase, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { applyLifeLoss, doAttack, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
+import { afterAttackResolved, applyLifeLoss, doAttack, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
 import { findDieOf, setDieValue, heal, moveDice, paySlots, withRngState } from './effects';
 import { pumpPending, queueRerollEndTriggers } from './pending';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
@@ -48,6 +48,10 @@ export function beginTurn(g: GameState): void {
   g.attackQueue = null;
   g.extraReroll = null;
   g.pendingQueue = [];
+  // 019 尘哀·尘起：每回合最多触发 1 次；其赠予的「免费额外尘起」也在回合开始时清零
+  g.chenaiUsed.A = false;
+  g.chenaiUsed.B = false;
+  g.freeNoCostRise = 0;
   // 018 至黑：每回合第一次受伤的判定在每回合开始时重置（任何玩家的回合开始时都重置，双方各自独立）
   g.players.A.damagedThisTurn = false;
   g.players.B.damagedThisTurn = false;
@@ -172,8 +176,16 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   const canNormal = (g.freeDustRise > 0 || !g.dustRiseNormalUsed) && hasMed;
   const medId = hasMed ? p.areas.meditation[0].id : undefined; // 默认候选（仅供 AI）；UI 会让玩家自选
   const medSlot = medId ? [{ dieIds: [medId] }] : undefined;
+  // 019 尘起赠予的「无需冥想骰的额外尘起行动」（不占每回合 1 次、不耗尘印）
+  const canFree = g.freeNoCostRise > 0;
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
+    if (canFree) {
+      const sides = a.column === 3 ? [undefined] : a.activeMarkerSide == null ? ['left', 'right'] : [a.activeMarkerSide === 'left' ? 'right' : 'left'];
+      for (const side of sides) {
+        acts.push({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side: side as 'left' | 'right' } : {}) });
+      }
+    }
     if (a.column === 3) {
       if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, costSlots: medSlot });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
@@ -222,13 +234,13 @@ function resolveActivationOnArm(g: GameState, player: PlayerId, artifactId: stri
   const a = p.artifacts.find((x) => x.id === artifactId);
   if (!a) return;
   const armed: 'left' | 'right' = side;
-  const s = a.skills.find((x) => x.kind === 'activation' && (x.side === armed));
+  const s = a.skills.find((x) => x.kind === 'activation' && (x.side === armed || (a.column === 3 && x.side === 'only')));
   if (!s) return;
   const handler = SKILL_HANDLERS[s.key];
   if (!handler) return;
   logLine(g, `「${a.name}」的「激活」技能立即结算`);
   if (activationNeedsChoice(s.key)) {
-    g.pending = { kind: 'activationResolve', player, artifactId, side: armed };
+    g.pending = { kind: 'activationResolve', player, artifactId, side: s.side };
     return;
   }
   withRng(g, (rng) =>
@@ -398,6 +410,17 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
       } else if (s.key === 'zhihai.bloom.ultimate') {
         // 018 漆黑绽放（必杀）：计数 ≥1 时可主动发动（FAQ 18.1.3）；计数=5 由引擎强制发动
         if (a.count >= 1) acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: {} });
+      } else if (s.key === 'chenai.fang') {
+        // 019 蛮王之牙（启动）：默认消耗 1 个任意能力骰 + 选择 ② 获得 1 个 3 点攻击骰
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        if (anyDie) {
+          acts.push({
+            t: 'skill',
+            artifactId: a.id,
+            side: s.side,
+            params: { costSlots: [{ dieIds: [anyDie.id] }], picks: ['gain'] },
+          });
+        }
       }
     }
   }
@@ -466,6 +489,18 @@ export function getLegalActions(g: GameState): Action[] {
       return [
         { t: 'leibao', accept: false },
         { t: 'leibao', dieIds: pick },
+      ];
+    }
+    if (g.pending.kind === 'chenaiFreeRise') {
+      return [
+        { t: 'chenaiFreeRise', accept: true },
+        { t: 'chenaiFreeRise', accept: false },
+      ];
+    }
+    if (g.pending.kind === 'shouhunCancel') {
+      return [
+        { t: 'shouhunCancel', cancel: true },
+        { t: 'shouhunCancel', cancel: false },
       ];
     }
     if (g.pending.kind === 'activationResolve') {
@@ -547,6 +582,12 @@ export function getLegalActions(g: GameState): Action[] {
       const acts: Action[] = [{ t: 'advance' }];
       for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
       acts.push(...activateSkillActions(g, p));
+      // 019 尘起赠予的免费额外尘起：可在主要阶段立即使用（不耗冥想骰、不占每回合 1 次）
+      if (g.freeNoCostRise > 0) {
+        for (const a of dustRiseActions(g, g.activePlayer)) {
+          if (a.t === 'dustRise' && a.free) acts.push(a);
+        }
+      }
       return acts;
     }
     default:
@@ -589,6 +630,8 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
   activationResolve: 'skill',
   weimu: 'weimu',
   zhihaiReroll: 'zhihaiReroll',
+  chenaiFreeRise: 'chenaiFreeRise',
+  shouhunCancel: 'shouhunCancel',
 };
 
 export function applyAction(g: GameState, action: Action): GameState {
@@ -690,9 +733,19 @@ export function applyAction(g: GameState, action: Action): GameState {
       break;
     }
     case 'dustRise': {
-      if (g.phase !== 'dustRise') throw new Error('not dust rise phase');
+      // 019 尘起赠予的免费额外尘起（可在主要阶段立即使用，不耗冥想骰、不占每回合 1 次）
+      if (action.free) {
+        if (g.freeNoCostRise <= 0) throw new Error('no free dust rise available');
+      } else if (g.phase !== 'dustRise') {
+        throw new Error('not dust rise phase');
+      }
       const p = g.players[g.activePlayer];
-      if (action.useSeal) {
+      // 第三列：只有「本次充能完成激活」时才结算该神器的「激活」技能（续充不重复结算）
+      const beforeRise = p.artifacts.find((x) => x.id === action.artifactId);
+      const wasFullyCharged = beforeRise?.column === 3 && beforeRise.chargeLayer >= (beforeRise.chargeReq ?? 0);
+      if (action.free) {
+        g.freeNoCostRise -= 1;
+      } else if (action.useSeal) {
         if (!p.hasDustSeal) throw new Error('no dust seal');
         p.hasDustSeal = false;
       } else {
@@ -713,9 +766,10 @@ export function applyAction(g: GameState, action: Action): GameState {
         `${pname(g.activePlayer)} 尘起：${desc}${action.useSeal ? '（消耗尘印标记）' : ''}`,
       );
       runChargeSkill(g, g.activePlayer, action.artifactId);
-      // 「激活」类技能：装填到该侧的瞬间立即强制结算（016 虚无形态 / 014 净化·数罪并罚）
+      // 「激活」类技能：装填到该侧的瞬间立即强制结算（016 虚无形态 / 014 净化·数罪并罚 / 020 兽魂 / 021 决意）
+      // 第三列续充（wasFullyCharged）不再重复结算「激活」
       const justArmed = g.players[g.activePlayer].artifacts.find((x) => x.id === action.artifactId);
-      if (justArmed?.armedSide === 'left' || justArmed?.armedSide === 'right') {
+      if (!wasFullyCharged && (justArmed?.armedSide === 'left' || justArmed?.armedSide === 'right')) {
         resolveActivationOnArm(g, g.activePlayer, action.artifactId, justArmed.armedSide);
       }
       g.dustRiseActed = true;
@@ -830,7 +884,10 @@ export function applyAction(g: GameState, action: Action): GameState {
       const dieId = action.meditationDieId;
       if (action.accept && dieId && p.areas.meditation.some((d) => d.id === dieId)) {
         consumeDice(p, 'meditation', [dieId]);
-        if (g.pendingAttack) g.pendingAttack.value = Math.floor(g.pendingAttack.value / 2);
+        if (g.pendingAttack) {
+          g.pendingAttack.value = Math.floor(g.pendingAttack.value / 2);
+          g.pendingAttack.halved = true;
+        }
         logLine(g, `${pname(pd.player)} 「灵能屏障」：消耗 1 个冥想骰，伤害减半为 ${g.pendingAttack?.value ?? 0}`);
       } else {
         logLine(g, `${pname(pd.player)} 放弃灵能屏障`);
@@ -889,6 +946,45 @@ export function applyAction(g: GameState, action: Action): GameState {
       withRng(g, (rng) => rerollPhase(g, pd.player, ids, rng));
       break;
     }
+    case 'chenaiFreeRise': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'chenaiFreeRise') throw new Error('no chenaiFreeRise pending');
+      g.pending = null;
+      if (action.accept) {
+        g.freeNoCostRise += 1;
+        logLine(g, `${pname(pd.player)} 「尘起」：获得 1 次无需冥想骰的额外尘起行动（可在主要阶段立即使用）`);
+      } else {
+        logLine(g, `${pname(pd.player)} 放弃「尘起」的额外尘起行动`);
+      }
+      break;
+    }
+    case 'shouhunCancel': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'shouhunCancel') throw new Error('no shouhunCancel pending');
+      const pa2 = pd.attack;
+      g.pending = null;
+      if (action.cancel) {
+        const owner = g.players[pd.owner];
+        const card = owner.artifacts.find((x) => x.skills.some((s) => s.key === 'shouhun.xiong.continuous' || s.key === 'shouhun.lang.continuous'));
+        if (card && card.count > 0) card.count -= 1;
+        logLine(
+          g,
+          `${pname(pd.player)} 「兽魂」：取消本次 ${pa2.value} 点伤害，令 ${pname(pd.owner)} 的「兽魂」计数下降 1 点${
+            card ? `（${card.count}）` : ''
+          }`,
+        );
+        break;
+      }
+      logLine(g, `${pname(pd.player)} 「兽魂」：不取消，正常造成伤害`);
+      const before = g.players[pd.owner].life;
+      applyLifeLoss(g, pd.owner, pa2.value);
+      logLine(g, `${pname(pd.owner)} 未抵挡，受到 ${pa2.value} 点伤害（生命 ${before} → ${g.players[pd.owner].life}）`);
+      if ((g.phase as string) !== 'gameOver') {
+        afterAttackResolved(g, pa2, { blocked: false, damageDealt: pa2.value });
+        pumpAttackQueue(g);
+      }
+      break;
+    }
     case 'skill': {
       const pendingSkill = g.pending && g.pending.kind === 'activationResolve' ? g.pending : null;
       const resolvingActivation =
@@ -935,6 +1031,8 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (resolvingActivation) g.pending = null;
       g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
+      // 019 蛮王之牙等：启动后刷新自身「每回合一次」计数（本回合可再次启动）
+      if (s.refresh) g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== s.key);
       // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）
       if (
         g.skillConsumedThisAction > 0 &&

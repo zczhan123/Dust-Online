@@ -553,6 +553,69 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       costSlots: costPart(state, player, SPEC_MINGJIE, numbers, chosenDice).costSlots,
     }),
   },
+  // 019 尘哀·蛮王之牙（启动）：选 X（1–3）→ 选种类组合 → 每种类各 1 颗 → 选 X 项（①②可重复）
+  'chenai.fang': {
+    steps: ({ options }) => {
+      const x = Number(options[0] ?? '1');
+      const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      const steps: SelectStep[] = [
+        {
+          kind: 'option',
+          label: '「蛮王之牙」：消耗几个种类各不相同的能力骰（X）',
+          options: [
+            { value: '1', label: '1 个（选 1 项）' },
+            { value: '2', label: '2 个（选 2 项）' },
+            { value: '3', label: '3 个（选 3 项）' },
+          ],
+        },
+      ];
+      const sets =
+        x === 2
+          ? ['attack,defense', 'attack,meditation', 'defense,meditation']
+          : x === 3
+            ? ['attack,defense,meditation']
+            : ['attack', 'defense', 'meditation'];
+      steps.push({
+        kind: 'option',
+        label: '选择要消耗的能力骰种类组合',
+        options: sets.map((s) => ({
+          value: s,
+          label: s.split(',').map((k) => CN[k]).join(' + '),
+        })),
+      });
+      const chosenSet = options[1];
+      const kinds = (sets.includes(chosenSet ?? '') ? chosenSet! : sets[0]).split(',') as DiceKind[];
+      for (const k of kinds) {
+        steps.push({
+          kind: 'dice',
+          label: `选择消耗的 1 颗${CN[k]}骰`,
+          owner: 'self',
+          areas: [k],
+          min: 1,
+          max: 1,
+        });
+      }
+      for (let i = 0; i < x; i++) {
+        steps.push({
+          kind: 'option',
+          label: `选择第 ${i + 1} 项`,
+          options: [
+            { value: 'discard', label: '① 弃置对方的 1 个防御骰' },
+            { value: 'gain', label: '② 获得 1 个 3 点攻击骰' },
+          ],
+        });
+      }
+      return steps;
+    },
+    buildParams: ({ options, chosenDice }) => {
+      const x = Number(options[0] ?? '1');
+      const kinds = (options[1] ?? 'attack').split(',');
+      const costSlots = kinds.map((_, i) => ({ dieIds: chosenDice[2 + i] ?? [] }));
+      // 选项目的步骤排在「每个种类的骰子步骤」之后 → 按 step 下标读取
+      const picks = Array.from({ length: x }, (_, i) => options[2 + kinds.length + i] as string);
+      return { costSlots, picks };
+    },
+  },
   // 017 幽冥·帷幕（待决策）：选对方 1 个能力骰弃置
   '@weimu': {
     steps: () => [
