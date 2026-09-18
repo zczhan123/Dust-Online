@@ -52,9 +52,17 @@ const render = () => {
   });
 };
 
+/** 每局随机种子（引擎内所有随机都走它；保证每局骰子序列不同，也便于将来做录像回放） */
+const newSeed = (): number => Math.floor(Math.random() * 1_000_000_000);
+
 const showSetup = () => {
   renderSetup(root, (opts) => {
-    state = createGame({ seed: 20240913, firstPlayer: opts.firstPlayer, heroA: opts.heroA, heroB: opts.heroB });
+    state = createGame({
+      seed: newSeed(),
+      firstPlayer: opts.firstPlayer,
+      heroA: opts.heroA,
+      heroB: opts.heroB,
+    });
     ui.rerollSelected.clear();
     ui.selection = null;
     ui.pendingConfirm = null;
