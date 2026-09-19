@@ -128,43 +128,55 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
     ['random', '随机'],
   ];
 
+  // 选将矩阵：每行放两个英雄（9 项 → 5 行），以压缩纵向高度；每个英雄仍是「英雄名 + 玩家A + 玩家B」
   const matrix = el('div', 'hero-matrix');
   const head = el('div', 'hero-matrix-row hero-matrix-head');
-  head.appendChild(el('span', 'setup-label'));
-  const headA = el('span', 'hero-cell');
-  headA.textContent = '玩家A';
-  const headB = el('span', 'hero-cell');
-  headB.textContent = '玩家B';
-  head.appendChild(headA);
-  head.appendChild(headB);
+  for (let half = 0; half < 2; half++) {
+    const group = el('div', 'hero-group');
+    group.appendChild(el('span', 'setup-label'));
+    const headA = el('span', 'hero-cell');
+    headA.textContent = '玩家A';
+    const headB = el('span', 'hero-cell');
+    headB.textContent = '玩家B';
+    group.appendChild(headA);
+    group.appendChild(headB);
+    head.appendChild(group);
+  }
   matrix.appendChild(head);
 
   const heroAButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
   const heroBButtons: Array<{ value: HeroChoice; node: HTMLButtonElement }> = [];
-  for (const [value, label] of heroDefs) {
+  for (let i = 0; i < heroDefs.length; i += 2) {
     const row = el('div', 'hero-matrix-row');
-    const lab = el('span', 'setup-label');
-    lab.textContent = label;
-    row.appendChild(lab);
+    for (let k = 0; k < 2; k++) {
+      const group = el('div', 'hero-group');
+      const def = heroDefs[i + k];
+      if (def) {
+        const [value, label] = def;
+        const lab = el('span', 'setup-label');
+        lab.textContent = label;
+        group.appendChild(lab);
 
-    const cellA = el('div', 'hero-cell');
-    const nodeA = choiceButton('heroA', value, '○', () => {
-      heroAChoice = value;
-      sync();
-    });
-    heroAButtons.push({ value, node: nodeA });
-    cellA.appendChild(nodeA);
-    row.appendChild(cellA);
+        const cellA = el('div', 'hero-cell');
+        const nodeA = choiceButton('heroA', value, '○', () => {
+          heroAChoice = value;
+          sync();
+        });
+        heroAButtons.push({ value, node: nodeA });
+        cellA.appendChild(nodeA);
+        group.appendChild(cellA);
 
-    const cellB = el('div', 'hero-cell');
-    const nodeB = choiceButton('heroB', value, '○', () => {
-      heroBChoice = value;
-      sync();
-    });
-    heroBButtons.push({ value, node: nodeB });
-    cellB.appendChild(nodeB);
-    row.appendChild(cellB);
-
+        const cellB = el('div', 'hero-cell');
+        const nodeB = choiceButton('heroB', value, '○', () => {
+          heroBChoice = value;
+          sync();
+        });
+        heroBButtons.push({ value, node: nodeB });
+        cellB.appendChild(nodeB);
+        group.appendChild(cellB);
+      }
+      row.appendChild(group);
+    }
     matrix.appendChild(row);
   }
   wrap.appendChild(matrix);

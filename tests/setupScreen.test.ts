@@ -39,6 +39,26 @@ describe('renderSetup', () => {
     expect(root.classList.contains('setup-page')).toBe(true);
   });
 
+  it('选将矩阵：两列布局，每个英雄恰好出现一次（不重不漏）', () => {
+    renderSetup(root, () => {});
+    // 6 行 = 表头 + 5 行（9 个英雄，每行两个）
+    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(6);
+    const labels = Array.from(root.querySelectorAll('.hero-group .setup-label'))
+      .map((n) => n.textContent)
+      .filter((t) => t !== '');
+    expect(labels).toEqual([
+      '雨中剑圣·空',
+      '永暗之刃·影',
+      '孤塔之王·巴顿二世',
+      '地狱的魔女·塔塔萝丝',
+      '轰鸣审判官·佐雷',
+      '漆黑死神·修',
+      '荒野行者·尼萨',
+      '黑枪·希瓦',
+      '随机',
+    ]);
+  });
+
   it('defaults 随机 as selected for both rows', () => {
     renderSetup(root, () => {});
     expect(

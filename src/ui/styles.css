@@ -526,15 +526,22 @@ button.pay-die {
 }
 
 /* 开始新对局设置页（浅色主题） */
-/* 设置页背景：封面铺满全屏；可见窗口下移到 77%，把画面下方的大标题与作者名留在视野内 */
+/* 设置页背景：封面铺满全屏；可见窗口下移（86%）以把画面下方的「尘起时刻」大字与作者名留在视野内。
+   卡片贴顶（不居中），让下方留白留给背景；页面不出现滚动条。 */
 #app.setup-page {
   min-height: 100vh;
-  background: #ece7dc url('/cover.jpg') center 77% / cover no-repeat fixed;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  background: #ece7dc url('/cover.jpg') center 86% / cover no-repeat fixed;
 }
 .setup {
+  width: 100%;
   max-width: 640px;
-  margin: 48px auto;
-  padding: 24px 28px;
+  margin: 0;
+  padding: 16px 20px;
   /* 半透明卡片：让封面透出来（其余面板仍用不透明的 --card-bg） */
   background: rgba(255, 253, 248, 0.62);
   backdrop-filter: blur(2px);
@@ -542,7 +549,13 @@ button.pay-die {
   border-radius: 14px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
+}
+/* 极矮窗口：进一步压缩（宁可更紧凑，也不出现滚动条） */
+@media (max-height: 560px) {
+  #app.setup-page { padding: 6px; }
+  .setup { padding: 10px 16px; gap: 6px; }
+  .setup-title { font-size: 18px; }
 }
 .setup-title {
   margin: 0;
@@ -607,17 +620,24 @@ button.pay-die {
   border-color: var(--line);
 }
 
-/* 选将矩阵：单表对齐 玩家A/玩家B 两列 */
+/* 选将矩阵：每行两个英雄；每个英雄一组「英雄名 + 玩家A + 玩家B」 */
 .hero-matrix {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 .hero-matrix-row {
   display: grid;
-  grid-template-columns: 1fr 96px 96px;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 18px;
   align-items: center;
-  gap: 8px;
+}
+.hero-group {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 .hero-matrix-head {
   font-size: 13px;
