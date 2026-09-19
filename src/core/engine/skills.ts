@@ -1,8 +1,10 @@
 import { areaOf, createDie, newDieId } from '../model/dice';
+import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
-import { findDieOf, gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, type SlotFill, type SlotSpec } from './effects';
+import { findDieOf, gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, transferDice, type SlotFill, type SlotSpec } from './effects';
+import { rerollPhase } from './phases';
 import { queuePending } from './pending';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
@@ -59,7 +61,7 @@ export interface SkillCtx {
   g: GameState;
   player: PlayerId;
   artifact: Artifact;
-  rng: { rollDie(): number };
+  rng: Rng;
   params: Record<string, unknown>;
   /** 立即结束当前主要阶段（009 必杀等使用），由 game.ts 提供 */
   endMainPhase: () => void;
@@ -640,6 +642,140 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
       logLine(g, `「${artifact.name}」：本神器失去持续式效果`);
       queuePending(g, { kind: 'zhihaiReroll', player, x, forced: false });
+    },
+  },
+  // 022 死契·填弹（启动）：消耗 1–6 个能力骰（≥2 个时必须顺点）→ 计数 +X（上限 6）
+  'siji.tiandan': {
+    run({ g, player, artifact, params, reportConsumed }) {
+      const p = g.players[player];
+      const ids = (params.dieIds as string[] | undefined) ?? [];
+      if (ids.length < 1 || ids.length > 6) throw new Error('必须消耗 1–6 个能力骰');
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      const dice: Die[] = [];
+      for (const id of ids) {
+        const found = findDieOf(g, player, id);
+        if (!found) throw new Error(`not your ability die: ${id}`);
+        dice.push(found.die);
+      }
+      const valueText = dice.map((d) => d.value).join('/');
+      if (dice.length >= 2) {
+        const sorted = dice.map((d) => d.value).sort((a, b) => a - b);
+        // 顺点：连续且互不相同（不回绕，5-6-1-2-3 之类无效）
+        const ok = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
+        if (!ok) throw new Error('消耗 2 个或更多能力骰时，其点数必须顺点');
+      }
+      // 移除（返还供应堆）：022 为第一列，与「真实之剑」永不同时存在，无需走 paySlots
+      for (const d of dice) consumeDice(p, d.kind, [d.id]);
+      // 以消耗自身能力骰为代价 → 上报给「顿悟·灵能脉冲」等触发（FAQ 22.1.1：消耗 6 颗 → 6 点真伤）
+      reportConsumed?.(dice.length);
+      const cap = artifact.countCap ?? Infinity;
+      const before = artifact.count;
+      artifact.count = Math.min(cap, artifact.count + dice.length);
+      logLine(
+        g,
+        `${pname(player)} 发动「填弹」：消耗 ${dice.length} 颗能力骰（${valueText}点），「死契」计数 ${before} → ${artifact.count}/${cap}`,
+      );
+    },
+  },
+  // 023 蛇蝎·畏惧（启动）：我方先消耗 1 骰 → 对方必须消耗 1 骰（由对方选择）→ 比大小（1 视为大于 6）
+  'shexie.weiju': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const dieId = params.dieId as string | undefined;
+      if (!dieId) throw new Error('must choose 1 die');
+      const found = findDieOf(g, player, dieId);
+      if (!found) throw new Error(`not your ability die: ${dieId}`);
+      const oppDice = [...g.players[opp].areas.attack, ...g.players[opp].areas.defense, ...g.players[opp].areas.meditation];
+      if (oppDice.length < 1) throw new Error('对方没有能力骰，无法发动「畏惧」');
+      const mine = found.die.value;
+      const kindCn = found.kind === 'attack' ? '攻击' : found.kind === 'defense' ? '防御' : '冥想';
+      consumeDice(p, found.kind, [dieId]);
+      logLine(
+        g,
+        `${pname(player)} 发动「畏惧」：消耗 1 颗${kindCn}骰（${mine}点），对方必须消耗 1 颗能力骰`,
+      );
+      g.pending = { kind: 'weijuPay', player: opp, initiator: player, initiatorValue: mine };
+    },
+  },
+  // 023 蛇蝎·共振（启动）：重掷我方 1 骰并按新点数落区 → 按落区类型二选一（待决策）
+  'shexie.gongzhen': {
+    run({ g, player, params, rng }) {
+      const dieId = params.dieId as string | undefined;
+      if (!dieId) throw new Error('must choose 1 die');
+      const found = findDieOf(g, player, dieId);
+      if (!found) throw new Error(`not your ability die: ${dieId}`);
+      rerollPhase(g, player, [dieId], rng);
+      const after = findDieOf(g, player, dieId);
+      if (!after) throw new Error('reroll failed');
+      const kindCn = after.kind === 'attack' ? '攻击' : after.kind === 'defense' ? '防御' : '冥想';
+      logLine(g, `${pname(player)} 发动「共振」：重掷 1 颗能力骰 → ${after.die.value} 点（${kindCn}骰区）`);
+      g.pending = { kind: 'gongzhenPick', player, areaKind: after.kind };
+    },
+  },
+  // 024 狂舞·凶弹业舞（充能）：选择任意玩家的 1 颗能力骰 → 移到该玩家的另一个区域（保留点数）
+  'kuangwu.charge': {
+    run({ g, player, params }) {
+      const owner: PlayerId = params.owner === 'opponent' ? (player === 'A' ? 'B' : 'A') : player;
+      const dieId = params.dieId as string | undefined;
+      const toKind = params.toKind as DiceKind | undefined;
+      if (!dieId) throw new Error('must choose 1 die');
+      if (toKind !== 'attack' && toKind !== 'defense' && toKind !== 'meditation') throw new Error('invalid destination');
+      const found = findDieOf(g, owner, dieId);
+      if (!found) throw new Error(`not ${owner}'s ability die: ${dieId}`);
+      if (found.kind === toKind) throw new Error('must move to another area');
+      const kindCn = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
+      const from = found.kind;
+      const value = found.die.value;
+      moveDice(g, owner, [dieId], toKind);
+      logLine(
+        g,
+        `${pname(player)} 「凶弹业舞」充能效果：将 ${pname(owner)} 的 1 颗能力骰（${value}点）从${kindCn(from)}骰区移到${kindCn(toKind)}骰区`,
+      );
+    },
+  },
+  // 024 狂舞·凶弹业舞（必杀）：6 区域各选最多 3 颗 → 按顺/逆时针整体移动到下一区域（可跨玩家）
+  'kuangwu.ultimate': {
+    run({ g, player, params }) {
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const groups = (params.groups as string[][] | undefined) ?? [];
+      const dir = params.direction === 'ccw' ? 'ccw' : 'cw';
+      if (groups.length !== 6) throw new Error('需要为 6 个区域各提供一组选择');
+      // 顺时针（FAQ 24.1.1）：我冥想→我攻击→我防御→对方冥想→对方攻击→对方防御；逆时针取反
+      const cw: { player: PlayerId; kind: DiceKind }[] = [
+        { player, kind: 'meditation' },
+        { player, kind: 'attack' },
+        { player, kind: 'defense' },
+        { player: opp, kind: 'meditation' },
+        { player: opp, kind: 'attack' },
+        { player: opp, kind: 'defense' },
+      ];
+      const cycle = dir === 'cw' ? cw : [...cw].reverse();
+      const picked: string[][] = [];
+      cycle.forEach((slot, i) => {
+        const ids = groups[i] ?? [];
+        if (ids.length > 3) throw new Error('每个区域最多选择 3 颗');
+        if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+        for (const id of ids) {
+          if (!g.players[slot.player].areas[slot.kind].some((d) => d.id === id)) {
+            throw new Error(`die ${id} is not in ${slot.player}'s ${slot.kind} area`);
+          }
+        }
+        picked.push([...ids]);
+      });
+      // 快照后再整体移动，避免连锁移动
+      let moved = 0;
+      picked.forEach((ids, i) => {
+        const dest = cycle[(i + 1) % 6];
+        for (const id of ids) {
+          transferDice(g, cycle[i].player, [id], dest.player, dest.kind);
+          moved += 1;
+        }
+      });
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「凶弹业舞」：双方 6 个区域各选最多 3 颗，按${dir === 'cw' ? '顺时针' : '逆时针'}移动到下一区域（共移动 ${moved} 颗）`,
+      );
     },
   },
 };

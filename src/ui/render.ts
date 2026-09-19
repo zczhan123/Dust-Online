@@ -54,7 +54,7 @@ export interface UiState {
     /** 「slots」步骤每格的填充模式 */
     slotModes: ('real' | 'convert')[];
     /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴、017 帷幕、018 重掷），确认时直接派发对应动作 */
-    pendingKind?: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll';
+    pendingKind?: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll' | 'gongzhenPick';
   };
   pendingConfirm: null | { action: Action; label: string };
   /** 尘起 2 步流程：选择（激活时）启动侧 → 支付代价 */
@@ -384,7 +384,7 @@ function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
 }
 
 /** 为「待决策」（013 电刑/雷暴）打开选骰面板：一次列全部可选骰，选完确认即派发 */
-function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll'): void {
+function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll' | 'gongzhenPick'): void {
   ctx.hooks.ui.selection = {
     key,
     artifactId: '',
@@ -782,6 +782,33 @@ function phaseHint(ctx: Ctx): HintPart[] {
       { text: '：装填即强制结算，请完成选择后确认。' },
     ];
   }
+  if (pd && pd.kind === 'sijiChuxing') {
+    return [
+      { text: '处刑通牒', color: pd.player },
+      { text: '：使用攻击骰前必须先决定（优先于抵挡与「灵能屏障」）；可扣 1 点计数令本次攻击 ①伤害+1且不可抵挡 或 ②伤害+5。' },
+    ];
+  }
+  if (pd && pd.kind === 'weijuPay') {
+    return [
+      { text: '畏惧', color: pd.initiator },
+      { text: '：' },
+      { text: `玩家${pd.player}`, color: pd.player },
+      { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点；1 视为大于 6）；请选择` },
+    ];
+  }
+  if (pd && pd.kind === 'gongzhenPick') {
+    const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+    return [
+      { text: '共振', color: pd.player },
+      { text: `：重掷后落入${CN[pd.areaKind]}骰区；请选择 ①双方各获得 2 颗 / ②双方各弃置 2 颗（弃置由你指定）` },
+    ];
+  }
+  if (pd && pd.kind === 'chargeResolve') {
+    return [
+      { text: '凶弹业舞', color: pd.player },
+      { text: '：充能效果 — 选择任意玩家的 1 颗能力骰，移到该玩家的另一个区域（保留点数）。' },
+    ];
+  }
   if (pd && pd.kind === 'chenaiFreeRise') {
     return [
       { text: '尘起', color: pd.player },
@@ -871,7 +898,7 @@ function phaseHint(ctx: Ctx): HintPart[] {
   }
   if (state.pendingAttack) {
     const pa = state.pendingAttack;
-    const bonus = attackDamageBonus(state, pa.attacker);
+    const bonus = pa.bonusValue !== undefined ? { value: pa.bonusValue, label: pa.bonusLabel } : attackDamageBonus(state, pa.attacker);
     const parts: HintPart[] = [];
     if (pa.sourceValue !== undefined) {
       parts.push({ text: `被 ${pa.sourceValue} 点攻击骰攻击，本次 ${pa.value} 伤害` });
@@ -881,6 +908,7 @@ function phaseHint(ctx: Ctx): HintPart[] {
     if (bonus.value > 0) {
       parts.push({ text: `（${bonus.label ? `「${bonus.label}」` : ''}加成 ${bonus.value} 伤害）` });
     }
+    if (pa.halveReason) parts.push({ text: `（「${pa.halveReason}」减半）` });
     if (pa.unblockable) parts.push({ text: '（不可抵挡）' });
     parts.push({ text: '；请选择' });
     return parts;
@@ -1059,6 +1087,16 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return a.to === 'defense' ? '「裁雨流」移到防御骰区' : a.to === 'meditation' ? '「裁雨流」移到冥想骰区' : '不发动「裁雨流」';
     case 'guwangCharge':
       return '不变更';
+    case 'chuxingPick':
+      return a.pick === 'none'
+        ? '不发动「处刑通牒」'
+        : a.pick === 'unblockable'
+          ? '① 本次攻击伤害 +1 且不可抵挡'
+          : '② 本次攻击伤害 +5';
+    case 'gongzhenResolve':
+      return a.pick === 'gain' ? '① 双方各获得 2 颗' : '② 双方各弃置 2 颗';
+    case 'weijuPay':
+      return '消耗 1 颗能力骰';
     case 'guwangCancel':
       return '不发动「高塔铁幕」';
     case 'dunwuHalve':
@@ -1095,10 +1133,17 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
 function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
   const { state, hooks } = ctx;
   const actor = actorOf(state);
+  const art = state.players[actor].artifacts.find((x) => x.id === a.artifactId);
+  // 同名技能（如 024「凶弹业舞」充能+必杀）要按当前上下文取对应那条
+  const isChargeCtx = state.pending?.kind === 'chargeResolve' && state.pending.artifactId === a.artifactId;
   const def = a.t === 'skill'
-    ? state.players[actor].artifacts
-        .find((x) => x.id === a.artifactId)
-        ?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'activation' || s.kind === 'ultimate'))
+    ? art?.skills.find(
+        (s) =>
+          s.side === a.side &&
+          (isChargeCtx
+            ? s.kind === 'charge'
+            : s.kind === 'activate' || s.kind === 'activation' || s.kind === 'ultimate'),
+      )
     : undefined;
   const key = def?.key;
   const name = skillName(state, a);
@@ -1182,6 +1227,12 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
       return { parts: ['发动「灵能屏障」伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
+    }
+    case 'weijuPay': {
+      // 023 畏惧：对方被迫消耗的那颗骰 → 1 颗用内联骰片
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'weijuPay' ? pd.player : state.activePlayer;
+      return { parts: ['消耗 1 颗能力骰 ', ''], dice: [{ id: a.dieId, owner }] };
     }
     case 'guwangCharge': {
       if (!a.dieId) return null;
@@ -1273,6 +1324,8 @@ function operationList(ctx: Ctx): HTMLElement {
   let seenZhihaiReroll = false;
   let seenChenaiRise = false;
   let seenShouhun = false;
+  let seenChuxing = false;
+  let seenGongzhen = false;
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1289,6 +1342,28 @@ function operationList(ctx: Ctx): HTMLElement {
       open.addEventListener('click', () => startPendingSelection(ctx, `@${a.t}`, a.t));
       box.appendChild(open);
       box.appendChild(button(a.t === 'dianxing' ? '不发动「电刑」' : '不发动「雷暴」', a, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'chuxingPick') {
+      // 022 处刑通牒：使用攻击骰前的强制决定（唯一渲染来源）
+      if (seenChuxing) continue;
+      seenChuxing = true;
+      box.appendChild(button('不发动「处刑通牒」', { t: 'chuxingPick', pick: 'none' }, ctx.hooks));
+      box.appendChild(button('① 本次攻击伤害 +1 且不可抵挡', { t: 'chuxingPick', pick: 'unblockable' }, ctx.hooks));
+      box.appendChild(button('② 本次攻击伤害 +5', { t: 'chuxingPick', pick: 'bonus5' }, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'gongzhenResolve') {
+      // 023 共振：打开选择器（①/② + 弃置选择），确认后直接派发（唯一渲染来源）
+      if (seenGongzhen) continue;
+      seenGongzhen = true;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'gongzhenOpen';
+      open.textContent = '选择「共振」效果';
+      open.addEventListener('click', () => startPendingSelection(ctx, '@gongzhen', 'gongzhenPick'));
+      box.appendChild(open);
       continue;
     }
     if (a.t === 'chenaiFreeRise') {
@@ -1517,10 +1592,21 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   title.textContent = `步骤 ${sel.stepIndex + 1}/${steps.length} · ${step.label}`;
   head.appendChild(title);
 
+  let diceValidate: { ok: boolean; hint?: string } = { ok: true };
   if (step.kind === 'dice') {
     const info = el('div', 'selector-info');
     info.textContent = `已选 ${sel.currentSel.size}（需 ${step.min}–${step.max} 颗）`;
     head.appendChild(info);
+    if (step.validate) {
+      const picked = [...sel.currentSel].map((id) => findDie(state, id)).filter((d): d is Die => d !== undefined);
+      diceValidate = step.validate(picked);
+      if (diceValidate.hint) {
+        const hint = el('div', 'selector-hint');
+        hint.textContent = diceValidate.hint;
+        if (!diceValidate.ok) hint.classList.add('selector-hint--bad');
+        head.appendChild(hint);
+      }
+    }
   } else if (step.kind === 'option') {
     const row = el('div', 'option-row');
     for (const o of step.options) {
@@ -1576,7 +1662,7 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const chosenNum = sel.numbers[sel.stepIndex];
   let satisfied: boolean;
   if (step.kind === 'dice') {
-    satisfied = sel.currentSel.size >= step.min && sel.currentSel.size <= step.max;
+    satisfied = sel.currentSel.size >= step.min && sel.currentSel.size <= step.max && diceValidate.ok;
   } else if (step.kind === 'option') {
     satisfied = step.options.some((o) => o.value === sel.options[sel.stepIndex]);
   } else if (step.kind === 'slots') {
@@ -1641,7 +1727,18 @@ function confirmSelection(ctx: Ctx): void {
       .filter((i) => i >= 0);
     const numbers = numberIdx.map((i) => sel.numbers[i]);
     if (sel.pendingKind) {
-      // 「待决策」直接派发：询问本身即确认（013 电刑/雷暴、017 帷幕、018 重掷）
+      // 「待决策」直接派发：询问本身即确认（013 电刑/雷暴、017 帷幕、018 重掷、023 共振）
+      if (sel.pendingKind === 'gongzhenPick') {
+        const pendingAction: Action = {
+          t: 'gongzhenResolve',
+          pick: sel.options[0] === 'discard' ? 'discard' : 'gain',
+          myIds: sel.chosenDice[1] ?? [],
+          oppIds: sel.chosenDice[2] ?? [],
+        };
+        hooks.ui.selection = null;
+        hooks.onAction(pendingAction);
+        return;
+      }
       const ids = sel.chosenDice[0] ?? [];
       let pendingAction: Action;
       if (sel.pendingKind === 'dianxing') pendingAction = { t: 'dianxing', dieIds: ids };

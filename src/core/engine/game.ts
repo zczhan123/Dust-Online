@@ -4,12 +4,12 @@ import { refillPhase, rerollPhase, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { afterAttackResolved, applyLifeLoss, doAttack, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue } from './combat';
-import { findDieOf, setDieValue, heal, moveDice, paySlots, withRngState } from './effects';
+import { afterAttackResolved, applyLifeLoss, artifactWithSkill, doAttack, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, type AttackMods } from './combat';
+import { findDieOf, gainRandomDice, setDieValue, heal, moveDice, paySlots, withRngState } from './effects';
 import { pumpPending, queueRerollEndTriggers } from './pending';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
-import type { Action, Artifact, GameState, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
+import type { Action, Artifact, DiceKind, GameState, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
 /** 校验：这些骰必须是该玩家自己的、互不重复的冥想骰（越界抛错，不静默修正） */
 function assertOwnMeditationDice(p: PlayerState, ids: string[]): void {
@@ -83,6 +83,8 @@ export function endTurn(g: GameState): void {
     cx.count -= 1;
     logLine(g, `「${cx.name}」：回合结束，计数 ${before} → ${cx.count}`);
   }
+  // 023 蛇蝎·畏惧：该玩家「下个回合」的攻击伤害减半 → 其回合结束时清除（即使本回合没攻击/被抵挡也不保留）
+  p.attackHalvedNextTurn = false;
   p.buffs = p.buffs.filter((b) => b.duration !== 'thisTurn');
   g.firstRound[g.activePlayer] = false;
   g.activePlayer = g.activePlayer === 'A' ? 'B' : 'A';
@@ -206,6 +208,21 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   }
   return acts;
 }
+
+/** 「充能」技能的默认参数（供充能后强制结算使用；AI/测试同样走这里）。024 狂舞：把自己第 1 颗骰移到另一个区域。 */
+function chargeDefaultAction(p: PlayerState, a: Artifact, s: SkillDef): Action {
+  const first = KINDS_ORDER.flatMap((k) => p.areas[k])[0];
+  const from = first?.kind ?? 'attack';
+  const toKind: DiceKind = from === 'defense' ? 'attack' : 'defense';
+  return {
+    t: 'skill',
+    artifactId: a.id,
+    side: s.side,
+    params: { owner: 'self', dieId: first?.id, toKind },
+  };
+}
+
+const KINDS_ORDER: DiceKind[] = ['attack', 'defense', 'meditation'];
 
 /** 「激活」类技能：仅在该侧被“切入”的当回合生效（尘起装填即强制结算；此处用于校验/UI 显示） */
 function activationUsable(g: GameState, a: { armedSide: 'left' | 'right' | null; armedTurn: number }, s: { side: 'left' | 'right' | 'only' }): boolean {
@@ -421,6 +438,33 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
             params: { costSlots: [{ dieIds: [anyDie.id] }], picks: ['gain'] },
           });
         }
+      } else if (s.key === 'siji.tiandan') {
+        // 022 死契·填弹（启动）：默认消耗 1 个任意能力骰（1 颗无「顺点」要求）
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        if (anyDie) {
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieIds: [anyDie.id] } });
+        }
+      } else if (s.key === 'shexie.weiju') {
+        // 023 蛇蝎·畏惧（启动）：我方与对方都必须有至少 1 颗能力骰，否则不能发动
+        const opp: PlayerId = p.id === 'A' ? 'B' : 'A';
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        const oppDice = [...g.players[opp].areas.attack, ...g.players[opp].areas.defense, ...g.players[opp].areas.meditation];
+        if (anyDie && oppDice.length >= 1) {
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id } });
+        }
+      } else if (s.key === 'shexie.gongzhen') {
+        // 023 蛇蝎·共振（启动）：默认重掷我方第 1 颗骰
+        const anyDie = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation][0];
+        if (anyDie) {
+          acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { dieId: anyDie.id } });
+        }
+      } else if (s.key === 'kuangwu.ultimate') {
+        // 024 狂舞·凶弹业舞（必杀）：默认每个区域取最多 3 颗、顺时针
+        const opp: PlayerId = p.id === 'A' ? 'B' : 'A';
+        const groups = [p, g.players[opp]].flatMap((who) =>
+          (['defense', 'attack', 'meditation'] as const).map((k) => who.areas[k].slice(0, 3).map((d) => d.id)),
+        );
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { groups, direction: 'cw' } });
       }
     }
   }
@@ -490,6 +534,39 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'leibao', accept: false },
         { t: 'leibao', dieIds: pick },
       ];
+    }
+    if (g.pending.kind === 'sijiChuxing') {
+      return [
+        { t: 'chuxingPick', pick: 'none' },
+        { t: 'chuxingPick', pick: 'unblockable' },
+        { t: 'chuxingPick', pick: 'bonus5' },
+      ];
+    }
+    if (g.pending.kind === 'weijuPay') {
+      const p = g.players[g.pending.player];
+      const acts: Action[] = [];
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        for (const d of p.areas[k]) acts.push({ t: 'weijuPay', dieId: d.id });
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'gongzhenPick') {
+      const pd = g.pending;
+      const me = g.players[pd.player];
+      const opp = g.players[pd.player === 'A' ? 'B' : 'A'];
+      const acts: Action[] = [{ t: 'gongzhenResolve', pick: 'gain' }];
+      const myIds = me.areas[pd.areaKind].slice(0, 2).map((d) => d.id); // 默认候选（AI/测试用）
+      const oppIds = opp.areas[pd.areaKind].slice(0, 2).map((d) => d.id);
+      if (myIds.length + oppIds.length > 0) acts.push({ t: 'gongzhenResolve', pick: 'discard', myIds, oppIds });
+      return acts;
+    }
+    if (g.pending.kind === 'chargeResolve') {
+      const pd = g.pending;
+      const p = g.players[pd.player];
+      const a = p.artifacts.find((x) => x.id === pd.artifactId);
+      const s = a?.skills.find((x) => x.kind === 'charge');
+      if (!a || !s) return [{ t: 'advance' }];
+      return [chargeDefaultAction(p, a, s)];
     }
     if (g.pending.kind === 'chenaiFreeRise') {
       return [
@@ -601,6 +678,11 @@ function runChargeSkill(g: GameState, player: PlayerId, artifactId: string): voi
   if (!a || a.column !== 3) return;
   const cs = a.skills.find((s) => s.kind === 'charge');
   if (cs && SKILL_HANDLERS[cs.key]) {
+    // 024 狂舞：充能技能需要玩家选择（哪一方哪颗骰 → 移到该玩家另一区域）→ 弹出强制选择器
+    if (cs.needsChoice) {
+      g.pending = { kind: 'chargeResolve', player, artifactId };
+      return;
+    }
     withRng(g, (rng) =>
       SKILL_HANDLERS[cs.key].run({
         g,
@@ -632,6 +714,10 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
   zhihaiReroll: 'zhihaiReroll',
   chenaiFreeRise: 'chenaiFreeRise',
   shouhunCancel: 'shouhunCancel',
+  sijiChuxing: 'chuxingPick',
+  weijuPay: 'weijuPay',
+  gongzhenPick: 'gongzhenResolve',
+  chargeResolve: 'skill',
 };
 
 export function applyAction(g: GameState, action: Action): GameState {
@@ -779,6 +865,11 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
       assertConversionAllowed(g, g.activePlayer, action.costSlots);
+      // 022 死契·处刑通牒：使用攻击骰前必须先决定是否扣计数（FAQ 22.2.1：优先于抵挡与「灵能屏障」）
+      if (hasActiveSkill(g.players[g.activePlayer], 'siji.chuxing') && (artifactWithSkill(g.players[g.activePlayer], 'siji.chuxing')?.count ?? 0) >= 1) {
+        g.pending = { kind: 'sijiChuxing', player: g.activePlayer, costSlots: action.costSlots };
+        break;
+      }
       doAttack(g, g.activePlayer, action.costSlots);
       break;
     case 'block': {
@@ -885,10 +976,15 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (action.accept && dieId && p.areas.meditation.some((d) => d.id === dieId)) {
         consumeDice(p, 'meditation', [dieId]);
         if (g.pendingAttack) {
-          g.pendingAttack.value = Math.floor(g.pendingAttack.value / 2);
-          g.pendingAttack.halved = true;
+          // 统一减半入口：同种削减不叠加（屏障 / 021 满计数 / 023 畏惧 只减半一次，FAQ 21.1.5）
+          const ok = halveAttackDamage(g.pendingAttack, '灵能屏障');
+          logLine(
+            g,
+            ok
+              ? `${pname(pd.player)} 「灵能屏障」：消耗 1 个冥想骰，伤害减半为 ${g.pendingAttack.value}`
+              : `${pname(pd.player)} 「灵能屏障」：本次攻击已在减半状态，不再叠加（同种削减不叠加）`,
+          );
         }
-        logLine(g, `${pname(pd.player)} 「灵能屏障」：消耗 1 个冥想骰，伤害减半为 ${g.pendingAttack?.value ?? 0}`);
       } else {
         logLine(g, `${pname(pd.player)} 放弃灵能屏障`);
       }
@@ -985,11 +1081,89 @@ export function applyAction(g: GameState, action: Action): GameState {
       }
       break;
     }
+    case 'chuxingPick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'sijiChuxing') throw new Error('no sijiChuxing pending');
+      const card = artifactWithSkill(g.players[pd.player], 'siji.chuxing');
+      g.pending = null;
+      if (action.pick === 'none') {
+        logLine(g, `${pname(pd.player)} 不发动「处刑通牒」`);
+        doAttack(g, pd.player, pd.costSlots);
+        break;
+      }
+      if (!card || card.count < 1) throw new Error('no 「死契」 count to spend');
+      card.count -= 1;
+      const mods: AttackMods =
+        action.pick === 'unblockable'
+          ? { minBonus: 1, bonusLabel: '处刑通牒', forceUnblockable: true }
+          : { minBonus: 5, bonusLabel: '处刑通牒' };
+      logLine(
+        g,
+        `${pname(pd.player)} 发动「处刑通牒」：计数 −1（${card.count}），本次攻击${
+          action.pick === 'unblockable' ? '伤害 +1 且不可抵挡' : '伤害 +5'
+        }`,
+      );
+      doAttack(g, pd.player, pd.costSlots, mods);
+      break;
+    }
+    case 'weijuPay': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'weijuPay') throw new Error('no weijuPay pending');
+      const p = g.players[pd.player];
+      const found = findDieOf(g, pd.player, action.dieId);
+      if (!found) throw new Error(`not your ability die: ${action.dieId}`);
+      const theirValue = found.die.value;
+      consumeDice(p, found.kind, [action.dieId]);
+      g.pending = null;
+      const kindCn = found.kind === 'attack' ? '攻击' : found.kind === 'defense' ? '防御' : '冥想';
+      logLine(
+        g,
+        `${pname(pd.player)} 因「畏惧」消耗 1 颗${kindCn}骰（${theirValue}点），与 ${pname(pd.initiator)} 的 ${pd.initiatorValue} 点比较`,
+      );
+      // FAQ 23.2.1：1 点视为大于 6 点
+      const beats = (x: number, y: number): boolean => (x === 1 && y === 6 ? true : y === 1 && x === 6 ? false : x > y);
+      if (beats(pd.initiatorValue, theirValue)) {
+        p.attackHalvedNextTurn = true;
+        logLine(g, `「畏惧」生效：${pname(pd.player)} 点数较小 → 其下个回合中攻击造成的伤害减半`);
+      } else {
+        logLine(g, `「畏惧」未生效（1 视为大于 6；相等或更大则无事发生）`);
+      }
+      break;
+    }
+    case 'gongzhenResolve': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'gongzhenPick') throw new Error('no gongzhenPick pending');
+      const me = pd.player;
+      const opp: PlayerId = me === 'A' ? 'B' : 'A';
+      g.pending = null;
+      const kind = pd.areaKind;
+      const kindCn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
+      if (action.pick === 'gain') {
+        withRng(g, (rng) => {
+          gainRandomDice(g, me, kind, 2, rng);
+          gainRandomDice(g, opp, kind, 2, rng);
+        });
+        logLine(g, `「共振」：${pname(me)} 与 ${pname(opp)} 各获得 2 个随机点数的${kindCn}骰`);
+        break;
+      }
+      // ② 双方各弃置最多 2 颗该类型（由发起者选择；不足则尽可能，FAQ 23.2.2）
+      const pickFor = (who: PlayerId, ids: string[]): number => {
+        const valid = ids.filter((id) => g.players[who].areas[kind].some((d) => d.id === id)).slice(0, 2);
+        if (valid.length > 0) consumeDice(g.players[who], kind, valid);
+        return valid.length;
+      };
+      const mine = pickFor(me, action.myIds ?? []);
+      const theirs = pickFor(opp, action.oppIds ?? []);
+      logLine(g, `「共振」：${pname(me)} 弃置自己 ${mine} 颗、${pname(opp)} 的 ${theirs} 颗${kindCn}骰`);
+      break;
+    }
     case 'skill': {
       const pendingSkill = g.pending && g.pending.kind === 'activationResolve' ? g.pending : null;
       const resolvingActivation =
         pendingSkill !== null && pendingSkill.artifactId === action.artifactId && pendingSkill.side === action.side;
-      if (g.phase !== 'main' && !resolvingActivation) throw new Error('not main phase');
+      const pendingCharge = g.pending && g.pending.kind === 'chargeResolve' ? g.pending : null;
+      const resolvingCharge = pendingCharge !== null && pendingCharge.artifactId === action.artifactId;
+      if (g.phase !== 'main' && !resolvingActivation && !resolvingCharge) throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
       const p = g.players[g.activePlayer];
       const a = p.artifacts.find((x) => x.id === action.artifactId);
@@ -999,10 +1173,16 @@ export function applyAction(g: GameState, action: Action): GameState {
           x.side === action.side &&
           (x.kind === 'activate' ||
             x.kind === 'activation' ||
-            x.kind === 'ultimate'),
+            x.kind === 'ultimate' ||
+            (resolvingCharge && x.kind === 'charge')),
       );
       if (!s) throw new Error('no usable skill on that side');
-      if (!skillActive(a, s)) throw new Error('skill not active');
+      if (s.kind === 'charge') {
+        // 024：充能技能由「充能行动」触发的强制选择结算，不能手动发动
+        if (!resolvingCharge) throw new Error('充能技能由充能行动结算，不能手动发动');
+      } else if (!skillActive(a, s)) {
+        throw new Error('skill not active');
+      }
       if (s.kind === 'activation') {
         // 「激活」类只能由尘起装填时的强制结算触发，不能手动发动
         if (!resolvingActivation) throw new Error('激活类技能由尘起装填时立即强制结算，不能手动发动');
@@ -1028,7 +1208,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         }),
       );
       // 非法参数在处理器内抛错时不清空待决策（非法动作不得改变状态）
-      if (resolvingActivation) g.pending = null;
+      if (resolvingActivation || resolvingCharge) g.pending = null;
       g.skillsUsedThisTurn.push(s.key);
       if (s.kind === 'ultimate') g.ultimatesUsed.push(s.key);
       // 019 蛮王之牙等：启动后刷新自身「每回合一次」计数（本回合可再次启动）

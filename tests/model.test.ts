@@ -20,6 +20,7 @@ describe('model types', () => {
       markers: 0,
       hasDustSeal: false,
     damagedThisTurn: false,
+    attackHalvedNextTurn: false,
       buffs: [],
     };
     const g: GameState = {

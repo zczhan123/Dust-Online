@@ -2,7 +2,17 @@ import type { DiceKind, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
 
 export type SelectStep =
-  | { kind: 'dice'; label: string; owner: 'self' | 'opponent'; areas: DiceKind[]; min: number; max: number; filter?: (d: { id: string; value: number; kind: DiceKind }) => boolean }
+  | {
+      kind: 'dice';
+      label: string;
+      owner: 'self' | 'opponent';
+      areas: DiceKind[];
+      min: number;
+      max: number;
+      filter?: (d: { id: string; value: number; kind: DiceKind }) => boolean;
+      /** 跨骰约束（如 022「填弹」的顺点）：不满足时禁止确认并给出提示 */
+      validate?: (dice: { id: string; value: number; kind: DiceKind }[]) => { ok: boolean; hint?: string };
+    }
   | { kind: 'option'; label: string; options: { value: string; label: string }[] }
   | { kind: 'number'; label: string; min: number; max: number; fmt?: (n: number) => string }
   | { kind: 'slots'; label: string; kinds: DiceKind[] } // 每个代价骰位一个类型
@@ -615,6 +625,162 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       const picks = Array.from({ length: x }, (_, i) => options[2 + kinds.length + i] as string);
       return { costSlots, picks };
     },
+  },
+  // 022 死契·填弹（启动）：消耗 1–6 颗任意能力骰（≥2 颗必须顺点，UI 实时校验并禁用确认）
+  'siji.tiandan': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要消耗的能力骰（1–6 颗；≥2 颗时点数必须顺点）',
+        owner: 'self',
+        areas: KINDS,
+        min: 1,
+        max: 6,
+        validate: (dice) => {
+          if (dice.length < 2) return { ok: true, hint: `已选 ${dice.length} 颗（1 颗无顺点要求）` };
+          const sorted = dice.map((d) => d.value).sort((a, b) => a - b);
+          const ok = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
+          return ok
+            ? { ok: true, hint: `顺点 ✓（${sorted.join('-')}）` }
+            : { ok: false, hint: `不是顺点 ✗（需连续且不回绕，如 2-3-4）` };
+        },
+      },
+    ],
+    buildParams: ({ chosenDice }) => ({ dieIds: chosenDice[0] ?? [] }),
+  },
+  // 023 蛇蝎·畏惧（启动）：先选我方要消耗的 1 颗骰
+  'shexie.weiju': {
+    steps: () => [
+      { kind: 'dice', label: '选择你要消耗的 1 颗能力骰（随后对方必须消耗 1 颗）', owner: 'self', areas: KINDS, min: 1, max: 1 },
+    ],
+    buildParams: ({ chosenDice }) => ({ dieId: chosenDice[0]?.[0] }),
+  },
+  // 023 蛇蝎·共振（启动）：先选我方要重掷的 1 颗骰（之后的①/②在待决策里选）
+  'shexie.gongzhen': {
+    steps: () => [
+      { kind: 'dice', label: '选择你要重掷的 1 颗能力骰（将按新点数落入对应区域）', owner: 'self', areas: KINDS, min: 1, max: 1 },
+    ],
+    buildParams: ({ chosenDice }) => ({ dieId: chosenDice[0]?.[0] }),
+  },
+  // 023 蛇蝎·共振（待决策）：按重掷后的区域类型二选一；选 ② 时由发起者指定双方各弃置哪 2 颗
+  '@gongzhen': {
+    steps: ({ state, options }) => {
+      const pd = state.pending;
+      const areaKind = pd && pd.kind === 'gongzhenPick' ? pd.areaKind : 'attack';
+      const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      const actor = pd ? pd.player : state.activePlayer;
+      const steps: SelectStep[] = [
+        {
+          kind: 'option',
+          label: `「共振」效果选择（重掷后落入${CN[areaKind]}骰区）`,
+          options: [
+            { value: 'gain', label: `① 双方各获得 2 个随机点数的${CN[areaKind]}骰` },
+            { value: 'discard', label: `② 双方各弃置 2 个${CN[areaKind]}骰（由你选择）` },
+          ],
+        },
+      ];
+      if (options[0] === 'discard') {
+        for (const owner of ['self', 'opponent'] as const) {
+          const who = owner === 'self' ? actor : oppOf(actor);
+          const n = state.players[who].areas[areaKind].length;
+          const need = Math.min(2, n);
+          steps.push({
+            kind: 'dice',
+            label: `选择要弃置的${owner === 'self' ? '你' : '对方'}的 ${need} 颗${CN[areaKind]}骰（不足则尽可能）`,
+            owner,
+            areas: [areaKind],
+            min: need,
+            max: need,
+          });
+        }
+      }
+      return steps;
+    },
+    buildParams: ({ options, chosenDice }) => ({
+      pick: options[0] === 'discard' ? 'discard' : 'gain',
+      myIds: chosenDice[1] ?? [],
+      oppIds: chosenDice[2] ?? [],
+    }),
+  },
+  // 024 狂舞·凶弹业舞（充能，强制结算）：选任意玩家 1 颗骰 → 移到该玩家另一个区域
+  'kuangwu.charge': {
+    steps: ({ state, player, options, chosenDice }) => {
+      const sideChoice = options[0] === 'opponent' ? 'opponent' : 'self';
+      const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      const who = sideChoice === 'self' ? player : oppOf(player);
+      const steps: SelectStep[] = [
+        {
+          kind: 'option',
+          label: '选择要移动哪一方的能力骰',
+          options: [
+            { value: 'self', label: '我方的能力骰' },
+            { value: 'opponent', label: '对方的能力骰' },
+          ],
+        },
+        { kind: 'dice', label: '选择要移动的 1 颗能力骰', owner: sideChoice, areas: KINDS, min: 1, max: 1 },
+      ];
+      const pickedId = chosenDice[1]?.[0];
+      const currentKind = pickedId
+        ? KINDS.map((k) => state.players[who].areas[k].find((d) => d.id === pickedId)).find((d) => d !== undefined)?.kind
+        : undefined;
+      if (currentKind) {
+        steps.push({
+          kind: 'option',
+          label: '选择要移动到该玩家的哪个区域（不能与原区域相同）',
+          options: KINDS.filter((k) => k !== currentKind).map((k) => ({ value: k, label: `${CN[k]}骰区` })),
+        });
+      }
+      return steps;
+    },
+    buildParams: ({ options, chosenDice }) => ({
+      owner: options[0] === 'opponent' ? 'opponent' : 'self',
+      dieId: chosenDice[1]?.[0],
+      toKind: options[2],
+    }),
+  },
+  // 024 狂舞·凶弹业舞（必杀）：先选方向，再为（按该方向排序的）6 个区域各选 ≤3 颗
+  'kuangwu.ultimate': {
+    steps: ({ state, player, options }) => {
+      const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      const dir = options[0] === 'ccw' ? 'ccw' : 'cw';
+      const base: { owner: 'self' | 'opponent'; kind: DiceKind }[] = [
+        { owner: 'self', kind: 'meditation' },
+        { owner: 'self', kind: 'attack' },
+        { owner: 'self', kind: 'defense' },
+        { owner: 'opponent', kind: 'meditation' },
+        { owner: 'opponent', kind: 'attack' },
+        { owner: 'opponent', kind: 'defense' },
+      ];
+      const slots = dir === 'cw' ? base : [...base].reverse();
+      const steps: SelectStep[] = [
+        {
+          kind: 'option',
+          label: '选择旋转方向',
+          options: [
+            { value: 'cw', label: '顺时针' },
+            { value: 'ccw', label: '逆时针' },
+          ],
+        },
+      ];
+      for (const s of slots) {
+        const who = s.owner === 'self' ? player : oppOf(player);
+        const n = state.players[who].areas[s.kind].length;
+        const need = Math.min(3, n);
+        steps.push({
+          kind: 'dice',
+          label: `选择${s.owner === 'self' ? '我方' : '对方'}${CN[s.kind]}骰区要移动的骰（${need} 颗${n === 0 ? '，该区域没有骰' : ''}）`,
+          owner: s.owner,
+          areas: [s.kind],
+          min: need,
+          max: need,
+        });
+      }
+      return steps;
+    },
+    buildParams: ({ chosenDice, options }) => ({
+      direction: options[0] === 'ccw' ? 'ccw' : 'cw',
+      groups: chosenDice.slice(1, 7).map((g) => [...g]),
+    }),
   },
   // 017 幽冥·帷幕（待决策）：选对方 1 个能力骰弃置
   '@weimu': {

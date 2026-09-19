@@ -84,24 +84,57 @@ export function checkLifeEnd(g: GameState): void {
   }
 }
 
+/** 022 死契·处刑通牒 这类「单次攻击修正」：伤害加成取最大、可强制不可抵挡 */
+export interface AttackMods {
+  /** 本次攻击的伤害加成（与既有加成**取最大**，FAQ 22.2.2） */
+  minBonus?: number;
+  /** 本次攻击的加成来源名（提示栏显示） */
+  bonusLabel?: string;
+  /** 本次攻击不可抵挡（只影响这一次攻击，不设回合标记） */
+  forceUnblockable?: boolean;
+}
+
+/** 攻击伤害减半的**唯一入口**（同种削减不叠加：灵能屏障 / 021 满计数 / 023 畏惧 只生效一次） */
+export function halveAttackDamage(pa: PendingAttack, reason: string): boolean {
+  if (pa.halved) return false;
+  pa.value = Math.floor(pa.value / 2);
+  pa.halved = true;
+  pa.halveReason = reason;
+  return true;
+}
+
+/** 023 蛇蝎·畏惧：该玩家在其下个回合中的攻击伤害减半（生成攻击时就减半，提示/日志保持一致） */
+function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack): void {
+  if (g.activePlayer !== player) return;
+  if (!g.players[player].attackHalvedNextTurn) return;
+  if (halveAttackDamage(pa, '畏惧')) {
+    logLine(g, `${pname(player)} 处于「畏惧」影响中：本次攻击伤害减半为 ${pa.value}`);
+  }
+}
+
 /** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
-export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[]): void {
+export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], mods?: AttackMods): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots);
   const effDie = eff[0];
-  const buff = attackDamageBuff(g, player);
-  const value = effDie.value + buff;
+  const base = attackDamageBonus(g, player);
+  const bonus = Math.max(base.value, mods?.minBonus ?? 0);
+  const bonusLabel = mods?.minBonus !== undefined && mods.minBonus > base.value ? mods.bonusLabel : base.label;
+  const value = effDie.value + bonus;
   g.pendingAttack = {
     attacker: player,
     value,
-    unblockable: g.unblockableThisTurn,
+    unblockable: g.unblockableThisTurn || mods?.forceUnblockable === true,
     physical: true,
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
     baseValue: effDie.value,
+    bonusValue: bonus,
+    bonusLabel,
   };
+  applyNextTurnHalving(g, player, g.pendingAttack);
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
-  const buffText = buff > 0 ? `（攻击伤害+${buff}，共 ${value} 点）` : '';
+  const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${g.pendingAttack.value} 点）` : '';
   logLine(g, `${pname(player)} 使用 ${effDie.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
   // 011 顿悟·灵能屏障 触发：当对方使用 1 个攻击骰后，可消耗 1 个冥想骰使伤害减半
   if (
@@ -115,13 +148,17 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[]):
 
 /** 技能发起的“虚拟”攻击（非实体攻击骰） */
 export function virtualAttack(g: GameState, player: PlayerId, baseValue: number): void {
+  const base = attackDamageBonus(g, player);
   g.pendingAttack = {
     attacker: player,
-    value: baseValue + attackDamageBuff(g, player),
+    value: baseValue + base.value,
     unblockable: g.unblockableThisTurn,
     physical: false,
     baseValue,
+    bonusValue: base.value,
+    bonusLabel: base.label,
   };
+  applyNextTurnHalving(g, player, g.pendingAttack);
 }
 
 /**

@@ -948,6 +948,166 @@ describe('renderGame (read-only snapshot)', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'dustRise', artifactId: '020', free: true, side: 'right' });
   });
 
+  it('022 填弹：顺点约束实时校验（不满足时禁用确认并提示）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // → 主要阶段
+    const card = state.players.A.artifacts.find((a) => a.id === '022')!;
+    card.activeMarkerSide = 'left';
+    card.armedSide = 'left';
+    state.players.A.areas.attack = [
+      { id: 'p1', value: 2, kind: 'attack' },
+      { id: 'p2', value: 4, kind: 'attack' },
+      { id: 'p3', value: 3, kind: 'attack' },
+    ];
+    const { ui } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')!.click();
+    expect(ui.selection?.key).toBe('siji.tiandan');
+    const ok = () => Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    const die = (id: string) => root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!;
+    die('p1').click();
+    die('p2').click(); // 2 + 4 不是顺点
+    expect(ok().disabled).toBe(true);
+    expect(root.querySelector('.selector-hint')!.textContent).toContain('不是顺点');
+    // 取消 4、改选 3 → 2-3 顺点（仍满足 1..6 颗）
+    die('p2').click();
+    die('p3').click();
+    expect(ok().disabled).toBe(false);
+    expect(root.querySelector('.selector-hint')!.textContent).toContain('顺点 ✓');
+  });
+
+  it('022 处刑通牒：使用攻击骰前给出「不发动 / ① / ②」三个按钮（精确）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'sijiChuxing', player: 'A', costSlots: [{ dieIds: ['x'] }] };
+    renderGame(state, root, hooksFor());
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels.filter((l) => (l ?? '').includes('处刑通牒') || (l ?? '').startsWith('①') || (l ?? '').startsWith('②'))).toEqual([
+      '不发动「处刑通牒」',
+      '① 本次攻击伤害 +1 且不可抵挡',
+      '② 本次攻击伤害 +5',
+    ]);
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('处刑通牒');
+  });
+
+  it('023 畏惧：对方用内联骰片消耗 1 颗（非当前玩家操作）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['022', '023', '024'] });
+    skipInitialReroll(state);
+    state.activePlayer = 'A';
+    state.pending = { kind: 'weijuPay', player: 'B', initiator: 'A', initiatorValue: 5 };
+    state.players.B.areas.attack = [{ id: 'bx', value: 2, kind: 'attack' }];
+    const { onAction } = mount(state, root);
+    const chip = root.querySelector<HTMLElement>('.actionlist-chips .pay-die[data-id="bx"]');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toBe('攻2');
+    chip!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'weijuPay', dieId: 'bx' });
+  });
+
+  it('023 共振：选 ② 时按重掷后区域给出双方各弃置 2 颗的选择器', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'gongzhenPick', player: 'A', areaKind: 'meditation' };
+    state.players.A.areas.meditation = [
+      { id: 'ma1', value: 2, kind: 'meditation' },
+      { id: 'ma2', value: 3, kind: 'meditation' },
+    ];
+    state.players.B.areas.meditation = [
+      { id: 'mb1', value: 5, kind: 'meditation' },
+      { id: 'mb2', value: 6, kind: 'meditation' },
+    ];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="gongzhenOpen"]')!.click();
+    expect(ui.selection?.pendingKind).toBe('gongzhenPick');
+    const btn = (t: string) => Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => (b.textContent ?? '').includes(t))!;
+    btn('②').click();
+    btn('确认').click();
+    // 第二步：弃置我方 2 颗
+    const die = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    die('ma1').click();
+    die('ma2').click();
+    btn('确认').click();
+    // 第三步：弃置对方 2 颗
+    die('mb1').click();
+    die('mb2').click();
+    btn('确认').click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'gongzhenResolve',
+      pick: 'discard',
+      myIds: ['ma1', 'ma2'],
+      oppIds: ['mb1', 'mb2'],
+    });
+  });
+
+  it('024 充能：强制选择器（选哪一方 → 哪颗骰 → 目标区域）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'chargeResolve', player: 'A', artifactId: '024' };
+    state.players.A.areas.attack = [{ id: 'ka', value: 4, kind: 'attack' }];
+    const { ui, onAction } = mount(state, root);
+    // 充能待决策 → 操作栏给出「凶弹业舞」按钮（charge 技能可开选择器）
+    const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('凶弹业舞'),
+    )!;
+    expect(open).toBeTruthy();
+    open.click();
+    expect(ui.selection?.key).toBe('kuangwu.charge');
+    const btn = (t: string) => Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => (b.textContent ?? '').includes(t))!;
+    btn('我方的能力骰').click();
+    btn('确认').click();
+    root.querySelector<HTMLElement>('.player--self .die[data-id="ka"]')!.click();
+    btn('确认').click();
+    btn('冥想骰区').click();
+    btn('确认').click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '024',
+      side: 'only',
+      params: { owner: 'self', dieId: 'ka', toKind: 'meditation' },
+    });
+  });
+
+  it('024 必杀：方向选项 + 6 个区域各一步（不足 3 颗则尽可能）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '024')!;
+    card.chargeLayer = 4;
+    card.activeMarkerSide = 'left';
+    state.players.A.areas.defense = [{ id: 'd1', value: 2, kind: 'defense' }];
+    applyAction(state, { t: 'advance' }); // 尘起 → 主要阶段
+    const { ui } = mount(state, root);
+    const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('凶弹业舞'),
+    )!;
+    open.click();
+    expect(ui.selection?.key).toBe('kuangwu.ultimate');
+    // 第 1 步是方向选项；共 1（方向）+ 6（区域）步
+    expect(root.querySelector('.selector .option-btn')!.textContent).toBe('顺时针');
+    expect(root.querySelector('.selector-title')!.textContent).toContain('/7');
+  });
+
+  it('被攻击提示：显示「处刑通牒」加成与「畏惧」减半来源', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pendingAttack = {
+      attacker: 'A',
+      value: 3,
+      unblockable: false,
+      physical: true,
+      sourceValue: 2,
+      bonusValue: 1,
+      bonusLabel: '处刑通牒',
+      halveReason: '畏惧',
+    };
+    renderGame(state, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('被 2 点攻击骰攻击，本次 3 伤害');
+    expect(hint).toContain('（「处刑通牒」加成 1 伤害）');
+    expect(hint).toContain('（「畏惧」减半）');
+  });
+
   it('block prompt shows real damage, bonus source and 请选择', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);

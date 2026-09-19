@@ -52,6 +52,12 @@ export type Action =
   | { t: 'zhihaiReroll'; dieIds: string[] }
   /** 019 尘哀·尘起：是否接受赠送的 1 次「无需冥想骰的额外尘起行动」 */
   | { t: 'chenaiFreeRise'; accept: boolean }
+  /** 022 死契·处刑通牒：使用攻击骰前的强制决定（不发动 / ①伤害+1且不可抵挡 / ②伤害+5） */
+  | { t: 'chuxingPick'; pick: 'none' | 'unblockable' | 'bonus5' }
+  /** 023 蛇蝎·畏惧：对方被迫消耗他选择的那颗能力骰 */
+  | { t: 'weijuPay'; dieId: string }
+  /** 023 蛇蝎·共振：选择 ①双方各得 2 颗 / ②双方各弃置 2 颗（弃置由发起者指定） */
+  | { t: 'gongzhenResolve'; pick: 'gain' | 'discard'; myIds?: string[]; oppIds?: string[] }
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
   | { t: 'shouhunCancel'; cancel: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
@@ -65,8 +71,14 @@ export interface PendingAttack {
   sourceValue?: number;
   /** 攻击的有效点数（物理=骰点；技能发起的攻击=该技能指定的点数）。供 017 持续判定，不受伤害加成影响 */
   baseValue?: number;
-  /** 本次伤害是否已被「减半」（同种削减不叠加：屏障 / 021 满计数只减半一次） */
+  /** 本次伤害是否已被「减半」（同种削减不叠加：屏障 / 021 满计数 / 023 畏惧 只减半一次） */
   halved?: boolean;
+  /** 本次攻击实际应用的伤害加成值（含 022 处刑通牒这类单次修正），供提示栏显示 */
+  bonusValue?: number;
+  /** 上述加成的来源名（如「处刑通牒」） */
+  bonusLabel?: string;
+  /** 减半来源名（如「畏惧」），供提示栏显示 */
+  halveReason?: string;
 }
 
 export type Pending =
@@ -89,7 +101,15 @@ export type Pending =
   /** 019 尘哀·尘起：自己回合造成伤害后可立即进行 1 次「无需冥想骰」的额外尘起行动（每回合 1 次） */
   | { kind: 'chenaiFreeRise'; player: PlayerId }
   /** 020 兽魂：攻击方选择「取消本次伤害（持有者计数 −1）」还是「正常造成伤害」 */
-  | { kind: 'shouhunCancel'; player: PlayerId; owner: PlayerId; attack: PendingAttack };
+  | { kind: 'shouhunCancel'; player: PlayerId; owner: PlayerId; attack: PendingAttack }
+  /** 022 死契·处刑通牒：使用攻击骰前必须先决定是否扣计数（FAQ 22.2.1） */
+  | { kind: 'sijiChuxing'; player: PlayerId; costSlots: SlotFill[] }
+  /** 023 蛇蝎·畏惧：对方必须消耗 1 颗能力骰（由对方选择） */
+  | { kind: 'weijuPay'; player: PlayerId; initiator: PlayerId; initiatorValue: number }
+  /** 023 蛇蝎·共振：重掷并落区后，按落区类型二选一 */
+  | { kind: 'gongzhenPick'; player: PlayerId; areaKind: DiceKind }
+  /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
+  | { kind: 'chargeResolve'; player: PlayerId; artifactId: string };
 
 export interface Distribution {
   defense: number[];
@@ -112,6 +132,8 @@ export interface SkillDef {
   key: string;
   /** 启动后刷新自身「每回合一次」计数（019 蛮王之牙） */
   refresh?: boolean;
+  /** 该「充能」技能需要玩家选择（024 狂舞）：充能后弹出强制选择器，而不是自动结算 */
+  needsChoice?: boolean;
 }
 
 export interface Artifact {
@@ -151,6 +173,8 @@ export interface PlayerState {
   buffs: Buff[];
   /** 本回合是否已受过伤害（018 至黑：每回合第一次受伤才计数） */
   damagedThisTurn: boolean;
+  /** 023 蛇蝎·畏惧：该玩家「下个回合」中攻击造成的伤害减半（其回合结束时清除） */
+  attackHalvedNextTurn: boolean;
 }
 
 export interface LogEntry {

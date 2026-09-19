@@ -154,6 +154,42 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
       { side: 'only', kind: 'continuous', key: 'jueyi.wildfire.continuous' },
     ],
   },
+  '022': {
+    id: '022',
+    name: '死契',
+    weapon: '火绳铳',
+    column: 1,
+    speed: 4,
+    will: 8,
+    countCap: 6,
+    skills: [
+      { side: 'left', kind: 'activate', key: 'siji.tiandan' },
+      { side: 'right', kind: 'trigger', key: 'siji.chuxing' },
+    ],
+  },
+  '023': {
+    id: '023',
+    name: '蛇蝎',
+    weapon: '面具',
+    column: 2,
+    distribution: { attack: [1, 6], defense: [2, 5], meditation: [3, 4] },
+    skills: [
+      { side: 'left', kind: 'activate', key: 'shexie.weiju' },
+      { side: 'right', kind: 'activate', key: 'shexie.gongzhen' },
+    ],
+  },
+  '024': {
+    id: '024',
+    name: '狂舞',
+    weapon: '燧发枪',
+    column: 3,
+    life: 50,
+    chargeReq: 4,
+    skills: [
+      { side: 'only', kind: 'charge', key: 'kuangwu.charge', needsChoice: true },
+      { side: 'only', kind: 'ultimate', key: 'kuangwu.ultimate' },
+    ],
+  },
 };
 
 export function makeArtifact(id: string): Artifact {
@@ -185,4 +221,5 @@ export const HEROES = {
   zoray: { name: '轰鸣审判官 佐雷', artifacts: ['013', '014', '015'] },
   xiu: { name: '漆黑死神 修', artifacts: ['016', '017', '018'] },
   nisa: { name: '荒野行者 尼萨', artifacts: ['019', '020', '021'] },
+  xiva: { name: '黑枪 希瓦', artifacts: ['022', '023', '024'] },
 } as const;

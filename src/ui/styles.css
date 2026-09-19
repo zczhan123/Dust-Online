@@ -446,7 +446,7 @@ button.pay-die {
 }
 /* 长文本（标题/提示）必须可收缩、可断行，否则会把面板顶出容器（表现为“操作栏变宽”） */
 .selector-head .selector-title,
-.selector-head .selector-info {
+.selector-info {
   flex: 0 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -461,6 +461,8 @@ button.pay-die {
   font-weight: 700;
   color: #1b4f9c;
 }
+.selector-hint { font-size: 12px; color: #4b5563; }
+.selector-hint--bad { color: #b3261e; font-weight: 600; }
 .selector-info {
   font-size: 13px;
   color: #3a4658;

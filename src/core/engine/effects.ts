@@ -38,6 +38,17 @@ export function setDieValue(g: GameState, player: PlayerId, dieId: string, value
   return old;
 }
 
+/** 把骰子**转移给另一位玩家**的指定区域（保留点数与 id；024 狂舞用） */
+export function transferDice(g: GameState, from: PlayerId, dieIds: string[], to: PlayerId, toKind: DiceKind): void {
+  for (const id of dieIds) {
+    const found = findDieOf(g, from, id);
+    if (!found) throw new Error(`die not found: ${id}`);
+    g.players[from].areas[found.kind] = g.players[from].areas[found.kind].filter((d) => d.id !== id);
+    found.die.kind = toKind;
+    g.players[to].areas[toKind].push(found.die);
+  }
+}
+
 /** 把指定骰移动到目标区域（保留点数） */
 export function moveDice(g: GameState, player: PlayerId, dieIds: string[], to: DiceKind): void {
   const p = g.players[player];

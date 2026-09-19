@@ -22,6 +22,7 @@ function makePlayer(id: PlayerId, hero: [string, string, string]): PlayerState {
     hasDustSeal: false,
     buffs: [],
     damagedThisTurn: false,
+    attackHalvedNextTurn: false,
   };
 }
 
