@@ -1200,6 +1200,9 @@ function segDieText(ctx: Ctx, seg: DieSeg): string {
   return d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
 }
 
+/** 文本片段 + 骰子的分段（契约：`parts.length === dice.length + 1`，逐位拼接 → 用于纯文字标签）。
+ *  注意：**骰片行**（`actionChipRow`）会把「同一文案、不同骰子」的多个动作合并成一行，
+ *  那里的后缀必须只渲染一次、位于整行末尾，不能按本函数的逐位规则。 */
 function segsToText(ctx: Ctx, segs: { parts: string[]; dice: DieSeg[] }): string {
   let out = segs.parts[0] ?? '';
   segs.dice.forEach((s, i) => {
@@ -1218,7 +1221,7 @@ function actionChipRow(
   const lead = el('span', 'chip-label');
   lead.textContent = parts[0] ?? '';
   row.appendChild(lead);
-  items.forEach(({ a, die }, i) => {
+  items.forEach(({ a, die }) => {
     const d = findDie(ctx.state, die.id);
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -1228,13 +1231,14 @@ function actionChipRow(
     chip.textContent = d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
     chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? ''));
     row.appendChild(chip);
-    const tail = parts[i + 1] ?? '';
-    if (tail) {
-      const t = el('span', 'chip-label');
-      t.textContent = tail;
-      row.appendChild(t);
-    }
   });
+  // 同一行是把「同一文案、不同骰子」的多个动作合并成一行 → 后缀（如「）」）只出现一次、位于整行末尾
+  const tail = parts[parts.length - 1] ?? '';
+  if (tail) {
+    const t = el('span', 'chip-label');
+    t.textContent = tail;
+    row.appendChild(t);
+  }
   return row;
 }
 

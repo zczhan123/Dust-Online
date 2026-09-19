@@ -1719,7 +1719,29 @@ describe('renderGame (interaction)', () => {
     expect(state.pending!.kind).toBe('guwangCharge'); // 渲染不应改变状态
   });
 
-  it('renders the 009 高塔铁幕 trigger prompt with cancel / take-damage buttons', () => {
+  it('骰片行的后缀括号只出现一次且位于整行末尾（多颗候选骰合并成一行）', () => {
+    // 009 高塔铁幕：A 有 2 颗防御骰 → 「取消（消耗 [防…][防…]）」应只有 1 个右括号且在末尾
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
+    skipInitialReroll(state);
+    const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
+    gw.activeMarkerSide = 'left';
+    state.players.A.areas.defense = [
+      { id: 'gd1', value: 4, kind: 'defense' },
+      { id: 'gd2', value: 2, kind: 'defense' },
+      { id: 'gd3', value: 6, kind: 'defense' },
+    ];
+    dealTrueDamage(state, 'A', 6);
+    renderGame(state, root, hooksFor());
+    const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
+    const txt = row.textContent ?? '';
+    expect(txt).toContain('发动「高塔铁幕」取消（消耗');
+    expect(txt.split('）').length - 1).toBe(1); // 右括号恰好 1 个
+    expect(txt.endsWith('）')).toBe(true); // 且位于末尾
+    expect(row.lastElementChild!.textContent).toBe('）'); // 末尾节点就是后缀
+    expect(row.querySelectorAll('.pay-die[data-act="guwangCancel"]').length).toBe(3);
+  });
+
+  it('渲染 009 高塔铁幕 触发提示（取消 / 承受伤害）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '009'] });
     skipInitialReroll(state);
     const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
@@ -1735,6 +1757,7 @@ describe('renderGame (interaction)', () => {
     expect(take!.textContent).toBe('不发动「高塔铁幕」');
     const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
     expect(row.textContent).toContain('发动「高塔铁幕」取消（消耗');
+    expect(row.textContent!.endsWith('）')).toBe(true);
     expect(row.querySelector('.pay-die[data-act="guwangCancel"]')!.textContent).toBe('防4');
     expect(state.pending!.kind).toBe('guwangCancel'); // 渲染不应改变状态
   });
@@ -1859,6 +1882,30 @@ describe('renderGame (interaction)', () => {
       side: 'right',
       params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }, { dieIds: ['a3'] }] },
     });
+  });
+
+  it('灵能屏障 骰片行：多颗冥想骰时括号只出现一次且在末尾', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // A -> main
+    state.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
+    state.players.B.areas.meditation = [
+      { id: 'bm1', value: 3, kind: 'meditation' },
+      { id: 'bm2', value: 2, kind: 'meditation' },
+      { id: 'bm3', value: 6, kind: 'meditation' },
+    ];
+    state.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
+    expect(state.pending!.kind).toBe('dunwuHalve');
+
+    renderGame(state, root, hooksFor());
+    const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
+    const txt = row.textContent ?? '';
+    expect(txt.startsWith('发动「灵能屏障」伤害减半（消耗')).toBe(true);
+    expect(txt.split('）').length - 1).toBe(1); // 右括号恰好 1 个
+    expect(txt.endsWith('）')).toBe(true); // 且在整行末尾
+    expect(row.lastElementChild!.textContent).toBe('）');
+    expect(row.querySelectorAll('.pay-die[data-act="dunwuHalve"]').length).toBe(3);
   });
 
   it('renders the 011 灵能屏障 触发 prompt with halve / decline buttons', () => {
