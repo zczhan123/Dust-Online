@@ -14,6 +14,7 @@ import { getLegalActions } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill } from '../core/engine/derive';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { attackDamageBonus } from '../core/engine/combat';
+import { battleNotes } from '../core/engine/battleNotes';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, type Prefs } from './prefs';
 
@@ -963,6 +964,21 @@ function hintBox(ctx: Ctx): HTMLElement {
     }
   }
   left.appendChild(phase);
+  // 主要阶段的「攻击提示」：只列出此刻可用的攻击相关修正（独占一行，由 .hint-notes 的 flex:1 1 100% 保证）
+  const notes = battleNotes(ctx.state, actor);
+  if (notes.length > 0) {
+    const line = el('div', 'hint-notes');
+    line.dataset.role = 'battle-notes';
+    line.appendChild(document.createTextNode('攻击提示：'));
+    notes.forEach((n, i) => {
+      if (i > 0) line.appendChild(document.createTextNode('　｜　'));
+      const skill = el('span', `hint-skill player-${actor}`);
+      skill.textContent = `「${n.label}」`;
+      line.appendChild(skill);
+      line.appendChild(document.createTextNode(n.text));
+    });
+    left.appendChild(line);
+  }
   // UI 层错误提示（非法操作等）：只在这里显示，不落进引擎状态/战报
   if (ctx.hooks.ui.error) {
     const err = el('span', 'hint-error');

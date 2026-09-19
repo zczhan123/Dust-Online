@@ -2657,3 +2657,53 @@ describe('dust-rise 2-step flow', () => {
     expect(root.querySelector('.dustflow-pay')).not.toBeNull();
   });
 });
+
+describe('战斗提示（.hint-notes）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  const mainState = (heroA: [string, string, string]): GameState => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA });
+    skipInitialReroll(state);
+    applyAction(state, { t: 'advance' }); // -> main
+    return state;
+  };
+
+  it('主要阶段且有条目时渲染独立一行，技能名带玩家配色', () => {
+    const state = mainState(['004', '005', '006']);
+    expect(state.phase).toBe('main');
+    const card = state.players.A.artifacts.find((a) => a.id === '004')!;
+    card.activeMarkerSide = 'right';
+    card.count = 3;
+
+    renderGame(state, root, hooksFor());
+    const line = root.querySelector('.hint-notes');
+    expect(line).not.toBeNull();
+    const text = line!.textContent ?? '';
+    expect(text.startsWith('攻击提示：')).toBe(true);
+    expect(text).toContain('「锋芒」攻击伤害 +3');
+    expect(line!.querySelector('.hint-skill.player-A')?.textContent).toBe('「锋芒」');
+  });
+
+  it('主要阶段但无条目时不渲染该行', () => {
+    const state = mainState(['001', '002', '003']);
+    expect(state.phase).toBe('main');
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-notes')).toBeNull();
+  });
+
+  it('非主要阶段不渲染该行', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '004')!;
+    card.activeMarkerSide = 'right';
+    card.count = 3;
+    expect(state.phase).not.toBe('main');
+
+    renderGame(state, root, hooksFor());
+    expect(root.querySelector('.hint-notes')).toBeNull();
+  });
+});
