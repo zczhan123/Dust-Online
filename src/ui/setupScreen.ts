@@ -91,6 +91,8 @@ function placeholderRow(
 
 export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
   root.innerHTML = '';
+  // 设置页背景（封面）：进入对局时由 renderGame 移除
+  root.classList.add('setup-page');
 
   const wrap = el('div', 'setup');
 

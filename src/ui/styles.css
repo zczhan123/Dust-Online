@@ -526,11 +526,18 @@ button.pay-die {
 }
 
 /* 开始新对局设置页（浅色主题） */
+/* 设置页背景：封面铺满全屏；可见窗口下移到 77%，把画面下方的大标题与作者名留在视野内 */
+#app.setup-page {
+  min-height: 100vh;
+  background: #ece7dc url('/cover.jpg') center 77% / cover no-repeat fixed;
+}
 .setup {
   max-width: 640px;
   margin: 48px auto;
   padding: 24px 28px;
-  background: var(--card-bg);
+  /* 半透明卡片：让封面透出来（其余面板仍用不透明的 --card-bg） */
+  background: rgba(255, 253, 248, 0.62);
+  backdrop-filter: blur(2px);
   border: 1px solid var(--line);
   border-radius: 14px;
   display: flex;

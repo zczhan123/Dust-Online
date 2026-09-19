@@ -2586,6 +2586,7 @@ function dustFlowView(ctx: Ctx): HTMLElement {
 }
 
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
+  root.classList.remove('setup-page'); // 离开设置页 → 恢复普通背景
   const legal = getLegalActions(state);
   const selfId: PlayerId = actorOf(state);
   const enemyId: PlayerId = oppOf(selfId);

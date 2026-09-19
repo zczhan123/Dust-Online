@@ -2707,3 +2707,16 @@ describe('战斗提示（.hint-notes）', () => {
     expect(root.querySelector('.hint-notes')).toBeNull();
   });
 });
+describe('设置页背景类（setup-page）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  it('渲染对局时移除设置页背景类（且不会自己加上）', () => {
+    root.classList.add('setup-page');
+    renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
+    expect(root.classList.contains('setup-page')).toBe(false);
+  });
+});

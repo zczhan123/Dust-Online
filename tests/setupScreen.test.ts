@@ -34,6 +34,11 @@ describe('renderSetup', () => {
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 
+  it('marks the app root as the setup page (封面背景由 CSS 负责)', () => {
+    renderSetup(root, () => {});
+    expect(root.classList.contains('setup-page')).toBe(true);
+  });
+
   it('defaults 随机 as selected for both rows', () => {
     renderSetup(root, () => {});
     expect(
