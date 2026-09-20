@@ -85,5 +85,7 @@ export function setupGame(opts: SetupOptions): GameState {
     pendingQueue: [],
     chenaiUsed: { A: false, B: false },
     freeNoCostRise: 0,
+    attacksThisTurn: { A: 0, B: 0 },
+    rerollPunish: { A: false, B: false },
   };
 }

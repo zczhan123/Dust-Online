@@ -13,7 +13,7 @@ import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { getLegalActions } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill } from '../core/engine/derive';
 import { hasActiveSkill } from '../core/engine/skill-state';
-import { attackDamageBonus } from '../core/engine/combat';
+import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
 import { SKILL_SELECTION, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, type Prefs } from './prefs';
@@ -54,8 +54,16 @@ export interface UiState {
     slots: string[][];
     /** 「slots」步骤每格的填充模式 */
     slotModes: ('real' | 'convert')[];
-    /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴、017 帷幕、018 重掷），确认时直接派发对应动作 */
-    pendingKind?: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll' | 'gongzhenPick';
+    /** 若是为「待决策」打开的选骰面板（013 电刑/雷暴、017 帷幕、018 重掷、023 共振、025 横贯、026 威压/陷阵），确认时直接派发对应动作 */
+    pendingKind?:
+      | 'dianxing'
+      | 'leibao'
+      | 'weimu'
+      | 'zhihaiReroll'
+      | 'gongzhenPick'
+      | 'weiyaPick'
+      | 'xianzhenPick'
+      | 'hengguan';
   };
   pendingConfirm: null | { action: Action; label: string };
   /** 尘起 2 步流程：选择（激活时）启动侧 → 支付代价 */
@@ -385,7 +393,11 @@ function canSelectForReroll(player: PlayerState, ctx: Ctx): boolean {
 }
 
 /** 为「待决策」（013 电刑/雷暴）打开选骰面板：一次列全部可选骰，选完确认即派发 */
-function startPendingSelection(ctx: Ctx, key: string, kind: 'dianxing' | 'leibao' | 'weimu' | 'zhihaiReroll' | 'gongzhenPick'): void {
+function startPendingSelection(
+  ctx: Ctx,
+  key: string,
+  kind: NonNullable<UiState['selection']>['pendingKind'],
+): void {
   ctx.hooks.ui.selection = {
     key,
     artifactId: '',
@@ -638,6 +650,22 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
       skills.appendChild(box);
     }
     card.appendChild(skills);
+  }
+
+  // 027 寒光·必杀：置于神器上的骰（不在任何区域，故不带攻/防/冥前缀，用中性骰片）
+  if (a.heldDice && a.heldDice.length > 0) {
+    const held = el('div', 'pay-dice card-held');
+    const lab = el('span', 'chip-label');
+    lab.textContent = '神器上的骰';
+    held.appendChild(lab);
+    for (const h of a.heldDice) {
+      const chip = el('span', 'pay-die pay-die--held');
+      chip.dataset.id = h.id;
+      chip.dataset.value = String(h.value);
+      chip.textContent = `◆${h.value}`;
+      held.appendChild(chip);
+    }
+    card.appendChild(held);
   }
 
   return card;
@@ -897,6 +925,32 @@ function phaseHint(ctx: Ctx): HintPart[] {
       { text: '：你的攻击被抵挡，可将最多 2 个冥想骰移动到攻击骰区（保留点数）。' },
     ];
   }
+  if (pd && pd.kind === 'weiyaPick') {
+    return [
+      { text: '威压', color: pd.player },
+      { text: `：你使用了 1 个能力骰，可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择` },
+    ];
+  }
+  if (pd && pd.kind === 'xianzhenPick') {
+    return [
+      { text: '陷阵', color: pd.owner },
+      { text: '：' },
+      { text: `玩家${pd.owner}`, color: pd.owner },
+      { text: ' 的重掷阶段结束，由生命最少的一方弃置其 1 颗能力骰（随后其获得另外两类各 1 颗）；请选择' },
+    ];
+  }
+  if (pd && pd.kind === 'hengguan') {
+    return [
+      { text: '横贯', color: pd.player },
+      { text: `：攻击被抵挡后，可弃置对方 1 颗点数小于本次攻击（${pd.value} 点）的能力骰；请选择` },
+    ];
+  }
+  if (pd && pd.kind === 'hanguangPick') {
+    return [
+      { text: '凛冽之音', color: pd.player },
+      { text: '：使用攻击骰前，选择神器上的 1 颗骰 — 移入其对应区域，或移除它并弃置对方 1 颗同点数的能力骰。' },
+    ];
+  }
   if (state.pendingAttack) {
     const pa = state.pendingAttack;
     const bonus = pa.bonusValue !== undefined ? { value: pa.bonusValue, label: pa.bonusLabel } : attackDamageBonus(state, pa.attacker);
@@ -1087,6 +1141,11 @@ function advanceLabel(phase: Phase): string {
 }
 
 function actionLabel(ctx: Ctx, a: Action): string | null {
+  // 025 屠虎·奇袭：把能力骰「视为攻击骰」发起攻击 → 文案必须点明「视为」，不可与真攻击骰混淆
+  if (a.t === 'attack' && a.costSlots[0]?.treated === true) {
+    const d = findDie(ctx.state, a.costSlots[0].dieIds[0]);
+    return d ? `将 ${KIND_SHORT[d.kind]}${d.value} 视为攻击骰发起攻击` : '将能力骰视为攻击骰发起攻击';
+  }
   const segs = actionDieSegments(ctx, a);
   if (segs) return segsToText(ctx, segs);
   const { state } = ctx;
@@ -1290,12 +1349,18 @@ function actionChipRow(
   row.appendChild(lead);
   items.forEach(({ a, die }) => {
     const d = findDie(ctx.state, die.id);
+    const treated = a.t === 'attack' && a.costSlots[0]?.treated === true;
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = `pay-die clickable die-${die.owner}`;
+    chip.className = `pay-die clickable die-${die.owner}${treated ? ' pay-die--treated' : ''}`;
     chip.dataset.id = die.id;
     chip.dataset.act = a.t;
-    chip.textContent = d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
+    if (treated) chip.dataset.treated = '1';
+    chip.textContent = d
+      ? treated
+        ? `${KIND_SHORT[d.kind]}${d.value} → 攻击`
+        : `${KIND_SHORT[d.kind]}${d.value}`
+      : '?';
     chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? ''));
     row.appendChild(chip);
   });
@@ -1307,6 +1372,68 @@ function actionChipRow(
     row.appendChild(t);
   }
   return row;
+}
+
+type HanguangAction = Extract<Action, { t: 'hanguangPick' }>;
+
+/** 027 寒光·凛冽之音（必杀）：神器上的骰不在任何区域 → 专用面板，逐颗给出合法动作 */
+function hanguangPanel(ctx: Ctx): HTMLElement {
+  const pd = ctx.state.pending;
+  const panel = el('div', 'selector');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「凛冽之音」：选择神器上的 1 颗骰';
+  head.appendChild(title);
+  const hint = el('div', 'selector-hint');
+  hint.textContent = '移入其对应区域；或移除该骰，并弃置对方 1 颗与它点数相同的能力骰（无则只可移入）。';
+  head.appendChild(hint);
+  panel.appendChild(head);
+  if (!pd || pd.kind !== 'hanguangPick') return panel;
+
+  const card = artifactWithSkill(ctx.state.players[pd.player], 'hanguang.ultimate');
+  const acts = ctx.legal.filter((x): x is HanguangAction => x.t === 'hanguangPick');
+  const oppId: PlayerId = oppOf(pd.player);
+  const diceBox = el('div', 'pay-dice');
+  for (const h of card?.heldDice ?? []) {
+    const chip = el('span', 'pay-die pay-die--held');
+    chip.dataset.id = h.id;
+    chip.dataset.value = String(h.value);
+    chip.textContent = `◆${h.value}`;
+    diceBox.appendChild(chip);
+    const move = acts.find((x) => x.dieId === h.id && x.pick === 'move');
+    if (move) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-confirm';
+      b.dataset.act = 'hanguangMove';
+      b.dataset.id = h.id;
+      b.textContent = '移入对应区域';
+      b.addEventListener('click', () => ctx.hooks.propose(move, `「凛冽之音」：将 ◆${h.value} 移入对应区域`));
+      diceBox.appendChild(b);
+    }
+    const discards = acts.filter((x) => x.dieId === h.id && x.pick === 'discard');
+    if (discards.length) {
+      const lab = el('span', 'chip-label');
+      lab.textContent = '弃置同点数：';
+      diceBox.appendChild(lab);
+      for (const dd of discards) {
+        const target = findDie(ctx.state, dd.targetDieId ?? '');
+        const tc = document.createElement('button');
+        tc.type = 'button';
+        tc.className = `pay-die clickable die-${oppId}`;
+        tc.dataset.act = 'hanguangDiscard';
+        tc.dataset.id = dd.targetDieId ?? '';
+        tc.dataset.held = h.id;
+        tc.textContent = target ? `${KIND_SHORT[target.kind]}${target.value}` : '?';
+        tc.addEventListener('click', () =>
+          ctx.hooks.propose(dd, `「凛冽之音」：移除 ◆${h.value} 并弃置对方同点数骰`),
+        );
+        diceBox.appendChild(tc);
+      }
+    }
+  }
+  panel.appendChild(diceBox);
+  return panel;
 }
 
 function operationList(ctx: Ctx): HTMLElement {
@@ -1342,6 +1469,10 @@ function operationList(ctx: Ctx): HTMLElement {
   let seenShouhun = false;
   let seenChuxing = false;
   let seenGongzhen = false;
+  let seenWeiya = false;
+  let seenXianzhen = false;
+  let seenHengguan = false;
+  let seenHanguang = false;
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1380,6 +1511,56 @@ function operationList(ctx: Ctx): HTMLElement {
       open.textContent = '选择「共振」效果';
       open.addEventListener('click', () => startPendingSelection(ctx, '@gongzhen', 'gongzhenPick'));
       box.appendChild(open);
+      continue;
+    }
+    if (a.t === 'weiyaPick') {
+      // 026 威压：唯一渲染来源；「不发动」+ 打开选择器（候选骰仅供 AI/测试）
+      if (a.dieId) continue;
+      if (seenWeiya) continue;
+      seenWeiya = true;
+      box.appendChild(button('不发动「威压」', a, ctx.hooks));
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'weiyaOpen';
+      open.textContent = '发动「威压」（选择要变更的能力骰）';
+      open.addEventListener('click', () => startPendingSelection(ctx, '@weiyaPick', 'weiyaPick'));
+      box.appendChild(open);
+      continue;
+    }
+    if (a.t === 'xianzhenResolve') {
+      // 026 陷阵：强制、无「不发动」；唯一渲染来源（候选骰仅供 AI/测试）
+      if (seenXianzhen) continue;
+      seenXianzhen = true;
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'xianzhenOpen';
+      open.textContent = '「陷阵」：选择要弃置的能力骰';
+      open.addEventListener('click', () => startPendingSelection(ctx, '@xianzhenPick', 'xianzhenPick'));
+      box.appendChild(open);
+      continue;
+    }
+    if (a.t === 'hengguan') {
+      // 025 横贯·触发：唯一渲染来源；「不发动」+ 打开选择器（候选骰仅供 AI/测试）
+      if (a.dieId) continue;
+      if (seenHengguan) continue;
+      seenHengguan = true;
+      box.appendChild(button('不发动「横贯」', a, ctx.hooks));
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-skill';
+      open.dataset.act = 'hengguanOpen';
+      open.textContent = '发动「横贯」（选择要弃置的能力骰）';
+      open.addEventListener('click', () => startPendingSelection(ctx, '@hengguan', 'hengguan'));
+      box.appendChild(open);
+      continue;
+    }
+    if (a.t === 'hanguangPick') {
+      // 027 凛冽之音·必杀：强制、无「不发动」；直接内联渲染合法动作（神器上的骰不在任何区域）
+      if (seenHanguang) continue;
+      seenHanguang = true;
+      box.appendChild(hanguangPanel(ctx));
       continue;
     }
     if (a.t === 'chenaiFreeRise') {
@@ -1760,6 +1941,16 @@ function confirmSelection(ctx: Ctx): void {
       if (sel.pendingKind === 'dianxing') pendingAction = { t: 'dianxing', dieIds: ids };
       else if (sel.pendingKind === 'leibao') pendingAction = { t: 'leibao', dieIds: ids };
       else if (sel.pendingKind === 'weimu') pendingAction = { t: 'weimu', accept: true, dieId: ids[0] };
+      else if (sel.pendingKind === 'weiyaPick')
+        pendingAction = {
+          t: 'weiyaPick',
+          owner: sel.options[0] === 'opponent' ? 'opp' : 'self',
+          dieId: sel.chosenDice[1]?.[0],
+        };
+      else if (sel.pendingKind === 'xianzhenPick')
+        pendingAction = { t: 'xianzhenResolve', dieId: sel.chosenDice[0]?.[0] ?? '' };
+      else if (sel.pendingKind === 'hengguan')
+        pendingAction = { t: 'hengguan', dieId: sel.chosenDice[0]?.[0] };
       else pendingAction = { t: 'zhihaiReroll', dieIds: ids };
       hooks.ui.selection = null;
       hooks.onAction(pendingAction);
@@ -2610,7 +2801,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     const step = steps[sel.stepIndex];
     if (step && step.kind === 'dice') {
       selectionStep = step;
-      selectionOwner = step.owner === 'self' ? state.activePlayer : enemyId;
+      // owner 相对的是「当前操作者」actorOf(state)（待决策玩家），而非总是 activePlayer
+      selectionOwner = step.owner === 'self' ? selfId : enemyId;
     } else if (step && step.kind === 'slots') {
       slotsStepOpen = true;
     }

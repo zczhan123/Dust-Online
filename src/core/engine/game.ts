@@ -1,12 +1,13 @@
 import { setupGame, type SetupOptions } from './setup';
 import { SeededRng } from '../rng/rng';
-import { refillPhase, rerollPhase, endPhase } from './phases';
+import { refillPhase, doReroll, endPhase } from './phases';
 import { effectiveSpeed, rerollAllowance } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
 import { afterAttackResolved, applyLifeLoss, artifactWithSkill, doAttack, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, type AttackMods } from './combat';
 import { findDieOf, gainRandomDice, setDieValue, heal, moveDice, paySlots, withRngState } from './effects';
-import { pumpPending, queueRerollEndTriggers } from './pending';
+import { areaOf } from '../model/dice';
+import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
 import { SKILL_HANDLERS, skillActive, consumeDice, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { logLine, pname } from './log';
 import type { Action, Artifact, DiceKind, GameState, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
@@ -31,6 +32,38 @@ function assertConversionAllowed(g: GameState, player: PlayerId, fills?: SlotFil
   }
 }
 
+/**
+ * 025 屠虎·奇袭（持续）：可把**点数不在对方任何区域**的能力骰「视为攻击骰」使用（单骰跨类型）。
+ * 返回该骰是否可用于攻击骰位（条件：奇袭已激活 + 该点数不在对方任意区域）。
+ */
+export function canTreatAsAttack(g: GameState, player: PlayerId, dieId: string): boolean {
+  if (!hasActiveSkill(g.players[player], 'tuohu.qixi')) return false;
+  const found = findDieOf(g, player, dieId);
+  if (!found) return false;
+  if (found.kind === 'attack') return false; // 本来就是攻击骰，无需「视为」
+  const opp: PlayerId = player === 'A' ? 'B' : 'A';
+  const v = found.die.value;
+  const kinds: DiceKind[] = ['attack', 'defense', 'meditation'];
+  return !kinds.some((k) => g.players[opp].areas[k].some((d) => d.value === v));
+}
+
+/** 027 寒光·必杀：是否处于「将要使用攻击骰」且神器上仍有骰子（用完即不再询问，必杀已用无法再次发动） */
+export function canUseHanguang(g: GameState, player: PlayerId): boolean {
+  const card = artifactWithSkill(g.players[player], 'hanguang.ultimate');
+  return (card?.heldDice?.length ?? 0) > 0;
+}
+
+/** 校验所有「视为」填法都满足 025 奇袭的条件（越界抛错，不静默修正） */
+function assertTreatedAllowed(g: GameState, player: PlayerId, fills?: SlotFill[]): void {
+  for (const f of fills ?? []) {
+    if (f.treated !== true) continue;
+    if (f.dieIds.length !== 1) throw new Error('「视为」填法只能有 1 颗骰');
+    if (!canTreatAsAttack(g, player, f.dieIds[0])) {
+      throw new Error('「视为攻击骰」不满足 025 屠虎·奇袭的条件');
+    }
+  }
+}
+
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
   logLine(g, `${pname(g.activePlayer)} 的回合开始`);
@@ -52,6 +85,11 @@ export function beginTurn(g: GameState): void {
   g.chenaiUsed.A = false;
   g.chenaiUsed.B = false;
   g.freeNoCostRise = 0;
+  // 025 屠虎·横贯（持续）：每回合的攻击次数清零（第 2 次攻击伤害 +2 按本回合统计）
+  g.attacksThisTurn.A = 0;
+  g.attacksThisTurn.B = 0;
+  // 027 寒光·凛冽之音（充能）：持续到「持有者自己的下个尘起阶段开始」→ 在此清除
+  g.rerollPunish[g.activePlayer] = false;
   // 018 至黑：每回合第一次受伤的判定在每回合开始时重置（任何玩家的回合开始时都重置，双方各自独立）
   g.players.A.damagedThisTurn = false;
   g.players.B.damagedThisTurn = false;
@@ -86,6 +124,9 @@ export function endTurn(g: GameState): void {
   // 023 蛇蝎·畏惧：该玩家「下个回合」的攻击伤害减半 → 其回合结束时清除（即使本回合没攻击/被抵挡也不保留）
   p.attackHalvedNextTurn = false;
   p.buffs = p.buffs.filter((b) => b.duration !== 'thisTurn');
+  // 027 寒光·必杀：置于神器上的骰子在该玩家回合结束时移除
+  const hanguang = p.artifacts.find((a) => a.skills.some((s) => s.key === 'hanguang.ultimate'));
+  if (hanguang) hanguang.heldDice = [];
   g.firstRound[g.activePlayer] = false;
   g.activePlayer = g.activePlayer === 'A' ? 'B' : 'A';
   g.turnIndex += 1;
@@ -111,6 +152,19 @@ export function advancePhase(g: GameState): void {
       }
       // 先离开重掷阶段再处理触发，避免待决策解算完后重复触发
       g.phase = 'dustRise';
+      // 026 哀歌·陷阵：**持有者自己的**重掷阶段结束时，由生命最少的一方弃置持有者 1 颗能力骰
+      // （FAQ 26.1.1：生命并列 → 当前回合玩家选择；无能力骰可弃置时该技能不结算，避免「另外两种类型」无从确定）
+      if (hasActiveSkill(g.players[g.activePlayer], 'aige.xianzhen')) {
+        const owner = g.activePlayer;
+        const own = g.players[owner];
+        if (KINDS_ORDER.some((k) => own.areas[k].length > 0)) {
+          const aLife = g.players.A.life;
+          const bLife = g.players.B.life;
+          const chooser: PlayerId = aLife < bLife ? 'A' : bLife < aLife ? 'B' : g.activePlayer;
+          queuePending(g, { kind: 'xianzhenPick', player: chooser, owner });
+          logLine(g, `「陷阵」：由生命最少的一方（${pname(chooser)}）选择弃置 ${pname(owner)} 的 1 颗能力骰`);
+        }
+      }
       // 对方（非当前玩家）的重掷阶段结束时触发：013 雷暴·持续 / 017 帷幕
       queueRerollEndTriggers(g, g.activePlayer);
       pumpPending(g);
@@ -568,6 +622,55 @@ export function getLegalActions(g: GameState): Action[] {
       if (!a || !s) return [{ t: 'advance' }];
       return [chargeDefaultAction(p, a, s)];
     }
+    if (g.pending.kind === 'weiyaPick') {
+      const pd = g.pending;
+      const me = g.players[pd.player];
+      const opp = g.players[pd.player === 'A' ? 'B' : 'A'];
+      const acts: Action[] = [{ t: 'weiyaPick', owner: 'self' }]; // 省略 dieId = 不发动「威压」
+      for (const k of KINDS_ORDER) {
+        for (const d of me.areas[k]) acts.push({ t: 'weiyaPick', owner: 'self', dieId: d.id });
+        for (const d of opp.areas[k]) acts.push({ t: 'weiyaPick', owner: 'opp', dieId: d.id });
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'xianzhenPick') {
+      const pd = g.pending;
+      const ownerP = g.players[pd.owner];
+      const acts: Action[] = [];
+      for (const k of KINDS_ORDER) {
+        for (const d of ownerP.areas[k]) acts.push({ t: 'xianzhenResolve', dieId: d.id });
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'hengguan') {
+      const pd = g.pending;
+      const opp = g.players[pd.player === 'A' ? 'B' : 'A'];
+      const acts: Action[] = [{ t: 'hengguan' }]; // 省略 dieId = 不发动
+      for (const k of KINDS_ORDER) {
+        for (const d of opp.areas[k]) {
+          if (d.value < pd.value) acts.push({ t: 'hengguan', dieId: d.id });
+        }
+      }
+      return acts;
+    }
+    if (g.pending.kind === 'hanguangPick') {
+      const pd = g.pending;
+      const card = artifactWithSkill(g.players[pd.player], 'hanguang.ultimate');
+      const held = card?.heldDice ?? [];
+      const opp = g.players[pd.player === 'A' ? 'B' : 'A'];
+      const acts: Action[] = [];
+      for (const h of held) {
+        acts.push({ t: 'hanguangPick', pick: 'move', dieId: h.id });
+        for (const k of KINDS_ORDER) {
+          for (const d of opp.areas[k]) {
+            if (d.value === h.value) {
+              acts.push({ t: 'hanguangPick', pick: 'discard', dieId: h.id, targetDieId: d.id });
+            }
+          }
+        }
+      }
+      return acts;
+    }
     if (g.pending.kind === 'chenaiFreeRise') {
       return [
         { t: 'chenaiFreeRise', accept: true },
@@ -658,6 +761,17 @@ export function getLegalActions(g: GameState): Action[] {
     case 'main': {
       const acts: Action[] = [{ t: 'advance' }];
       for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
+      // 025 屠虎·奇袭（持续）：把「点数不在对方任意区域」的能力骰**视为攻击骰**发起攻击
+      // （默认候选供 AI/测试；真人由 UI 显式选择）
+      if (hasActiveSkill(p, 'tuohu.qixi')) {
+        for (const k of ['defense', 'meditation'] as const) {
+          for (const d of p.areas[k]) {
+            if (canTreatAsAttack(g, g.activePlayer, d.id)) {
+              acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id], treated: true }] });
+            }
+          }
+        }
+      }
       acts.push(...activateSkillActions(g, p));
       // 019 尘起赠予的免费额外尘起：可在主要阶段立即使用（不耗冥想骰、不占每回合 1 次）
       if (g.freeNoCostRise > 0) {
@@ -718,6 +832,10 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
   weijuPay: 'weijuPay',
   gongzhenPick: 'gongzhenResolve',
   chargeResolve: 'skill',
+  weiyaPick: 'weiyaPick',
+  xianzhenPick: 'xianzhenResolve',
+  hengguan: 'hengguan',
+  hanguangPick: 'hanguangPick',
 };
 
 export function applyAction(g: GameState, action: Action): GameState {
@@ -738,7 +856,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         );
         if (new Set(action.dieIds).size !== action.dieIds.length) throw new Error('duplicate die id');
         for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
-        withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
+        withRng(g, (rng) => doReroll(g, g.activePlayer, action.dieIds, rng));
         finishInitialRerollStep(g);
         break;
       }
@@ -752,7 +870,7 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (action.dieIds.length > effectiveSpeed(p)) throw new Error('reroll exceeds speed');
       if (new Set(action.dieIds).size !== action.dieIds.length) throw new Error('duplicate die id');
       for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
-      withRng(g, (rng) => rerollPhase(g, g.activePlayer, action.dieIds, rng));
+      withRng(g, (rng) => doReroll(g, g.activePlayer, action.dieIds, rng));
       g.rerollUsed += 1;
       break;
     }
@@ -865,6 +983,12 @@ export function applyAction(g: GameState, action: Action): GameState {
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
       assertConversionAllowed(g, g.activePlayer, action.costSlots);
+      assertTreatedAllowed(g, g.activePlayer, action.costSlots);
+      // 027 寒光·必杀：使用攻击骰前先决定是否使用神器上的骰子（先于 022；两者仅可能在非预选模式共存）
+      if (canUseHanguang(g, g.activePlayer)) {
+        g.pending = { kind: 'hanguangPick', player: g.activePlayer, costSlots: action.costSlots };
+        break;
+      }
       // 022 死契·处刑通牒：使用攻击骰前必须先决定是否扣计数（FAQ 22.2.1：优先于抵挡与「灵能屏障」）
       if (hasActiveSkill(g.players[g.activePlayer], 'siji.chuxing') && (artifactWithSkill(g.players[g.activePlayer], 'siji.chuxing')?.count ?? 0) >= 1) {
         g.pending = { kind: 'sijiChuxing', player: g.activePlayer, costSlots: action.costSlots };
@@ -1039,7 +1163,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         logLine(g, `${pname(pd.player)} 「漆黑绽放」：不重掷`);
         break;
       }
-      withRng(g, (rng) => rerollPhase(g, pd.player, ids, rng));
+      withRng(g, (rng) => doReroll(g, pd.player, ids, rng));
       break;
     }
     case 'chenaiFreeRise': {
@@ -1155,6 +1279,116 @@ export function applyAction(g: GameState, action: Action): GameState {
       const mine = pickFor(me, action.myIds ?? []);
       const theirs = pickFor(opp, action.oppIds ?? []);
       logLine(g, `「共振」：${pname(me)} 弃置自己 ${mine} 颗、${pname(opp)} 的 ${theirs} 颗${kindCn}骰`);
+      break;
+    }
+    case 'weiyaPick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'weiyaPick') throw new Error('no weiyaPick pending');
+      if (!action.dieId) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「威压」`);
+        break;
+      }
+      const target: PlayerId = action.owner === 'opp' ? (pd.player === 'A' ? 'B' : 'A') : pd.player;
+      const old = setDieValue(g, target, action.dieId, pd.value);
+      g.pending = null;
+      logLine(
+        g,
+        `${pname(pd.player)} 发动「威压」：将 ${pname(target)} 的 1 颗能力骰 ${old} → ${pd.value}（保留原区域）`,
+      );
+      break;
+    }
+    case 'xianzhenResolve': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'xianzhenPick') throw new Error('no xianzhenPick pending');
+      const found = findDieOf(g, pd.owner, action.dieId);
+      if (!found) throw new Error(`not ${pd.owner} ability die: ${action.dieId}`);
+      const ownerP = g.players[pd.owner];
+      ownerP.areas[found.kind] = ownerP.areas[found.kind].filter((d) => d.id !== action.dieId);
+      logLine(
+        g,
+        `「陷阵」：${pname(pd.player)} 选择弃置 ${pname(pd.owner)} 的 ${found.die.value} 点能力骰`,
+      );
+      // 然后：持有者获得「另外两种类型」的随机点数能力骰各 1 个
+      const others = KINDS_ORDER.filter((k) => k !== found.kind);
+      withRng(g, (rng) => {
+        const gained = others.flatMap((k) => gainRandomDice(g, pd.owner, k, 1, rng));
+        logLine(
+          g,
+          `${pname(pd.owner)} 「陷阵」：获得另外两种类型的随机点数能力骰各 1 个（${gained
+            .map((d) => d.value)
+            .join('/')}）`,
+        );
+      });
+      g.pending = null;
+      break;
+    }
+    case 'hengguan': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'hengguan') throw new Error('no hengguan pending');
+      if (!action.dieId) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「横贯」`);
+        break;
+      }
+      const oppId: PlayerId = pd.player === 'A' ? 'B' : 'A';
+      const found = findDieOf(g, oppId, action.dieId);
+      if (!found) throw new Error(`not ${oppId} ability die: ${action.dieId}`);
+      if (found.die.value >= pd.value) throw new Error('「横贯」只能弃置点数小于该攻击的能力骰');
+      const oppP = g.players[oppId];
+      oppP.areas[found.kind] = oppP.areas[found.kind].filter((d) => d.id !== action.dieId);
+      g.pending = null;
+      logLine(
+        g,
+        `${pname(pd.player)} 发动「横贯」：弃置 ${pname(oppId)} 的 ${found.die.value} 点能力骰（小于本次攻击 ${pd.value} 点）`,
+      );
+      break;
+    }
+    case 'hanguangPick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'hanguangPick') throw new Error('no hanguangPick pending');
+      const card = artifactWithSkill(g.players[pd.player], 'hanguang.ultimate');
+      if (!card || !card.heldDice) throw new Error('no 寒光·必杀 data');
+      const held = card.heldDice.find((d) => d.id === action.dieId);
+      if (!held) throw new Error(`held die not found: ${action.dieId}`);
+      const oppId: PlayerId = pd.player === 'A' ? 'B' : 'A';
+      const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
+      if (action.pick === 'move') {
+        const dist = g.players[pd.player].artifacts.find((a) => a.column === 2)?.distribution;
+        if (!dist) throw new Error('no distribution');
+        const kind = areaOf(held.value, dist);
+        card.heldDice = card.heldDice.filter((d) => d.id !== action.dieId);
+        g.players[pd.player].areas[kind].push({ id: held.id, value: held.value, kind });
+        logLine(
+          g,
+          `${pname(pd.player)} 「凛冽之音」：将神器上的 ${held.value} 点骰移入${kindCnOf(kind)}骰区`,
+        );
+      } else {
+        if (!action.targetDieId) throw new Error('missing target die');
+        const found = findDieOf(g, oppId, action.targetDieId);
+        if (!found) throw new Error(`not ${oppId} ability die: ${action.targetDieId}`);
+        if (found.die.value !== held.value) {
+          throw new Error('「凛冽之音」只能弃置与神器上该骰点数相同的对方能力骰');
+        }
+        g.players[oppId].areas[found.kind] = g.players[oppId].areas[found.kind].filter(
+          (d) => d.id !== action.targetDieId,
+        );
+        card.heldDice = card.heldDice.filter((d) => d.id !== action.dieId);
+        logLine(
+          g,
+          `${pname(pd.player)} 「凛冽之音」：移除神器上的 ${held.value} 点骰，弃置 ${pname(oppId)} 的 1 颗 ${held.value} 点能力骰`,
+        );
+      }
+      g.pending = null;
+      // 继续本次攻击：先处理 022（若可用），否则直接发起攻击
+      if (
+        hasActiveSkill(g.players[pd.player], 'siji.chuxing') &&
+        (artifactWithSkill(g.players[pd.player], 'siji.chuxing')?.count ?? 0) >= 1
+      ) {
+        g.pending = { kind: 'sijiChuxing', player: pd.player, costSlots: pd.costSlots };
+      } else {
+        doAttack(g, pd.player, pd.costSlots);
+      }
       break;
     }
     case 'skill': {

@@ -23,12 +23,14 @@ export interface SlotSpec {
 
 export interface SlotFill {
   dieIds: string[];
+  /** 该格用「视为」填补（单骰跨类型，需技能许可，如 025「奇袭」）：仅当类型不匹配时使用 */
+  treated?: boolean;
 }
 
 export interface EffectiveDie {
   kind: DiceKind;
   value: number;
-  source: 'real' | 'converted';
+  source: 'real' | 'converted' | 'treated';
   realIds: string[];
 }
 
@@ -60,6 +62,14 @@ export type Action =
   | { t: 'gongzhenResolve'; pick: 'gain' | 'discard'; myIds?: string[]; oppIds?: string[] }
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
   | { t: 'shouhunCancel'; cancel: boolean }
+  /** 026 哀歌·威压：使用能力骰后，令自己或对方的 1 颗能力骰点数变为固定值（保留区域）；dieId 省略 = 不发动 */
+  | { t: 'weiyaPick'; owner: 'self' | 'opp'; dieId?: string }
+  /** 026 哀歌·陷阵：生命最少的一方选择弃置持有者的 1 颗能力骰 */
+  | { t: 'xianzhenResolve'; dieId: string }
+  /** 025 屠虎·横贯（触发）：被抵挡后可弃置对方 1 颗点数小于该攻击的能力骰；dieId 省略 = 不发动 */
+  | { t: 'hengguan'; dieId?: string }
+  /** 027 寒光·必杀：使用攻击骰前的二选一（① 把神器上的骰移入对应区域 / ② 移除它并弃置对方同点数骰） */
+  | { t: 'hanguangPick'; pick: 'move' | 'discard'; dieId: string; targetDieId?: string }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -109,7 +119,15 @@ export type Pending =
   /** 023 蛇蝎·共振：重掷并落区后，按落区类型二选一 */
   | { kind: 'gongzhenPick'; player: PlayerId; areaKind: DiceKind }
   /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
-  | { kind: 'chargeResolve'; player: PlayerId; artifactId: string };
+  | { kind: 'chargeResolve'; player: PlayerId; artifactId: string }
+  /** 026 哀歌·威压：某人「使用 1 个任意能力骰后」，威压持有者可令 1 颗能力骰点数变为固定值（FAQ 26.2.1：先于该骰的基础效果结算） */
+  | { kind: 'weiyaPick'; player: PlayerId; value: number }
+  /** 026 哀歌·陷阵：持有者的重掷阶段结束时，由生命最少的一方（并列 = 当前回合玩家）弃置持有者 1 颗能力骰 */
+  | { kind: 'xianzhenPick'; player: PlayerId; owner: PlayerId }
+  /** 025 屠虎·横贯（触发）：攻击被抵挡后，攻击者可弃置对方 1 颗点数小于该攻击的能力骰 */
+  | { kind: 'hengguan'; player: PlayerId; value: number }
+  /** 027 寒光·必杀：使用攻击骰前，必须先决定是否使用神器上的骰子（暂存本次攻击的支付） */
+  | { kind: 'hanguangPick'; player: PlayerId; costSlots: SlotFill[] };
 
 export interface Distribution {
   defense: number[];
@@ -134,6 +152,8 @@ export interface SkillDef {
   refresh?: boolean;
   /** 该「充能」技能需要玩家选择（024 狂舞）：充能后弹出强制选择器，而不是自动结算 */
   needsChoice?: boolean;
+  /** 卡面固定数值（如 026「威压」把点数变为 4、027 等）：供处理器/待决策读取，避免硬编码 */
+  value?: number;
 }
 
 export interface Artifact {
@@ -159,6 +179,8 @@ export interface Artifact {
   chargeLayer: number;
   /** 「在接下来的游戏中，本神器失去持续式效果」（018 必杀等） */
   continuousLost?: boolean;
+  /** 置于本神器上的骰子（027 寒光·必杀：1–6 点各 1 颗；回合结束时清空）。这些骰不在任何区域，落区时按点数决定类型 */
+  heldDice?: { id: string; value: number }[];
   skills: SkillDef[];
 }
 
@@ -217,4 +239,8 @@ export interface GameState {
   chenaiUsed: Record<PlayerId, boolean>;
   /** 本回合可用的「无需冥想骰的额外尘起行动」次数（019 尘起赠予） */
   freeNoCostRise: number;
+  /** 每名玩家「本回合已进行的攻击次数」（025 屠虎·横贯持续：第 2 次攻击伤害 +2；回合开始时清零） */
+  attacksThisTurn: Record<PlayerId, number>;
+  /** 027 寒光·凛冽之音（充能）：持有者自己的下个尘起阶段开始前，任何玩家重掷能力骰都会受到等量真实伤害 */
+  rerollPunish: Record<PlayerId, boolean>;
 }

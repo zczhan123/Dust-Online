@@ -797,6 +797,14 @@ button.pay-die {
   color: #6b7280;
   opacity: 0.7;
 }
+/* 置于神器上的骰（027 寒光）：不在任何区域 → 中性色，不带玩家色/攻防冥前缀 */
+.pay-die--held {
+  background: #64748b;
+}
+/* 025 奇袭：把能力骰「视为攻击骰」→ 与真攻击骰（玩家色）明显区分（琥珀色） */
+.pay-die.pay-die--treated {
+  background: #b45309;
+}
 .pay-die.selected {
   outline: 2px solid #b8860b;
   outline-offset: 1px;

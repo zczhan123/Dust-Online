@@ -782,6 +782,64 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       groups: chosenDice.slice(1, 7).map((g) => [...g]),
     }),
   },
+  // 026 哀歌·威压（待决策）：先选变哪一方 → 选 1 颗能力骰点数改为固定值（保留原区域）
+  '@weiyaPick': {
+    steps: ({ state, options }) => {
+      const pd = state.pending;
+      const value = pd && pd.kind === 'weiyaPick' ? pd.value : 4;
+      const owner: 'self' | 'opponent' = options[0] === 'opponent' ? 'opponent' : 'self';
+      return [
+        {
+          kind: 'option',
+          label: '选择要变更哪一方的能力骰',
+          options: [
+            { value: 'self', label: '我方的能力骰' },
+            { value: 'opponent', label: '对方的能力骰' },
+          ],
+        },
+        { kind: 'dice', label: `选择要变为 ${value} 点的 1 颗能力骰（保留原区域）`, owner, areas: KINDS, min: 1, max: 1 },
+      ];
+    },
+    buildParams: () => ({}),
+  },
+  // 026 哀歌·陷阵（待决策，强制、无「不发动」）：生命最少方选持有者的 1 颗能力骰弃置
+  '@xianzhenPick': {
+    steps: ({ state }) => {
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'xianzhenPick' ? pd.owner : state.activePlayer;
+      const actor: PlayerId = pd && pd.kind === 'xianzhenPick' ? pd.player : state.activePlayer;
+      return [
+        {
+          kind: 'dice',
+          label: '选择要弃置的 1 颗能力骰',
+          owner: owner === actor ? 'self' : 'opponent',
+          areas: KINDS,
+          min: 1,
+          max: 1,
+        },
+      ];
+    },
+    buildParams: () => ({}),
+  },
+  // 025 屠虎·横贯·触发（待决策）：选对方 1 颗点数严格小于该攻击的能力骰弃置（或不发动）
+  '@hengguan': {
+    steps: ({ state }) => {
+      const pd = state.pending;
+      const value = pd && pd.kind === 'hengguan' ? pd.value : 1;
+      return [
+        {
+          kind: 'dice',
+          label: `选择要弃置的对方 1 颗点数小于 ${value} 的能力骰`,
+          owner: 'opponent',
+          areas: KINDS,
+          min: 1,
+          max: 1,
+          filter: (d) => d.value < value,
+        },
+      ];
+    },
+    buildParams: () => ({}),
+  },
   // 017 幽冥·帷幕（待决策）：选对方 1 个能力骰弃置
   '@weimu': {
     steps: () => [

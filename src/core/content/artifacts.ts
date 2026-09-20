@@ -172,7 +172,7 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
     name: '蛇蝎',
     weapon: '面具',
     column: 2,
-    distribution: { attack: [1, 6], defense: [2, 5], meditation: [3, 4] },
+    distribution: { attack: [2, 5], defense: [1, 6], meditation: [3, 4] },
     skills: [
       { side: 'left', kind: 'activate', key: 'shexie.weiju' },
       { side: 'right', kind: 'activate', key: 'shexie.gongzhen' },
@@ -188,6 +188,49 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
     skills: [
       { side: 'only', kind: 'charge', key: 'kuangwu.charge', needsChoice: true },
       { side: 'only', kind: 'ultimate', key: 'kuangwu.ultimate' },
+    ],
+  },
+  '025': {
+    id: '025',
+    name: '屠虎',
+    weapon: '横刀',
+    column: 1,
+    speed: 4,
+    will: 7,
+    skills: [
+      // 奇袭（持续·左）：可把「点数不在对方任意区域」的能力骰视为攻击骰使用
+      { side: 'left', kind: 'continuous', key: 'tuohu.qixi' },
+      // 横贯（持续·右）：本回合第 2 次攻击伤害 +2
+      { side: 'right', kind: 'continuous', key: 'tuohu.hengguan' },
+      // 横贯（触发·右）：攻击被抵挡后，可弃置对方 1 颗点数小于该攻击的能力骰
+      { side: 'right', kind: 'trigger', key: 'tuohu.hengguan.trigger' },
+    ],
+  },
+  '026': {
+    id: '026',
+    name: '哀歌',
+    weapon: '明光铠',
+    column: 2,
+    distribution: { defense: [1, 6], attack: [3, 5], meditation: [2, 4] },
+    skills: [
+      // 陷阵（持续·左）：你的重掷阶段结束时，生命最少的一方弃置你 1 颗能力骰；随后你获得另外两种类型各 1 颗
+      { side: 'left', kind: 'continuous', key: 'aige.xianzhen' },
+      // 威压（触发·右）：使用 1 个任意能力骰后，可令自己或对方的 1 颗能力骰点数变为 4（保留原区域）
+      { side: 'right', kind: 'trigger', key: 'aige.weiya', value: 4 },
+    ],
+  },
+  '027': {
+    id: '027',
+    name: '寒光',
+    weapon: '竹笛',
+    column: 3,
+    life: 50,
+    chargeReq: 2,
+    skills: [
+      // 凛冽之音（充能）：直到你的下个尘起阶段开始，任何玩家重掷能力骰后，被重掷方受等量真实伤害
+      { side: 'only', kind: 'charge', key: 'hanguang.charge' },
+      // 凛冽之音（必杀）：取 1–6 各 1 颗置于本神器上；使用攻击骰前二选一（移入对应区域 / 移除并弃置对方同点数骰）
+      { side: 'only', kind: 'ultimate', key: 'hanguang.ultimate' },
     ],
   },
 };
@@ -210,8 +253,10 @@ export function makeArtifact(id: string): Artifact {
     count: 0,
     chargeLayer: 0,
     skills: base.skills.map((s) => ({ ...s })),
+    heldDice: [],
   };
 }
+
 
 export const HEROES = {
   kong: { name: '雨中剑圣 空', artifacts: ['001', '002', '003'] },
@@ -222,4 +267,5 @@ export const HEROES = {
   xiu: { name: '漆黑死神 修', artifacts: ['016', '017', '018'] },
   nisa: { name: '荒野行者 尼萨', artifacts: ['019', '020', '021'] },
   xiva: { name: '黑枪 希瓦', artifacts: ['022', '023', '024'] },
+  lifeng: { name: '天殇的战鬼 李封', artifacts: ['025', '026', '027'] },
 } as const;

@@ -15,7 +15,8 @@ const ZORAY = ['013', '014', '015'];
 const XIU = ['016', '017', '018'];
 const NISA = ['019', '020', '021'];
 const XIVA = ['022', '023', '024'];
-const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU, NISA, XIVA];
+const LIFENG = ['025', '026', '027'];
+const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU, NISA, XIVA, LIFENG];
 
 describe('renderSetup', () => {
   let root: HTMLElement;
@@ -29,8 +30,8 @@ describe('renderSetup', () => {
     expect(root.textContent).toContain('尘起时刻 · 开始新对局');
     expect(root.querySelector('.setup')).not.toBeNull();
     expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
-    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(9); // 8 英雄 + 随机
-    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(9); // 8 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(10); // 9 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(10); // 9 英雄 + 随机
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 
@@ -41,8 +42,8 @@ describe('renderSetup', () => {
 
   it('选将矩阵：单列对齐，每个英雄恰好出现一次（不重不漏）', () => {
     renderSetup(root, () => {});
-    // 10 行 = 表头 + 9 行（8 个英雄 + 随机）
-    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(10);
+    // 11 行 = 表头 + 10 行（9 个英雄 + 随机）
+    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(11);
     const labels = Array.from(root.querySelectorAll('.hero-matrix-row .setup-label'))
       .map((n) => n.textContent)
       .filter((t) => t !== '');
@@ -55,6 +56,7 @@ describe('renderSetup', () => {
       '漆黑死神·修',
       '荒野行者·尼萨',
       '黑枪·希瓦',
+      '天殇的战鬼·李封',
       '随机',
     ]);
   });

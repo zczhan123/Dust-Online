@@ -1,6 +1,10 @@
 import type { DiceKind, GameState, PlayerId } from '../model/types';
 import { hasActiveSkill } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
+import { canTreatAsAttack, canUseHanguang } from './game';
+
+const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
+const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
 
 /** 一条「攻击提示」：技能名（UI 上色）+ 说明文案（含数值；**不写发动条件**，因为只列出此刻可用的） */
 export interface BattleNote {
@@ -26,10 +30,36 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     notes.push({ label: bonus.label ?? '攻击加成', text: `攻击伤害 +${bonus.value}` });
   }
 
+  // A/D 攻击前的选择：025 屠虎·奇袭（持续·左）：有「点数不在对方任意区域」的能力骰时可用
+  if (hasActiveSkill(p, 'tuohu.qixi')) {
+    const candidates = [...p.areas.defense, ...p.areas.meditation];
+    if (candidates.some((d) => canTreatAsAttack(g, player, d.id))) {
+      notes.push({ label: '奇袭', text: '可将点数不在对方区域的能力骰视为攻击骰' });
+    }
+  }
+
   // D 攻击前的选择：022 死契·处刑通牒（计数 ≥1）
   const siji = artifactWithSkill(p, 'siji.chuxing');
   if (hasActiveSkill(p, 'siji.chuxing') && (siji?.count ?? 0) >= 1) {
     notes.push({ label: '处刑通牒', text: '使用攻击骰前，可令本次伤害 +1 且不可抵挡，或 +5' });
+  }
+
+  // D 攻击前的选择：027 寒光·必杀（神器上仍有骰子）
+  if (canUseHanguang(g, player)) {
+    notes.push({
+      label: '凛冽之音',
+      text: '使用攻击骰前：可将神器上 1 颗骰移入对应区域，或移除它并弃置对方同点数的能力骰',
+    });
+  }
+
+  // B 被抵挡时：025 屠虎·横贯·触发（对方有可弃置、且点数小于「可用攻击骰」的能力骰）
+  if (hasActiveSkill(p, 'tuohu.hengguan.trigger')) {
+    const maxAtk = p.areas.attack.reduce((m, d) => Math.max(m, d.value), 0);
+    const opp = oppOf(player);
+    const hasTarget = KINDS.some((k) => g.players[opp].areas[k].some((d) => d.value < maxAtk));
+    if (maxAtk > 0 && hasTarget) {
+      notes.push({ label: '横贯', text: '攻击被抵挡时，可弃置对方 1 颗点数小于该攻击的能力骰' });
+    }
   }
 
   // B 被抵挡时：004 不祥·锋芒·触发（需 1 攻击骰 + 1 冥想骰）

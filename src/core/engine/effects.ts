@@ -10,6 +10,7 @@ import type {
 import { newDieId, createDie, placeDieByDistribution } from '../model/dice';
 import { SeededRng } from '../rng/rng';
 import { logLine, pname } from './log';
+import { skillActive } from './skill-state';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
@@ -94,8 +95,20 @@ export function paySlots(
     }
     if (ids.length === 1) {
       const found = findDieOf(g, player, ids[0])!;
-      if (found.kind !== kind) throw new Error(`slot needs a ${kind} die, got ${found.kind}`);
-      effective.push({ kind, value: found.die.value, source: 'real', realIds: [ids[0]] });
+      const treated = fills[i]?.treated === true;
+      if (found.kind !== kind && !treated) throw new Error(`slot needs a ${kind} die, got ${found.kind}`);
+      effective.push({
+        kind,
+        value: found.die.value,
+        source: treated ? 'treated' : 'real',
+        realIds: [ids[0]],
+      });
+      if (treated && found.kind !== kind) {
+        logLine(
+          g,
+          `${pname(player)} 使用「奇袭」视为：${kindCnOf(found.kind)}骰 ${found.die.value} 点 → 视为${kindCnOf(kind)}骰`,
+        );
+      }
     } else {
       converted.push({ kind, values: ids.map((id) => findDieOf(g, player, id)?.die.value ?? 0) });
       effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
@@ -125,6 +138,19 @@ export function paySlots(
     }
   }
   reportConsumed?.(spec.length);
+  // 026 哀歌·威压（触发）：某人「使用 1 个任意能力骰后」→ 若其持有威压，弹出强制选择
+  // （FAQ 26.2.1：先结算「威压」，再结算该骰的基础效果 —— 支付后立即排队，挡在后续结算之前）
+  const weiyaCard = g.players[player].artifacts.find((a) => a.skills.some((s) => s.key === 'aige.weiya'));
+  const weiyaSkill = weiyaCard?.skills.find((s) => s.key === 'aige.weiya');
+  if (weiyaCard && weiyaSkill && skillActive(weiyaCard, weiyaSkill)) {
+    const me = g.players[player];
+    const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+    const opp = g.players[oppId];
+    const anyTarget = KINDS.some((k) => me.areas[k].length > 0 || opp.areas[k].length > 0);
+    if (anyTarget) {
+      g.pendingQueue.push({ kind: 'weiyaPick', player, value: weiyaSkill.value ?? 4 });
+    }
+  }
   return effective;
 }
 

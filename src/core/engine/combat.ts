@@ -37,6 +37,10 @@ export function attackDamageBonus(
     const jy = artifactWithSkill(p, 'jueyi.wildfire.continuous');
     if ((jy?.count ?? 0) >= 1) consider(1, '野火燎原');
   }
+  // 025 屠虎·横贯（持续）：本回合的**第 2 次**攻击伤害 +2（与其它加成取最大）
+  if (hasActiveSkill(p, 'tuohu.hengguan') && g.attacksThisTurn[player] === 1) {
+    consider(2, '横贯');
+  }
   return best;
 }
 
@@ -133,6 +137,8 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
     bonusLabel,
   };
   applyNextTurnHalving(g, player, g.pendingAttack);
+  // 025 屠虎·横贯（持续）：记入本回合攻击次数（第 2 次攻击时加成已在 attackDamageBonus 中生效）
+  g.attacksThisTurn[player] += 1;
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${g.pendingAttack.value} 点）` : '';
   logLine(g, `${pname(player)} 使用 ${effDie.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
@@ -273,6 +279,17 @@ export function afterAttackResolved(
   // 004 锋芒·触发：你的攻击被防御骰抵挡后
   if (res.blocked && hasActiveSkill(atk, 'buxiang.fengmang.trigger')) {
     queuePending(g, { kind: 'fengmang', player: pa.attacker, defenderId: pa.attacker === 'A' ? 'B' : 'A', value: pa.value });
+  }
+  // 025 屠虎·横贯·触发：你的攻击被抵挡后，可弃置对方 1 颗**点数小于该攻击**的能力骰
+  // （FAQ 25.2.1：必须严格小于，不能相同；FAQ 25.2.3：比较的是攻击点数，不含伤害修正）
+  if (res.blocked && hasActiveSkill(atk, 'tuohu.hengguan.trigger')) {
+    const cmp = pa.baseValue ?? pa.value;
+    const opp = g.players[pa.attacker === 'A' ? 'B' : 'A'];
+    const hasTarget = (['attack', 'defense', 'meditation'] as const).some((k) =>
+      opp.areas[k].some((d) => d.value < cmp),
+    );
+    // 无合格目标时不可发动（不弹待决策）
+    if (hasTarget) queuePending(g, { kind: 'hengguan', player: pa.attacker, value: cmp });
   }
   // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
   if (g.pending === null && g.pendingQueue.length === 0 && !g.attackQueue) {

@@ -778,4 +778,40 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
     },
   },
+  // ── 027 寒光 ────────────────────────────────────────────────
+  /** 凛冽之音（充能）：直到你自己的下个尘起阶段开始，任何玩家重掷能力骰后，被重掷方受等量真实伤害 */
+  'hanguang.charge': {
+    run: (ctx) => {
+      const { g, player, artifact } = ctx;
+      g.rerollPunish[player] = true;
+      logLine(
+        g,
+        `${pname(player)} 充能「${artifact.name}」：「凛冽之音」生效至其下个尘起阶段开始（此后任何玩家重掷能力骰都会受等量真实伤害）`,
+      );
+    },
+  },
+  /** 凛冽之音（必杀）：取 1–6 点各 1 颗置于本神器上；回合结束时移除（使用时机在「将要使用攻击骰时」） */
+  'hanguang.ultimate': {
+    run: (ctx) => {
+      const { g, player, artifact } = ctx;
+      artifact.heldDice = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `${artifact.id}-held-${v}`, value: v }));
+      logLine(
+        g,
+        `${pname(player)} 发动「凛冽之音」：从供应堆取 1–6 点骰各 1 颗置于「${artifact.name}」上（回合结束时移除）`,
+      );
+    },
+  },
+  // ── 026 哀歌 ────────────────────────────────────────────────
+  /** 陷阵（持续）：实际结算在「重掷阶段结束」事件点（game.ts advancePhase） */
+  'aige.xianzhen': {
+    run: (ctx) => {
+      logLine(ctx.g, `${pname(ctx.player)} 「陷阵」：在重掷阶段结束时结算`);
+    },
+  },
+  /** 威压（触发）：实际结算在「使用能力骰后」（effects.ts paySlots 排队） */
+  'aige.weiya': {
+    run: (ctx) => {
+      logLine(ctx.g, `${pname(ctx.player)} 「威压」：在使用能力骰后结算`);
+    },
+  },
 };

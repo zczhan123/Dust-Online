@@ -136,6 +136,68 @@ describe('战斗提示 battleNotes（主要阶段、只读状态）', () => {
     expect(notes(g, 'B')).toEqual([]);
   });
 
+  it('A：025 屠虎·奇袭 —— 存在「点数不在对方区域」的能力骰时才显示', () => {
+    const g = mk(['025', '026', '027']);
+    arm(g, 'A', '025', 'left'); // 奇袭（持续·左）
+    putDie(g, 'A', 'defense', 5); // 对方没有 5 点 → 可视为攻击骰
+    expect(notes(g, 'A')).toEqual([{ label: '奇袭', text: '可将点数不在对方区域的能力骰视为攻击骰' }]);
+
+    // 对方存在同点数 → 不可视为 → 不显示
+    const g2 = mk(['025', '026', '027']);
+    arm(g2, 'A', '025', 'left');
+    putDie(g2, 'A', 'defense', 5);
+    putDie(g2, 'B', 'defense', 5);
+    expect(notes(g2, 'A')).toEqual([]);
+
+    // 未激活 → 不显示
+    const g3 = mk(['025', '026', '027']);
+    putDie(g3, 'A', 'defense', 5);
+    expect(notes(g3, 'A')).toEqual([]);
+  });
+
+  it('D：027 寒光·必杀 —— 神器上有骰子时显示，用尽后不显示', () => {
+    const g = mk(['025', '026', '027']);
+    const card = art(g, 'A', '027');
+    card.heldDice = [{ id: '027-held-3', value: 3 }];
+    expect(notes(g, 'A')).toEqual([
+      {
+        label: '凛冽之音',
+        text: '使用攻击骰前：可将神器上 1 颗骰移入对应区域，或移除它并弃置对方同点数的能力骰',
+      },
+    ]);
+    card.heldDice = [];
+    expect(notes(g, 'A')).toEqual([]);
+  });
+
+  it('B：025 屠虎·横贯·触发 —— 对方有可弃置、且点数小于「可用攻击骰」的能力骰时才显示', () => {
+    const g = mk(['025', '026', '027']);
+    arm(g, 'A', '025', 'right'); // 横贯（持续 + 触发·右）
+    putDie(g, 'A', 'attack', 3);
+    putDie(g, 'B', 'defense', 2); // 2 < 3 → 可弃置
+    expect(notes(g, 'A')).toEqual([
+      { label: '横贯', text: '攻击被抵挡时，可弃置对方 1 颗点数小于该攻击的能力骰' },
+    ]);
+
+    // 对方没有严格小于最高可用攻击点数的骰 → 不显示
+    const g2 = mk(['025', '026', '027']);
+    arm(g2, 'A', '025', 'right');
+    putDie(g2, 'A', 'attack', 3);
+    putDie(g2, 'B', 'defense', 5);
+    expect(notes(g2, 'A')).toEqual([]);
+
+    // 自己没有攻击骰（无法发动攻击）→ 不显示
+    const g3 = mk(['025', '026', '027']);
+    arm(g3, 'A', '025', 'right');
+    putDie(g3, 'B', 'defense', 2);
+    expect(notes(g3, 'A')).toEqual([]);
+
+    // 未激活触发侧 → 不显示
+    const g4 = mk(['025', '026', '027']);
+    putDie(g4, 'A', 'attack', 3);
+    putDie(g4, 'B', 'defense', 2);
+    expect(notes(g4, 'A')).toEqual([]);
+  });
+
   it('综合：条目顺序按攻击时间线（加成 → 攻击前选择 → 被抵挡 → 伤害后 → 负面）', () => {
     const g = mk(['022', '023', '024']);
     arm(g, 'A', '022', 'right');
