@@ -523,3 +523,44 @@ describe('027 寒光（凛冽之音）', () => {
     applyAction(g, { t: 'block' });
   });
 });
+
+describe('027 寒光·必杀：真实路径（充能 → 按钮 → 发动）', () => {
+  it('尘起充能 2 次完成激活后，必杀必须出现在 getLegalActions；发动后神器上有 1–6 各 1 颗', () => {
+    const g = lifengGame();
+    const card = art(g, 'A', '027');
+    const step = (pred: () => boolean, max = 200): void => {
+      let i = 0;
+      while (!pred() && i++ < max && g.phase !== 'gameOver') applyAction(g, { t: 'advance' });
+    };
+    const atChargeable = (): boolean => g.activePlayer === 'A' && g.phase === 'dustRise' && !g.dustRiseActed;
+
+    // 第 1 次充能（A 的第一回合尘起阶段）
+    step(atChargeable);
+    g.players.A.areas.meditation.push({ id: 'cm1', value: 3, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '027', costSlots: [{ dieIds: ['cm1'] }] });
+    expect(card.chargeLayer).toBe(1);
+    expect(card.activeMarkerSide).toBeNull(); // 未激活
+
+    // 离开本阶段 → 第 2 次充能（A 的下一个尘起阶段）→ 激活
+    applyAction(g, { t: 'advance' });
+    step(atChargeable);
+    expect(g.phase).toBe('dustRise');
+    g.players.A.areas.meditation.push({ id: 'cm2', value: 5, kind: 'meditation' });
+    applyAction(g, { t: 'dustRise', artifactId: '027', costSlots: [{ dieIds: ['cm2'] }] });
+    expect(card.chargeLayer).toBe(2);
+    expect(card.activeMarkerSide).not.toBeNull(); // 已激活
+
+    // 进入主要阶段：必杀动作必须已被枚举出来（本次「按钮不出现」bug 的回归点）
+    applyAction(g, { t: 'advance' });
+    expect(g.phase).toBe('main');
+    const offered = getLegalActions(g).some(
+      (a) => a.t === 'skill' && a.artifactId === '027' && a.side === 'only',
+    );
+    expect(offered).toBe(true);
+
+    // 发动必杀 → 取 1–6 点各 1 颗置于本神器上
+    applyAction(g, { t: 'skill', artifactId: '027', side: 'only' });
+    expect(card.heldDice?.map((d) => d.value)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(g.ultimatesUsed).toContain('hanguang.ultimate');
+  });
+});

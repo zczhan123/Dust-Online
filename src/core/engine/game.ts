@@ -519,6 +519,9 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
           (['defense', 'attack', 'meditation'] as const).map((k) => who.areas[k].slice(0, 3).map((d) => d.id)),
         );
         acts.push({ t: 'skill', artifactId: a.id, side: s.side, params: { groups, direction: 'cw' } });
+      } else if (s.key === 'hanguang.ultimate') {
+        // 027 寒光·凛冽之音（必杀）：取 1–6 点各 1 颗置于本神器上（无需参数）
+        acts.push({ t: 'skill', artifactId: a.id, side: s.side });
       }
     }
   }
