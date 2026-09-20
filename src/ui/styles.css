@@ -535,7 +535,7 @@ button.pay-die {
   flex-direction: column;
   align-items: center;
   padding: 12px;
-  background: #ece7dc url('/cover.jpg') center bottom / cover no-repeat fixed;
+  background: #ece7dc url('/cover.jpg') center top / cover no-repeat fixed;
 }
 .setup {
   width: 100%;
