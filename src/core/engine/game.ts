@@ -64,6 +64,21 @@ function assertTreatedAllowed(g: GameState, player: PlayerId, fills?: SlotFill[]
   }
 }
 
+/**
+ * 026 哀歌·陷阵：**重掷者自己的**重掷阶段结束时触发（普通路径与 013「雷暴」插入的额外重掷阶段路径**共用**）。
+ * 由生命最少的一方（并列 = 重掷者本人，即「当前回合玩家」）弃置重掷者 1 颗能力骰；重掷者没有能力骰时不结算。
+ */
+function queueXianzhenOnRerollEnd(g: GameState, reroller: PlayerId): void {
+  if (!hasActiveSkill(g.players[reroller], 'aige.xianzhen')) return;
+  const own = g.players[reroller];
+  if (!KINDS_ORDER.some((k) => own.areas[k].length > 0)) return;
+  const aLife = g.players.A.life;
+  const bLife = g.players.B.life;
+  const chooser: PlayerId = aLife < bLife ? 'A' : bLife < aLife ? 'B' : reroller;
+  queuePending(g, { kind: 'xianzhenPick', player: chooser, owner: reroller });
+  logLine(g, `「陷阵」：由生命最少的一方（${pname(chooser)}）选择弃置 ${pname(reroller)} 的 1 颗能力骰`);
+}
+
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
   logLine(g, `${pname(g.activePlayer)} 的回合开始`);
@@ -147,6 +162,8 @@ export function advancePhase(g: GameState): void {
         // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 此处（其尘起阶段开始）清除
         g.rerollPunish[resume] = false;
         logLine(g, `额外重掷阶段结束，${pname(resume)} 继续尘起阶段`);
+        // 026 哀歌·陷阵：额外重掷阶段结束同样构成「你的重掷阶段结束」→ 与普通路径同一口径
+        queueXianzhenOnRerollEnd(g, reroller);
         // 017 帷幕：该额外重掷阶段结束时同样触发（FAQ 17.1.2）；不再触发 013 以免循环
         queueRerollEndTriggers(g, reroller, { includeLeibao: false });
         pumpPending(g);
@@ -157,19 +174,8 @@ export function advancePhase(g: GameState): void {
       // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 此处（其尘起阶段开始）清除
       // （注意：重掷阶段在本阶段**之前**，所以此时清除不会漏掉本轮重掷的惩罚）
       g.rerollPunish[g.activePlayer] = false;
-      // 026 哀歌·陷阵：**持有者自己的**重掷阶段结束时，由生命最少的一方弃置持有者 1 颗能力骰
-      // （FAQ 26.1.1：生命并列 → 当前回合玩家选择；无能力骰可弃置时该技能不结算，避免「另外两种类型」无从确定）
-      if (hasActiveSkill(g.players[g.activePlayer], 'aige.xianzhen')) {
-        const owner = g.activePlayer;
-        const own = g.players[owner];
-        if (KINDS_ORDER.some((k) => own.areas[k].length > 0)) {
-          const aLife = g.players.A.life;
-          const bLife = g.players.B.life;
-          const chooser: PlayerId = aLife < bLife ? 'A' : bLife < aLife ? 'B' : g.activePlayer;
-          queuePending(g, { kind: 'xianzhenPick', player: chooser, owner });
-          logLine(g, `「陷阵」：由生命最少的一方（${pname(chooser)}）选择弃置 ${pname(owner)} 的 1 颗能力骰`);
-        }
-      }
+      // 026 哀歌·陷阵：**重掷者自己的**重掷阶段结束时（与额外重掷路径共用同一实现）
+      queueXianzhenOnRerollEnd(g, g.activePlayer);
       // 对方（非当前玩家）的重掷阶段结束时触发：013 雷暴·持续 / 017 帷幕
       queueRerollEndTriggers(g, g.activePlayer);
       pumpPending(g);

@@ -625,3 +625,23 @@ describe('026 威压：触发来源与「不算使用」的边界', () => {
     expect(g2.pending).toBeNull();
   });
 });
+describe('026 陷阵 × 013 雷暴（额外重掷阶段，待办 §G 修复回归）', () => {
+  it('013 插入的额外重掷阶段结束时，同样触发陷阵（并列 → 由重掷者本人选择）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['013', '026', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    art(g, 'A', '013').activeMarkerSide = 'right'; // 雷暴·持续（对方重掷阶段结束时插入额外重掷阶段）
+    art(g, 'A', '026').activeMarkerSide = 'left'; // 陷阵·持续
+    g.phase = 'reroll';
+    g.activePlayer = 'A';
+    g.extraReroll = { player: 'A', resume: 'B' }; // 额外重掷阶段归属 A
+    g.players.A.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
+    g.players.A.life = 40;
+    g.players.B.life = 40; // 生命并列 → chooser = 重掷者本人
+
+    applyAction(g, { t: 'advance' }); // 结束额外重掷阶段
+
+    expect(g.pending?.kind).toBe('xianzhenPick');
+    expect(g.pending && g.pending.kind === 'xianzhenPick' ? g.pending.owner : null).toBe('A');
+    expect(g.pending && g.pending.kind === 'xianzhenPick' ? g.pending.player : null).toBe('A');
+  });
+});
