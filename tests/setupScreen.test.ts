@@ -39,11 +39,11 @@ describe('renderSetup', () => {
     expect(root.classList.contains('setup-page')).toBe(true);
   });
 
-  it('选将矩阵：两列布局，每个英雄恰好出现一次（不重不漏）', () => {
+  it('选将矩阵：单列对齐，每个英雄恰好出现一次（不重不漏）', () => {
     renderSetup(root, () => {});
-    // 6 行 = 表头 + 5 行（9 个英雄，每行两个）
-    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(6);
-    const labels = Array.from(root.querySelectorAll('.hero-group .setup-label'))
+    // 10 行 = 表头 + 9 行（8 个英雄 + 随机）
+    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(10);
+    const labels = Array.from(root.querySelectorAll('.hero-matrix-row .setup-label'))
       .map((n) => n.textContent)
       .filter((t) => t !== '');
     expect(labels).toEqual([

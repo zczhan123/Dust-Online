@@ -535,13 +535,13 @@ button.pay-die {
   flex-direction: column;
   align-items: center;
   padding: 12px;
-  background: #ece7dc url('/cover.jpg') center 86% / cover no-repeat fixed;
+  background: #ece7dc url('/cover.jpg') center bottom / cover no-repeat fixed;
 }
 .setup {
   width: 100%;
   max-width: 640px;
   margin: 0;
-  padding: 16px 20px;
+  padding: 24px 28px;
   /* 半透明卡片：让封面透出来（其余面板仍用不透明的 --card-bg） */
   background: rgba(255, 253, 248, 0.62);
   backdrop-filter: blur(2px);
@@ -549,10 +549,10 @@ button.pay-die {
   border-radius: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
 }
-/* 极矮窗口：进一步压缩（宁可更紧凑，也不出现滚动条） */
-@media (max-height: 560px) {
+/* 窗口不够高时自动轻微压缩（宁可更紧凑，也不出现任何滚动条） */
+@media (max-height: 680px) {
   #app.setup-page { padding: 6px; }
   .setup { padding: 10px 16px; gap: 6px; }
   .setup-title { font-size: 18px; }
@@ -620,24 +620,17 @@ button.pay-die {
   border-color: var(--line);
 }
 
-/* 选将矩阵：每行两个英雄；每个英雄一组「英雄名 + 玩家A + 玩家B」 */
+/* 选将矩阵：单表对齐 玩家A/玩家B 两列（一行一个英雄） */
 .hero-matrix {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .hero-matrix-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 18px;
+  grid-template-columns: 1fr 96px 96px;
   align-items: center;
-}
-.hero-group {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
+  gap: 8px;
 }
 .hero-matrix-head {
   font-size: 13px;
