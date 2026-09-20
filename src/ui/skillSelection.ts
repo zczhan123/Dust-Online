@@ -239,12 +239,12 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     steps: ({ state, player, chosenDice }) => {
       const first = chosenDice[0]?.[0];
       const steps: SelectStep[] = [
-        { kind: 'dice', label: '选择要降低点数的能力骰（恰好 1 颗，点数≥2）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1, filter: (d) => d.value >= 2 },
+        { kind: 'dice', label: '选择要点数下降的能力骰（恰好 1 颗，点数≥2）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1, filter: (d) => d.value >= 2 },
       ];
       if (first) {
         const die = KINDS.flatMap((k) => state.players[player].areas[k]).find((d) => d.id === first);
         const max = Math.max(1, (die?.value ?? 2) - 1);
-        steps.push({ kind: 'number', label: `选择 X（1 ~ ${max}，降完不低于 1 点）`, min: 1, max });
+        steps.push({ kind: 'number', label: `选择下降点数 X（1 ~ ${max}，最低降为 1）`, min: 1, max });
       }
       return steps;
     },

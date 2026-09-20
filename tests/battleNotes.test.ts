@@ -209,3 +209,28 @@ describe('战斗提示 battleNotes（主要阶段、只读状态）', () => {
     ]);
   });
 });
+
+describe('显示时机（用户反馈：被问"是否抵挡"时不该显示自己"下次攻击"的提示）', () => {
+  const mk22 = () => {
+    const g = mk(['022', '023', '024']);
+    arm(g, 'A', '022', 'right');
+    art(g, 'A', '022').count = 2;
+    return g;
+  };
+
+  it('非自己回合 / 正被要求抵挡 / 待决策属于别人 → 都不显示；自己回合或"使用攻击骰前"待决策 → 显示', () => {
+    const g = mk22();
+    expect(battleNotes(g, 'A').length).toBeGreaterThan(0); // 自己回合 → 显示
+    expect(battleNotes(g, 'B')).toEqual([]); // 不是他的回合 → 空
+
+    g.pendingAttack = { attacker: 'B', value: 3, unblockable: false, physical: true };
+    expect(battleNotes(g, 'A')).toEqual([]); // 被要求抵挡 → 空
+
+    g.pendingAttack = null;
+    g.pending = { kind: 'weiyaPick', player: 'B', value: 4, reason: 'attack' };
+    expect(battleNotes(g, 'A')).toEqual([]); // 待决策属于对方 → 空
+
+    g.pending = { kind: 'sijiChuxing', player: 'A', costSlots: [] };
+    expect(battleNotes(g, 'A').length).toBeGreaterThan(0); // 022 前置待决策属于自己 → 仍显示
+  });
+});

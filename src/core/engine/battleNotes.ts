@@ -21,6 +21,12 @@ const countOf = (g: GameState, who: PlayerId, k: DiceKind): number => g.players[
  */
 export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   if (g.phase !== 'main') return [];
+  // 只在「你自己的行动窗口」显示（真实事故：被问是否抵挡时，仍显示自己「下次攻击」的提示）：
+  //   ① 必须是你的回合；② 没有被要求抵挡；③ 若有待决策，必须属于你
+  //   （③ 允许 022/027 的「使用攻击骰前」待决策——那正是最该看到提示的时刻）
+  if (g.activePlayer !== player) return [];
+  if (g.pendingAttack) return [];
+  if (g.pending && g.pending.player !== player) return [];
   const p = g.players[player];
   const notes: BattleNote[] = [];
 

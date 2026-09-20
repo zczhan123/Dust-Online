@@ -501,6 +501,16 @@ button.pay-die {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* 选择器「选项」按钮（024 充能第一步 我方/对方、016 献祭 ①②、026 威压 我方/对方 …）
+   必须让"已选中"一眼可辨（真实事故 2026-09-20：option-btn--on 无样式 → 看不出选中，疑似卡死） */
+.option-btn--on {
+  background: #23405c;
+  border-color: #23405c;
+  color: #fff;
+  font-weight: 700;
+}
+.option-btn--on::before { content: '✓ '; }
+
 .number-btn {
   min-width: 34px;
   padding: 5px 8px;

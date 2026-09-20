@@ -3067,3 +3067,61 @@ describe('重掷阶段提示：可重掷次数（龙游万象 / 雷暴额外阶�
     expect(hint).toContain('「雷暴」插入的额外重掷阶段：仅 1 次');
   });
 });
+describe('文案与选中态修复（用户反馈）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  it('畏惧：提示写明"随后比较双方消耗的能力骰点数大小"', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['022', '023', '024'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'weijuPay', player: 'A', initiator: 'B', initiatorValue: 2 };
+    renderGame(state, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('比较双方消耗的能力骰点数大小');
+    expect(hint).toContain('1 视为大于 6');
+  });
+
+  it('确认条文案按技能区分：共振=「重掷 1 颗骰」（不再串成影袭的「降低」）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.players.A.artifacts.find((a) => a.id === '023')!.activeMarkerSide = 'right'; // 共振（启动·右）
+    state.players.A.areas.meditation = [{ id: 'm1', value: 2, kind: 'meditation' }];
+    const { ui } = mount(state, root);
+    // 点操作栏的「共振」按钮 → 打开选择器 → 选 1 颗骰 → 确认
+    const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
+      (b.textContent ?? '').includes('共振'),
+    )!;
+    open.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="m1"]')!.click();
+    const ok = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
+      (b) => b.textContent === '确认',
+    )!;
+    ok.click();
+    const label = ui.pendingConfirm!.label;
+    expect(label).toContain('重掷 1 颗骰');
+    expect(label).not.toContain('降低');
+  });
+
+  it('选择器「选项」按钮：未选中无标记，点选后恰好一个带 option-btn--on', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.players.A.artifacts.find((a) => a.id === '026')!.activeMarkerSide = 'right'; // 威压
+    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'skill' };
+    state.players.B.areas.attack = [{ id: 'bd', value: 2, kind: 'attack' }];
+    const { ui } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="weiyaOpen"]')!.click();
+    expect(ui.selection).not.toBeNull();
+    const opts = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn'));
+    expect(opts.length).toBe(2);
+    expect(opts.filter((b) => b.classList.contains('option-btn--on')).length).toBe(0);
+    opts[0].click();
+    const after = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn'));
+    const on = after.filter((b) => b.classList.contains('option-btn--on'));
+    expect(on.length).toBe(1);
+    expect(on[0].dataset.option).toBe('self');
+  });
+});

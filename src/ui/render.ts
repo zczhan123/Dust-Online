@@ -333,6 +333,34 @@ function skillName(state: GameState, a: SkillAction): string {
   return looksLikeInternalKey(resolved) ? (art?.name ?? '技能') : resolved;
 }
 
+/**
+ * `params.dieId` 的文案**按技能 key 登记**（不得用参数形状猜语义！）
+ * 真实事故 2026-09-20：共振 / 畏惧 / 024 充能 都带 `dieId` 参数，被统一套成了影袭的「降低点数」。
+ */
+function dieIdLabel(
+  key: string | undefined,
+  params: Record<string, unknown>,
+  at: string,
+): string {
+  switch (key) {
+    case 'yingle.yingxi':
+      // 005 影掠·影袭（卡面用「下降」）
+      return `使 1 颗骰点数下降 ${typeof params.x === 'number' ? params.x : 'X'} 点${at}`;
+    case 'shexie.weiju':
+      // 023 蛇蝎·畏惧
+      return `消耗 1 颗能力骰${at}——随后由对方消耗并比较点数`;
+    case 'shexie.gongzhen':
+      // 023 蛇蝎·共振
+      return `重掷 1 颗骰${at}（按新点数落入对应区域）`;
+    case 'kuangwu.charge':
+      // 024 狂舞·凶弹业舞（充能）
+      return `将 1 颗骰${at}移到该玩家另一区域（保留点数）`;
+    default:
+      // 兜底：不猜语义（宁可中性）
+      return `指定 1 颗骰${at}`;
+  }
+}
+
 function skillActionLabel(ctx: Ctx, a: SkillAction): string {
   const name = skillName(ctx.state, a);
   const params = a.params ?? {};
@@ -372,8 +400,10 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
   }
   if (typeof params.dieId === 'string') {
     const v = dieValue(ctx.state, params.dieId);
-    const x = typeof params.x === 'number' ? `，X=${params.x}` : '';
-    parts.push(v !== undefined ? `降低 1 颗骰（${v}点）${x}` : '降低骰子点数');
+    const at = v !== undefined ? `（${v}点）` : '';
+    const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+    const sk = art?.skills.find((s) => s.side === a.side);
+    parts.push(dieIdLabel(sk?.key, params, at));
   }
   if (Array.isArray(params.opponentDefenseDieIds) && params.opponentDefenseDieIds.length) {
     parts.push(`弃置对方 ${params.opponentDefenseDieIds.length} 颗防御骰`);
@@ -885,7 +915,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: '畏惧', color: pd.initiator },
       { text: '：' },
       { text: `玩家${pd.player}`, color: pd.player },
-      { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点；1 视为大于 6）；请选择` },
+      { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点）——随后比较双方消耗的能力骰点数大小；1 视为大于 6；请选择` },
     ];
   }
   if (pd && pd.kind === 'gongzhenPick') {
