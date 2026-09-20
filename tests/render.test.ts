@@ -11,6 +11,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   pendingConfirm: null,
   convertPick: null,
   fengmangPick: null,
+  hanguangPick: null,
   dustFlow: null,
   prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, zoomMode: 'off', zoomPercent: 90, ...prefs },
   settingsOpen: false,
@@ -2631,7 +2632,7 @@ describe('renderGame (interaction)', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'xianzhenResolve', dieId: 'xa' });
   });
 
-  it('027 寒光·必杀：神器上的骰以中性骰片显示（卡面 + 面板），move 经确认条派发', () => {
+  it('027 寒光·必杀：卡图下方显示「置于「寒光」上的骰子」（玩家色）+ 纯点数骰片；两步式走 ①移入', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
     const card = state.players.A.artifacts.find((a) => a.id === '027')!;
@@ -2645,29 +2646,41 @@ describe('renderGame (interaction)', () => {
     state.players.B.areas.meditation = [];
 
     const { ui, onAction } = mount(state, root);
-    const cardHeld = root.querySelector<HTMLElement>('.player--self .card[data-artifact="027"] .card-held')!;
-    expect(cardHeld).not.toBeNull();
-    const heldChips = Array.from(cardHeld.querySelectorAll<HTMLElement>('.pay-die--held')).map((c) => c.textContent);
-    expect(heldChips).toEqual(['◆3', '◆5']);
-    for (const c of heldChips) expect(c).not.toMatch(/[攻防冥]/);
+    const selfCard = root.querySelector<HTMLElement>('.player--self .card[data-artifact="027"]')!;
+    // 位置：紧跟卡图（.card-art）之后
+    const art = selfCard.querySelector('.card-art')!;
+    expect(art.nextElementSibling?.classList.contains('card-held')).toBe(true);
+    // 标签：精确文案 + 玩家色类
+    const lab = selfCard.querySelector<HTMLElement>('.card-held .chip-label')!;
+    expect(lab.textContent).toBe('置于「寒光」上的骰子');
+    expect(lab.classList.contains('player-A')).toBe(true);
+    // 骰片：纯点数（无 ◆、无攻/防/冥前缀）
+    const heldChips = Array.from(selfCard.querySelectorAll<HTMLElement>('.card-held .pay-die--held')).map((c) => c.textContent);
+    expect(heldChips).toEqual(['3', '5']);
     expect(root.querySelector('.hint-phase')!.textContent).toContain('凛冽之音');
 
-    // 面板：h3 有 move + discard(bd3)，h5 只有 move（对方无 5 点）
-    const move3 = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMove"][data-id="h3"]')!;
-    expect(move3).not.toBeNull();
-    expect(root.querySelector('.selector [data-act="hanguangMove"][data-id="h5"]')).not.toBeNull();
-    const disc = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDiscard"][data-id="bd3"]')!;
-    expect(disc).not.toBeNull();
-    expect(disc.textContent).toBe('防3');
-    expect(root.querySelector('.selector [data-act="hanguangDiscard"][data-held="h5"]')).toBeNull();
+    // 第一步：模式按钮（对方有 3 点 → ②可选）
+    const moveMode = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-move"]')!;
+    const discMode = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-discard"]')!;
+    expect(moveMode).not.toBeNull();
+    expect(discMode.disabled).toBe(false);
+    // 未选模式：没有骰片可点
+    expect(root.querySelector('.selector [data-act="hanguangDie"]')).toBeNull();
 
-    move3.click();
+    // 选 ① → 出现骰片（纯点数）→ 选 h3 → 确认
+    moveMode.click();
+    const dieChips = Array.from(root.querySelectorAll<HTMLElement>('.selector [data-act="hanguangDie"]')).map((c) => c.textContent);
+    expect(dieChips).toEqual(['3', '5']);
+    root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDie"][data-id="h3"]')!.click();
+    const commit = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangCommit"]')!;
+    expect(commit).not.toBeNull();
+    commit.click();
     expect(ui.pendingConfirm!.action).toEqual({ t: 'hanguangPick', pick: 'move', dieId: 'h3' });
     root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
     expect(onAction).toHaveBeenCalledWith({ t: 'hanguangPick', pick: 'move', dieId: 'h3' });
   });
 
-  it('027 寒光·必杀：discard 用目标骰片呈现同点数，点击经确认条派发', () => {
+  it('027 寒光·必杀：② 路径 —— 选模式 → 选骰 → 选对方同点数骰 → 派发 discard', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
     const card = state.players.A.artifacts.find((a) => a.id === '027')!;
@@ -2678,12 +2691,63 @@ describe('renderGame (interaction)', () => {
     state.players.B.areas.meditation = [];
 
     const { ui, onAction } = mount(state, root);
-    const disc = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDiscard"][data-id="bd3"]')!;
-    expect(disc).not.toBeNull();
-    disc.click();
-    expect(ui.pendingConfirm!.action).toEqual({ t: 'hanguangPick', pick: 'discard', dieId: 'h3', targetDieId: 'bd3' });
+    root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-discard"]')!.click();
+    root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDie"][data-id="h3"]')!.click();
+    const target = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDiscard"][data-id="bd3"]')!;
+    expect(target.textContent).toBe('防3');
+    target.click();
+    expect(ui.pendingConfirm!.action).toEqual({
+      t: 'hanguangPick',
+      pick: 'discard',
+      dieId: 'h3',
+      targetDieId: 'bd3',
+    });
     root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
-    expect(onAction).toHaveBeenCalledWith({ t: 'hanguangPick', pick: 'discard', dieId: 'h3', targetDieId: 'bd3' });
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'hanguangPick',
+      pick: 'discard',
+      dieId: 'h3',
+      targetDieId: 'bd3',
+    });
+  });
+
+  it('027 寒光·必杀：对方无同点数骰时 ② 置灰；卡面骰片可点且与面板共享选中状态（双入口）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '027')!;
+    card.heldDice = [{ id: 'h3', value: 3 }];
+    state.pending = { kind: 'hanguangPick', player: 'A', costSlots: [] };
+    state.players.B.areas.attack = [];
+    state.players.B.areas.defense = [{ id: 'bd5', value: 5, kind: 'defense' }]; // 与 3 点不同 → ②不可用
+    state.players.B.areas.meditation = [];
+
+    const { ui } = mount(state, root);
+    const discMode = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-discard"]')!;
+    expect(discMode.disabled).toBe(true);
+    expect(discMode.title).toContain('对方没有');
+
+    // 卡面骰片是可点的按钮（第二个入口）
+    const cardChip = root.querySelector<HTMLButtonElement>(
+      '.player--self .card[data-artifact="027"] .card-held .pay-die[data-id="h3"]',
+    )!;
+    expect(cardChip.tagName).toBe('BUTTON');
+    cardChip.click();
+    expect(ui.hanguangPick).toEqual({ mode: null, dieId: 'h3' }); // 未选模式也记住选中
+
+    // 选 ① 后面板骰片应是「已选中」（共享同一状态）
+    root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-move"]')!.click();
+    const panelChip = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangDie"][data-id="h3"]')!;
+    expect(panelChip.classList.contains('selected')).toBe(true);
+    // 两个入口各一处，不做重复渲染
+    expect(root.querySelectorAll('.pay-die--held[data-id="h3"]').length).toBe(2);
+  });
+
+  it('027 寒光·必杀：神器上没有骰子时不渲染该行（回合结束清空后即无）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.players.A.artifacts.find((a) => a.id === '027')!.heldDice = [];
+    mount(state, root);
+    expect(root.querySelector('.player--self .card[data-artifact="027"] .card-held')).toBeNull();
   });
 
   it('025 奇袭：可视为攻击骰的能力骰在攻击行标注「→ 攻击」且样式区分（不重复）', () => {

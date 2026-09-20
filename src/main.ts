@@ -15,6 +15,7 @@ const ui: UiState = {
   pendingConfirm: null,
   convertPick: null,
   fengmangPick: null,
+  hanguangPick: null,
   dustFlow: null,
   prefs: loadPrefs(),
   settingsOpen: false,
@@ -41,6 +42,7 @@ const render = () => {
         ui.pendingConfirm = null;
         ui.convertPick = null;
         ui.fengmangPick = null;
+        ui.hanguangPick = null;
         ui.dustFlow = null;
         ui.settingsOpen = false;
         ui.detail = null;
@@ -68,6 +70,7 @@ const showSetup = () => {
     ui.pendingConfirm = null;
     ui.convertPick = null;
     ui.fengmangPick = null;
+    ui.hanguangPick = null;
     ui.dustFlow = null;
     ui.settingsOpen = false;
     ui.detail = null;

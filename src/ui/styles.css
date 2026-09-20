@@ -409,6 +409,9 @@ body {
   font-size: 13px;
   color: #4b5563;
 }
+/* 「置于『寒光』上的骰子」等标签：用玩家色（与 .sub-delta.player-A/B 同一套路） */
+.chip-label.player-A { color: #2563eb; }
+.chip-label.player-B { color: #dc2626; }
 button.pay-die {
   border: 0;
   font: inherit;

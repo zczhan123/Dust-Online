@@ -87,6 +87,14 @@ export interface UiState {
     attackDieId?: string;
     meditationDieId?: string;
   };
+  /**
+   * 027 寒光·必杀（凛冽之音）的专用面板状态：两步式 —— 先选模式（①作为攻击骰使用 / ②移除并弃置对方同点数骰），
+   * 再选神器上的骰（面板内或**卡面骰片**双入口），② 最后选对方的目标骰。
+   */
+  hanguangPick: null | {
+    mode: 'move' | 'discard' | null;
+    dieId: string | null;
+  };
   /** 界面偏好（与对局状态解耦；由宿主负责持久化） */
   prefs: Prefs;
   /** 设置面板是否打开 */
@@ -570,6 +578,36 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   art.appendChild(artImg);
   attachDetailTrigger(art, ctx, a.id);
   card.appendChild(art);
+  // 027 寒光·必杀：置于神器上的骰（不在任何区域，故不带攻/防/冥前缀，用中性骰片）
+  // 位置：**卡图正下方**（技能区之前）；标签用玩家色；骰片只显示点数
+  if (a.heldDice && a.heldDice.length > 0) {
+    const held = el('div', 'pay-dice card-held');
+    const lab = el('span', `chip-label player-${player.id}`);
+    lab.textContent = `置于「${a.name}」上的骰子`;
+    held.appendChild(lab);
+    const pendingPick = ctx.state.pending?.kind === 'hanguangPick' ? ctx.state.pending : null;
+    const clickable = pendingPick !== null && pendingPick.player === player.id;
+    for (const h of a.heldDice) {
+      const chip = document.createElement(clickable ? 'button' : 'span');
+      chip.className = 'pay-die pay-die--held';
+      chip.dataset.id = h.id;
+      chip.dataset.value = String(h.value);
+      chip.textContent = String(h.value);
+      chip.title = `置于「${a.name}」上的骰（点数 ${h.value}）`;
+      if (clickable) {
+        // 双入口：卡面骰片与面板骰片共享同一选中状态（ui.hanguangPick）
+        (chip as HTMLButtonElement).type = 'button';
+        chip.classList.add('clickable');
+        chip.addEventListener('click', () => {
+          const st = ctx.hooks.ui.hanguangPick;
+          ctx.hooks.ui.hanguangPick = { mode: st?.mode ?? null, dieId: h.id };
+          ctx.hooks.requestRender();
+        });
+      }
+      held.appendChild(chip);
+    }
+    card.appendChild(held);
+  }
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
@@ -650,22 +688,6 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
       skills.appendChild(box);
     }
     card.appendChild(skills);
-  }
-
-  // 027 寒光·必杀：置于神器上的骰（不在任何区域，故不带攻/防/冥前缀，用中性骰片）
-  if (a.heldDice && a.heldDice.length > 0) {
-    const held = el('div', 'pay-dice card-held');
-    const lab = el('span', 'chip-label');
-    lab.textContent = '神器上的骰';
-    held.appendChild(lab);
-    for (const h of a.heldDice) {
-      const chip = el('span', 'pay-die pay-die--held');
-      chip.dataset.id = h.id;
-      chip.dataset.value = String(h.value);
-      chip.textContent = `◆${h.value}`;
-      held.appendChild(chip);
-    }
-    card.appendChild(held);
   }
 
   return card;
@@ -1376,63 +1398,130 @@ function actionChipRow(
 
 type HanguangAction = Extract<Action, { t: 'hanguangPick' }>;
 
-/** 027 寒光·凛冽之音（必杀）：神器上的骰不在任何区域 → 专用面板，逐颗给出合法动作 */
+/**
+ * 027 寒光·凛冽之音（必杀）：神器上的骰不在任何区域 → 专用面板。
+ * **两步式**：①先选模式（作为攻击骰使用 / 移除并弃置对方同点数骰）→ ②选骰（面板内 + 卡面骰片双入口）
+ * → ②再选对方目标骰。全部动作由 `getLegalActions` 提供，派发走确认条（`propose`）；强制、无「不发动」。
+ */
 function hanguangPanel(ctx: Ctx): HTMLElement {
   const pd = ctx.state.pending;
   const panel = el('div', 'selector');
   const head = el('div', 'selector-head');
   const title = el('div', 'selector-title');
-  title.textContent = '「凛冽之音」：选择神器上的 1 颗骰';
+  title.textContent = '「凛冽之音」：你正要使用攻击骰 — 请先决定';
   head.appendChild(title);
   const hint = el('div', 'selector-hint');
-  hint.textContent = '移入其对应区域；或移除该骰，并弃置对方 1 颗与它点数相同的能力骰（无则只可移入）。';
+  hint.textContent =
+    '①把神器上的 1 颗骰作为攻击骰使用（移入其对应区域）；②移除神器上的 1 颗骰，并弃置对方 1 颗与它点数相同的能力骰。这些骰会在你的回合结束时移除。';
   head.appendChild(hint);
   panel.appendChild(head);
   if (!pd || pd.kind !== 'hanguangPick') return panel;
 
   const card = artifactWithSkill(ctx.state.players[pd.player], 'hanguang.ultimate');
+  const held = card?.heldDice ?? [];
   const acts = ctx.legal.filter((x): x is HanguangAction => x.t === 'hanguangPick');
+  const st = ctx.hooks.ui.hanguangPick ?? { mode: null, dieId: null };
   const oppId: PlayerId = oppOf(pd.player);
+  const valueOf = (id: string | null): number | null =>
+    id ? (held.find((h) => h.id === id)?.value ?? null) : null;
+
+  // ── 第一步：模式 ──────────────────────────────────────────
+  const modeRow = el('div', 'pay-dice');
+  const modeBtn = (mode: 'move' | 'discard', label: string, disabled: boolean, why?: string): void => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-skill';
+    b.dataset.act = `hanguangMode-${mode}`;
+    b.textContent = label;
+    if (disabled) {
+      b.disabled = true;
+      if (why) b.title = why;
+    }
+    if (st.mode === mode) b.classList.add('selected');
+    b.addEventListener('click', () => {
+      ctx.hooks.ui.hanguangPick = { mode, dieId: st.dieId };
+      ctx.hooks.requestRender();
+    });
+    modeRow.appendChild(b);
+  };
+  const hasDiscardTarget = acts.some((x) => x.pick === 'discard');
+  modeBtn('move', '① 作为攻击骰使用（移入对应区域）', false);
+  modeBtn(
+    'discard',
+    '② 移除该骰并弃置对方同点数能力骰',
+    !hasDiscardTarget,
+    hasDiscardTarget ? undefined : '对方没有与神器上任何骰点数相同的能力骰',
+  );
+  panel.appendChild(modeRow);
+
+  if (!st.mode) {
+    const tip = el('div', 'selector-hint');
+    tip.textContent = `请先选择 ① 或 ②（也可直接点击卡面上「置于「${card?.name ?? ''}」上的骰子」里的骰片）`;
+    panel.appendChild(tip);
+    return panel;
+  }
+
+  // ── 第二步：选骰（面板内）────────────────────────────────
   const diceBox = el('div', 'pay-dice');
-  for (const h of card?.heldDice ?? []) {
-    const chip = el('span', 'pay-die pay-die--held');
+  const diceLab = el('span', 'chip-label');
+  diceLab.textContent = '选择神器上的 1 颗骰：';
+  diceBox.appendChild(diceLab);
+  for (const h of held) {
+    const usable = acts.some((x) => x.dieId === h.id && x.pick === st.mode);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pay-die pay-die--held';
+    chip.dataset.act = 'hanguangDie';
     chip.dataset.id = h.id;
-    chip.dataset.value = String(h.value);
-    chip.textContent = `◆${h.value}`;
+    chip.textContent = String(h.value);
+    chip.title = `置于「${card?.name ?? ''}」上的骰（点数 ${h.value}）`;
+    if (!usable) chip.disabled = true;
+    if (st.dieId === h.id) chip.classList.add('selected');
+    chip.addEventListener('click', () => {
+      ctx.hooks.ui.hanguangPick = { mode: st.mode, dieId: h.id };
+      ctx.hooks.requestRender();
+    });
     diceBox.appendChild(chip);
-    const move = acts.find((x) => x.dieId === h.id && x.pick === 'move');
+  }
+  panel.appendChild(diceBox);
+
+  // ── 第三步：② 选对方目标骰 / ① 确认 ──────────────────────
+  const pickedValue = valueOf(st.dieId);
+  if (st.mode === 'discard' && st.dieId) {
+    const targets = acts.filter((x) => x.dieId === st.dieId && x.pick === 'discard');
+    const tRow = el('div', 'pay-dice');
+    const tl = el('span', 'chip-label');
+    tl.textContent = '选择要弃置的对方能力骰：';
+    tRow.appendChild(tl);
+    for (const t of targets) {
+      const found = findDie(ctx.state, t.targetDieId ?? '');
+      const tc = document.createElement('button');
+      tc.type = 'button';
+      tc.className = `pay-die clickable die-${oppId}`;
+      tc.dataset.act = 'hanguangDiscard';
+      tc.dataset.id = t.targetDieId ?? '';
+      tc.dataset.held = t.dieId;
+      tc.textContent = found ? `${KIND_SHORT[found.kind]}${found.value}` : '?';
+      tc.addEventListener('click', () =>
+        ctx.hooks.propose(t, `「凛冽之音」：移除 ${pickedValue ?? '?'} 点骰，并弃置对方同点数能力骰`),
+      );
+      tRow.appendChild(tc);
+    }
+    panel.appendChild(tRow);
+  } else if (st.mode === 'move' && st.dieId) {
+    const move = acts.find((x) => x.dieId === st.dieId && x.pick === 'move');
     if (move) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn btn-confirm';
-      b.dataset.act = 'hanguangMove';
-      b.dataset.id = h.id;
-      b.textContent = '移入对应区域';
-      b.addEventListener('click', () => ctx.hooks.propose(move, `「凛冽之音」：将 ◆${h.value} 移入对应区域`));
-      diceBox.appendChild(b);
-    }
-    const discards = acts.filter((x) => x.dieId === h.id && x.pick === 'discard');
-    if (discards.length) {
-      const lab = el('span', 'chip-label');
-      lab.textContent = '弃置同点数：';
-      diceBox.appendChild(lab);
-      for (const dd of discards) {
-        const target = findDie(ctx.state, dd.targetDieId ?? '');
-        const tc = document.createElement('button');
-        tc.type = 'button';
-        tc.className = `pay-die clickable die-${oppId}`;
-        tc.dataset.act = 'hanguangDiscard';
-        tc.dataset.id = dd.targetDieId ?? '';
-        tc.dataset.held = h.id;
-        tc.textContent = target ? `${KIND_SHORT[target.kind]}${target.value}` : '?';
-        tc.addEventListener('click', () =>
-          ctx.hooks.propose(dd, `「凛冽之音」：移除 ◆${h.value} 并弃置对方同点数骰`),
-        );
-        diceBox.appendChild(tc);
-      }
+      b.dataset.act = 'hanguangCommit';
+      b.textContent = '确认：移入对应区域';
+      b.addEventListener('click', () =>
+        ctx.hooks.propose(move, `「凛冽之音」：将 ${pickedValue ?? '?'} 点骰移入对应区域`),
+      );
+      panel.appendChild(b);
     }
   }
-  panel.appendChild(diceBox);
   return panel;
 }
 
