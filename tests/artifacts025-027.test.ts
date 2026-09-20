@@ -369,29 +369,18 @@ describe('027 寒光（凛冽之音）', () => {
     expect(g.players.A.life).toBe(aLife);
   });
 
-  it('FAQ 27.1.2 时限：持有者自己的下个尘起阶段开始后，重掷不再受到伤害', () => {
+  it('时限（用户场景修正）：惩罚持续到持有者「尘起阶段开始」——其下个回合的**重掷阶段**仍会受伤', () => {
     const g = lifengGame();
     toReroll(g, 'A');
     applyAction(g, { t: 'advance' });
     g.players.A.areas.meditation.push({ id: 'medA', value: 3, kind: 'meditation' });
     applyAction(g, { t: 'dustRise', artifactId: '027', costSlots: [{ dieIds: ['medA'] }] });
     expect(g.rerollPunish.A).toBe(true);
-    applyAction(g, { t: 'advance' });
+    applyAction(g, { t: 'advance' }); // → A 的主要阶段
 
-    toReroll(g, 'B');
-    g.players.B.areas.attack = [
-      { id: 'br1', value: 1, kind: 'attack' },
-      { id: 'br2', value: 2, kind: 'attack' },
-    ];
-    g.players.B.areas.defense = [];
-    g.players.B.areas.meditation = [];
-    const bLife = g.players.B.life;
-    applyAction(g, { t: 'reroll', dieIds: ['br1', 'br2'] });
-    expect(g.players.B.life).toBe(bLife - 2);
-
-    // 进入 A 的第 3 个回合：其尘起阶段开始时清除惩罚
+    // A 的**下个回合**：这是重掷阶段（在尘起阶段**之前**）→ 惩罚仍在，A 重掷同样受伤
     toReroll(g, 'A');
-    expect(g.rerollPunish.A).toBe(false);
+    expect(g.rerollPunish.A).toBe(true);
     g.players.A.areas.attack = [
       { id: 'ar1', value: 1, kind: 'attack' },
       { id: 'ar2', value: 2, kind: 'attack' },
@@ -400,7 +389,12 @@ describe('027 寒光（凛冽之音）', () => {
     g.players.A.areas.meditation = [];
     const aLife = g.players.A.life;
     applyAction(g, { t: 'reroll', dieIds: ['ar1', 'ar2'] });
-    expect(g.players.A.life).toBe(aLife);
+    expect(g.players.A.life).toBe(aLife - 2);
+
+    // 进入 A 的尘起阶段 → 此刻才清除
+    applyAction(g, { t: 'advance' });
+    expect(g.phase).toBe('dustRise');
+    expect(g.rerollPunish.A).toBe(false);
   });
 
   it('FAQ 27.1.3：必杀取 1–6 各 1 颗；使用攻击骰前弹 hanguangPick 且可 move 落区', () => {
@@ -562,5 +556,29 @@ describe('027 寒光·必杀：真实路径（充能 → 按钮 → 发动）', 
     applyAction(g, { t: 'skill', artifactId: '027', side: 'only' });
     expect(card.heldDice?.map((d) => d.value)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(g.ultimatesUsed).toContain('hanguang.ultimate');
+  });
+});
+
+describe('027 凛冽之音 × 其它技能（联动）', () => {
+  it('023「共振」由技能产生的重掷同样触发惩罚（谁被重掷谁受伤）', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['025', '026', '027'],
+      heroB: ['022', '023', '024'],
+    });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.rerollPunish.A = true; // 等价于 A 已充能 027（本用例只验证"技能产生的重掷"这条路径）
+    const b023 = g.players.B.artifacts.find((a) => a.id === '023')!;
+    b023.activeMarkerSide = 'right'; // 共振（启动·右）
+    g.players.B.areas.meditation = [{ id: 'bm', value: 2, kind: 'meditation' }];
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [];
+    const life = g.players.B.life;
+    applyAction(g, { t: 'skill', artifactId: '023', side: 'right', params: { dieId: 'bm' } });
+    expect(g.players.B.life).toBe(life - 1); // 重掷 1 颗 → 1 点真实伤害
+    expect(g.pending?.kind).toBe('gongzhenPick');
   });
 });

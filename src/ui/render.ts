@@ -10,6 +10,7 @@ import type {
   SkillDef,
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
+import { HEROES } from '../core/content/artifacts';
 import { getLegalActions } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill } from '../core/engine/derive';
 import { hasActiveSkill } from '../core/engine/skill-state';
@@ -789,6 +790,15 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
 }
 
 /** 玩家面板：只保留骰区与神器卡（不再显示「玩家A/B」头部——身份由生命值栏呈现） */
+/** 该玩家所用英雄名（面板标签用；找不到返回 null）。artifacts.ts 的名字用空格分隔 → 统一成界面的「·」 */
+function heroNameOf(player: PlayerState): string | null {
+  const key = player.artifacts.map((a) => a.id).join(',');
+  for (const h of Object.values(HEROES)) {
+    if (h.artifacts.join(',') === key) return h.name.replace(' ', '·');
+  }
+  return null;
+}
+
 function playerPanel(
   player: PlayerState,
   role: 'enemy' | 'self',
@@ -797,6 +807,19 @@ function playerPanel(
 ): HTMLElement {
   const panel = el('div', `player player--${role}`);
   panel.dataset.player = player.id;
+
+  // 面板归属标签：明确「这一排是谁的卡」（玩家色 + 英雄名），避免"轮到玩家X操作/这是谁的技能"误读
+  const tag = el('div', 'panel-tag');
+  const tagWho = el('span', `panel-tag-player player-${player.id}`);
+  tagWho.textContent = `玩家${player.id}`;
+  tag.appendChild(tagWho);
+  const heroName = heroNameOf(player);
+  if (heroName) {
+    const hn = el('span', 'panel-tag-hero');
+    hn.textContent = `（${heroName}）`;
+    tag.appendChild(hn);
+  }
+  panel.appendChild(tag);
 
   const cards = el('div', 'cards');
   // 镜像神器摆放：敌方面板按「列3、列2、列1」显示（左右互搏下随上下角色自动跟随）
@@ -822,6 +845,21 @@ interface HintPart {
 }
 
 function phaseHint(ctx: Ctx): HintPart[] {
+  const parts = phaseHintInner(ctx);
+  const { state } = ctx;
+  // 027 寒光·凛冽之音（充能）：惩罚生效期内**常驻**醒目提醒（任何玩家重掷都会使被重掷方受伤）
+  if ((state.rerollPunish.A || state.rerollPunish.B) && state.phase !== 'gameOver') {
+    const owner: PlayerId = state.rerollPunish.A ? 'A' : 'B';
+    return [
+      { text: '「凛冽之音」', color: owner },
+      { text: `（玩家${owner} 的「寒光」）：任何玩家重掷能力骰后，被重掷方受到等量真实伤害；` },
+      ...parts,
+    ];
+  }
+  return parts;
+}
+
+function phaseHintInner(ctx: Ctx): HintPart[] {
   const { state } = ctx;
   const pd = state.pending;
   if (pd && pd.kind === 'activationResolve') {
@@ -950,15 +988,17 @@ function phaseHint(ctx: Ctx): HintPart[] {
   if (pd && pd.kind === 'weiyaPick') {
     return [
       { text: '威压', color: pd.player },
-      { text: `：你使用了 1 个能力骰，可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择` },
+      {
+        text: `（玩家${pd.player} 的「哀歌」）：玩家${pd.player} 使用了 1 个能力骰，可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择`,
+      },
     ];
   }
   if (pd && pd.kind === 'xianzhenPick') {
     return [
       { text: '陷阵', color: pd.owner },
-      { text: '：' },
-      { text: `玩家${pd.owner}`, color: pd.owner },
-      { text: ' 的重掷阶段结束，由生命最少的一方弃置其 1 颗能力骰（随后其获得另外两类各 1 颗）；请选择' },
+      {
+        text: `（玩家${pd.owner} 的「哀歌」）：玩家${pd.owner} 的重掷阶段结束，由生命最少的一方（玩家${pd.player}）选择弃置 玩家${pd.owner} 的 1 颗能力骰；随后 玩家${pd.owner} 获得另外两类各 1 颗；请选择`,
+      },
     ];
   }
   if (pd && pd.kind === 'hengguan') {
@@ -1007,8 +1047,10 @@ function phaseHint(ctx: Ctx): HintPart[] {
 }
 
 function actorOf(state: GameState): PlayerId {
-  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
+  // 待决策**优先**：它才是当前必须做决定的人。
+  // （026 威压这类待决策会与「待抵挡」同时存在，且决策人可能是**攻击方**——旧的先判 pendingAttack 会把它算成防守方）
   if (state.pending) return state.pending.player;
+  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
   return state.activePlayer;
 }
 
@@ -1244,7 +1286,12 @@ function skillButton(ctx: Ctx, a: SkillAction): HTMLElement {
     : undefined;
   const key = def?.key;
   const name = skillName(state, a);
-  const label = def?.kind === 'activation' ? `结算「${name}」（激活·立即生效）` : `启动技能：${name}`;
+  const label =
+    def?.kind === 'activation'
+      ? `结算「${name}」（激活·立即生效）`
+      : def?.kind === 'ultimate'
+        ? `发动必杀：「${name}」`
+        : `启动技能：${name}`;
   if (key && SKILL_SELECTION[key]) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -1261,18 +1308,21 @@ function rerollButton(ctx: Ctx): HTMLButtonElement | null {
   const reroll = ctx.legal.find((x): x is Extract<Action, { t: 'reroll' }> => x.t === 'reroll');
   if (!reroll) return null;
   const count = ctx.hooks.ui.rerollSelected.size;
+  // 027 凛冽之音：惩罚生效期内，重掷按钮/确认条直接写明会掉多少血（避免"忽然被扣血"）
+  const punished = ctx.state.rerollPunish.A || ctx.state.rerollPunish.B;
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'btn btn-reroll';
   b.dataset.act = 'reroll';
-  b.textContent = `重掷选中(${count})`;
+  b.textContent = punished ? `重掷选中(${count})（将受 ${count} 点真实伤害）` : `重掷选中(${count})`;
+  if (punished) b.title = '「凛冽之音」生效中：重掷多少颗，被重掷方就受到多少点真实伤害';
   b.disabled = count === 0;
   b.addEventListener('click', () => {
     const n = ctx.hooks.ui.rerollSelected.size;
     if (n === 0) return;
     ctx.hooks.propose(
       { t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] },
-      `重掷 ${n} 颗`,
+      punished ? `重掷 ${n} 颗（「凛冽之音」：将受 ${n} 点真实伤害）` : `重掷 ${n} 颗`,
     );
   });
   return b;

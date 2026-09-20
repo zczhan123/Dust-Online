@@ -117,6 +117,12 @@
 16. **"不发动"必须是显式选项**（`accept:false`），且不发动也要写战报。
 17. 引擎动作必须能被 `getLegalActions` 完整枚举（含"不发动"）；UI 只渲染合法动作，不自定义规则。
 18. 新增/修改技能后，对照本清单自查，并在测试里覆盖：正常 / 边界 / **不发动**。
+19. **新卡必查清单（全局联动，逐条对照）**：
+    - ① **「真实之剑」(010) 的置换兼容性**：凡涉及"消耗 / 使用能力骰"的技能，**第一列神器除外**（与真实之剑同列、永不共存），都必须检查（详见上级目录《尘起时刻_置换交互规范_v1.0.md》第 25 行）。
+    - ② **「凛冽之音」(027) 的重掷联动**：凡**产生"重掷"**的技能/效果，**必须走统一入口 `doReroll`**（`phases.ts`；否则 027 的惩罚不生效），并传入"被重掷方 = 骰子所在玩家"；**必须补一条与 027 的联动测试**。
+    - ③ **待决策的"决策人"必须登记**（见下条），并在 UI 提示里写明"**谁决策 + 谁的卡**"。
+20. **待决策 → 决策人 一览**（新增 pending 必须在此登记；UI 用 `actorOf()`，其优先级 = `pending` → `pendingAttack` → `activePlayer`，**待决策优先**——旧实现先判 pendingAttack，导致"威压（攻击方决策）"被写成被攻击方，已修）：
+    `dunwuHalve`=防守方 ｜ `fengmang`/`caiyuliu`/`shouhunCancel`/`sijiChuxing`/`hengguan`/`hanguangPick`/`chenaiFreeRise`/`dianxing`/`leibao`=攻击方 ｜ `weimu`=帷幕持有者 ｜ `zhihaiReroll`=持有者 ｜ `weijuPay`=被要求方 ｜ `gongzhenPick`=发起者 ｜ **`xianzhenPick`=生命最低方** ｜ **`weiyaPick`=威压持有者** ｜ `leibaoReroll`=雷暴持有者 ｜ `activationResolve`/`chargeResolve`=蓄能方
 
 ## 规范与文档
 项目文档在上级目录 `C:\Users\ASUS\Desktop\im\pmo\兴趣开发\尘起时刻\`（**不在 git 仓库内**）：

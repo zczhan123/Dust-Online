@@ -87,12 +87,15 @@ describe('renderGame (read-only snapshot)', () => {
     ]);
   });
 
-  it('puts self dice areas above the artifact cards (no player header)', () => {
+  it('puts self dice areas above the artifact cards；面板有「玩家A/B」归属标签', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const self = root.querySelector('.player--self')!;
-    expect(self.firstElementChild!.classList.contains('areas')).toBe(true);
-    // 「玩家A/B」头部已移除
-    expect(self.querySelector('.player-header')).toBeNull();
+    // 面板归属标签（玩家色 + 英雄名）——用于区分"这一排是谁的卡"
+    const tag = self.firstElementChild!;
+    expect(tag.classList.contains('panel-tag')).toBe(true);
+    expect(tag.querySelector('.panel-tag-player')!.textContent).toBe('玩家A');
+    expect(tag.querySelector('.panel-tag-player')!.classList.contains('player-A')).toBe(true);
+    expect(tag.querySelector('.panel-tag-hero')!.textContent).toBe('（雨中剑圣·空）');
     const order = Array.from(self.children);
     expect(order.indexOf(self.querySelector('.areas')!)).toBeLessThan(
       order.indexOf(self.querySelector('.cards')!),
@@ -2950,5 +2953,73 @@ describe('设置页背景类（setup-page）', () => {
     root.classList.add('setup-page');
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     expect(root.classList.contains('setup-page')).toBe(false);
+  });
+});
+describe('026/027 归属与提示（用户反馈回归）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  it('归属回归（截图场景）：B 持威压、B 攻击触发 → 提示必须是「轮到 玩家B 操作」', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'B', heroA: ['001', '002', '003'], heroB: ['025', '026', '027'] });
+    skipInitialReroll(state);
+    state.players.B.artifacts.find((a) => a.id === '026')!.activeMarkerSide = 'right'; // 威压（触发·右）
+    state.phase = 'main';
+    state.activePlayer = 'B';
+    state.players.B.areas.attack = [{ id: 'ba', value: 3, kind: 'attack' }];
+    state.players.B.areas.defense = [];
+    state.players.B.areas.meditation = [];
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [{ id: 'ad', value: 5, kind: 'defense' }];
+    state.players.A.areas.meditation = [];
+
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['ba'] }] });
+    // 攻击已生成 + 威压待决策同时存在（旧实现会把"操作者"算成被攻击方 A）
+    expect(state.pendingAttack).not.toBeNull();
+    expect(state.pending?.kind).toBe('weiyaPick');
+    expect(state.pending && state.pending.kind === 'weiyaPick' ? state.pending.player : null).toBe('B');
+
+    renderGame(state, root, hooksFor());
+    const turn = root.querySelector('.hint-turn')!.textContent ?? '';
+    expect(turn).toContain('玩家B');
+    expect(turn).not.toContain('玩家A');
+    // 提示里写明"谁的卡"
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('玩家B 的「哀歌」');
+  });
+
+  it('凛冽之音：惩罚生效时提示栏常驻、重掷按钮写明将受伤害', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.rerollPunish.A = true;
+    state.phase = 'reroll';
+    state.activePlayer = 'A';
+    state.players.A.areas.attack = [
+      { id: 'r1', value: 1, kind: 'attack' },
+      { id: 'r2', value: 2, kind: 'attack' },
+    ];
+    const hooks = hooksFor();
+    hooks.ui.rerollSelected.add('r1');
+    hooks.ui.rerollSelected.add('r2');
+    renderGame(state, root, hooks);
+    expect(root.querySelector('.hint-phase')!.textContent).toContain('凛冽之音');
+    const btn = root.querySelector<HTMLButtonElement>('.btn-reroll')!;
+    expect(btn.textContent).toContain('将受 2 点真实伤害');
+    btn.click();
+    expect(hooks.ui.pendingConfirm!.label).toBe('重掷 2 颗（「凛冽之音」：将受 2 点真实伤害）');
+  });
+
+  it('024 必杀按钮文案写明「发动必杀」而不是「启动技能」（避免与充能混淆）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const card = state.players.A.artifacts.find((a) => a.id === '024')!;
+    card.chargeLayer = card.chargeReq ?? 0;
+    card.activeMarkerSide = 'left';
+    state.phase = 'main';
+    renderGame(state, root, hooksFor());
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent ?? '');
+    expect(labels).toContain('发动必杀：「凶弹业舞」');
+    expect(labels.some((l) => l === '启动技能：凶弹业舞')).toBe(false);
   });
 });

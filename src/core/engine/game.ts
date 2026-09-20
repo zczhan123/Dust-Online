@@ -88,8 +88,6 @@ export function beginTurn(g: GameState): void {
   // 025 屠虎·横贯（持续）：每回合的攻击次数清零（第 2 次攻击伤害 +2 按本回合统计）
   g.attacksThisTurn.A = 0;
   g.attacksThisTurn.B = 0;
-  // 027 寒光·凛冽之音（充能）：持续到「持有者自己的下个尘起阶段开始」→ 在此清除
-  g.rerollPunish[g.activePlayer] = false;
   // 018 至黑：每回合第一次受伤的判定在每回合开始时重置（任何玩家的回合开始时都重置，双方各自独立）
   g.players.A.damagedThisTurn = false;
   g.players.B.damagedThisTurn = false;
@@ -98,6 +96,8 @@ export function beginTurn(g: GameState): void {
   applyTurnStartEffects(g, p);
   if (g.firstRound[p]) {
     g.phase = 'dustRise'; // 第一回合跳过补充与重掷
+    // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 尘起阶段开始时清除
+    g.rerollPunish[p] = false;
   } else {
     let refilled = 0;
     withRng(g, (rng) => {
@@ -144,6 +144,8 @@ export function advancePhase(g: GameState): void {
         g.extraReroll = null;
         g.activePlayer = resume;
         g.phase = 'dustRise';
+        // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 此处（其尘起阶段开始）清除
+        g.rerollPunish[resume] = false;
         logLine(g, `额外重掷阶段结束，${pname(resume)} 继续尘起阶段`);
         // 017 帷幕：该额外重掷阶段结束时同样触发（FAQ 17.1.2）；不再触发 013 以免循环
         queueRerollEndTriggers(g, reroller, { includeLeibao: false });
@@ -152,6 +154,9 @@ export function advancePhase(g: GameState): void {
       }
       // 先离开重掷阶段再处理触发，避免待决策解算完后重复触发
       g.phase = 'dustRise';
+      // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 此处（其尘起阶段开始）清除
+      // （注意：重掷阶段在本阶段**之前**，所以此时清除不会漏掉本轮重掷的惩罚）
+      g.rerollPunish[g.activePlayer] = false;
       // 026 哀歌·陷阵：**持有者自己的**重掷阶段结束时，由生命最少的一方弃置持有者 1 颗能力骰
       // （FAQ 26.1.1：生命并列 → 当前回合玩家选择；无能力骰可弃置时该技能不结算，避免「另外两种类型」无从确定）
       if (hasActiveSkill(g.players[g.activePlayer], 'aige.xianzhen')) {

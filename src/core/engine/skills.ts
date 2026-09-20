@@ -4,7 +4,7 @@ import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '
 import { skillActive, hasActiveSkill } from './skill-state';
 import { dealTrueDamage, virtualAttack } from './combat';
 import { findDieOf, gainRandomAbilityDice, gainRandomDice, moveDice, paySlots, setDieValue, transferDice, type SlotFill, type SlotSpec } from './effects';
-import { rerollPhase } from './phases';
+import { doReroll } from './phases';
 import { queuePending } from './pending';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
@@ -705,7 +705,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       if (!dieId) throw new Error('must choose 1 die');
       const found = findDieOf(g, player, dieId);
       if (!found) throw new Error(`not your ability die: ${dieId}`);
-      rerollPhase(g, player, [dieId], rng);
+      doReroll(g, player, [dieId], rng);
       const after = findDieOf(g, player, dieId);
       if (!after) throw new Error('reroll failed');
       const kindCn = after.kind === 'attack' ? '攻击' : after.kind === 'defense' ? '防御' : '冥想';
