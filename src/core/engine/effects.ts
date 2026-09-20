@@ -78,6 +78,8 @@ export function paySlots(
   spec: SlotSpec[],
   fills: SlotFill[],
   reportConsumed?: (n: number) => void,
+  // 触发 026「威压」的这次「使用能力骰」来自哪种支付（供 UI 提示显示触发原因）
+  reason: 'attack' | 'defense' | 'dustRise' | 'skill' = 'skill',
 ): EffectiveDie[] {
   if (fills.length !== spec.length) throw new Error(`expect ${spec.length} slot fills, got ${fills.length}`);
   const used = new Set<string>();
@@ -148,7 +150,7 @@ export function paySlots(
     const opp = g.players[oppId];
     const anyTarget = KINDS.some((k) => me.areas[k].length > 0 || opp.areas[k].length > 0);
     if (anyTarget) {
-      g.pendingQueue.push({ kind: 'weiyaPick', player, value: weiyaSkill.value ?? 4 });
+      g.pendingQueue.push({ kind: 'weiyaPick', player, value: weiyaSkill.value ?? 4, reason });
     }
   }
   return effective;

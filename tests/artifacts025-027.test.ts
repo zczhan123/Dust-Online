@@ -582,3 +582,46 @@ describe('027 凛冽之音 × 其它技能（联动）', () => {
     expect(g.pending?.kind).toBe('gongzhenPick');
   });
 });
+describe('026 威压：触发来源与「不算使用」的边界', () => {
+  it('尘起支付冥想骰会触发威压（reason=dustRise），结算完成后才落到陷阵侧', () => {
+    const g = lifengGame();
+    toReroll(g, 'A');
+    applyAction(g, { t: 'advance' }); // → A 的尘起阶段
+    const card = art(g, 'A', '026');
+    card.activeMarkerSide = 'right';
+    card.armedSide = 'right';
+    g.players.B.areas.attack = [{ id: 'bd', value: 2, kind: 'attack' }]; // 有可改目标
+    g.players.A.areas.meditation = [{ id: 'md', value: 3, kind: 'meditation' }];
+    applyAction(g, { t: 'dustRise', artifactId: '026', costSlots: [{ dieIds: ['md'] }] });
+    expect(g.pending?.kind).toBe('weiyaPick');
+    expect(g.pending && g.pending.kind === 'weiyaPick' ? g.pending.reason : null).toBe('dustRise');
+    applyAction(g, { t: 'weiyaPick', owner: 'self' }); // 不发动
+    expect(card.activeMarkerSide).toBe('left'); // 已切换到陷阵
+  });
+
+  it('尘印支付 / 重掷 都不触发威压（不耗骰 或 不算「使用」）', () => {
+    // 尘印
+    const g = lifengGame();
+    toReroll(g, 'A');
+    applyAction(g, { t: 'advance' });
+    const card = art(g, 'A', '026');
+    card.activeMarkerSide = 'right';
+    card.armedSide = 'right';
+    g.players.B.areas.attack = [{ id: 'bd', value: 2, kind: 'attack' }];
+    g.players.A.hasDustSeal = true;
+    applyAction(g, { t: 'dustRise', artifactId: '026', useSeal: true });
+    expect(g.pending).toBeNull();
+
+    // 重掷
+    const g2 = lifengGame();
+    toReroll(g2, 'A');
+    const card2 = art(g2, 'A', '026');
+    card2.activeMarkerSide = 'right';
+    g2.players.A.areas.attack = [
+      { id: 'x1', value: 1, kind: 'attack' },
+      { id: 'x2', value: 2, kind: 'attack' },
+    ];
+    applyAction(g2, { t: 'reroll', dieIds: ['x1', 'x2'] });
+    expect(g2.pending).toBeNull();
+  });
+});

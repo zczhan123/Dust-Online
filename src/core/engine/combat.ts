@@ -119,7 +119,7 @@ function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack)
 /** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
 export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], mods?: AttackMods): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
-  const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots);
+  const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
   const effDie = eff[0];
   const base = attackDamageBonus(g, player);
   const bonus = Math.max(base.value, mods?.minBonus ?? 0);
@@ -181,7 +181,7 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   let damageDealt = 0;
 
   if (!pa.unblockable && costSlots && costSlots.length > 0) {
-    const eff = paySlots(g, defenderId, [{ kind: 'defense' }], costSlots);
+    const eff = paySlots(g, defenderId, [{ kind: 'defense' }], costSlots, undefined, 'defense');
     blocked = true;
     logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点防御骰抵挡了攻击`);
     // 021 决意（持续·计数 5）：被抵挡时仍造成一半伤害

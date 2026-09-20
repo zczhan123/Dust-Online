@@ -2587,7 +2587,7 @@ describe('renderGame (interaction)', () => {
   it('026 威压：选择器可变更对方 1 颗能力骰为固定值，或「不发动」', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    state.pending = { kind: 'weiyaPick', player: 'A', value: 4 };
+    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'skill' };
     state.players.A.areas.attack = [{ id: 'a1', value: 3, kind: 'attack' }];
     state.players.B.areas.defense = [{ id: 'bd', value: 1, kind: 'defense' }];
 

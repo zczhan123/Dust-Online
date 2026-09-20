@@ -970,7 +970,7 @@ export function applyAction(g: GameState, action: Action): GameState {
         }
         assertConversionAllowed(g, g.activePlayer, action.costSlots);
         if (!action.costSlots || action.costSlots.length === 0) throw new Error('costSlots required');
-        paySlots(g, g.activePlayer, [{ kind: 'meditation' }], action.costSlots);
+        paySlots(g, g.activePlayer, [{ kind: 'meditation' }], action.costSlots, undefined, 'dustRise');
       }
       const desc = applyDustRiseToArtifact(g, g.activePlayer, action.artifactId, action.side);
       logLine(

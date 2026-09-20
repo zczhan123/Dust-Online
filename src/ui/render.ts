@@ -844,6 +844,9 @@ interface HintPart {
   color?: PlayerId;
 }
 
+const weiyaReasonCn = (r: 'attack' | 'defense' | 'dustRise' | 'skill'): string =>
+  r === 'attack' ? '攻击支付' : r === 'defense' ? '抵挡支付' : r === 'dustRise' ? '尘起支付' : '技能代价';
+
 function phaseHint(ctx: Ctx): HintPart[] {
   const parts = phaseHintInner(ctx);
   const { state } = ctx;
@@ -989,7 +992,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '威压', color: pd.player },
       {
-        text: `（玩家${pd.player} 的「哀歌」）：玩家${pd.player} 使用了 1 个能力骰，可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择`,
+        text: `（玩家${pd.player} 的「哀歌」）：玩家${pd.player} 使用了 1 个能力骰（${weiyaReasonCn(pd.reason)}），可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择`,
       },
     ];
   }

@@ -121,7 +121,7 @@ export type Pending =
   /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
   | { kind: 'chargeResolve'; player: PlayerId; artifactId: string }
   /** 026 哀歌·威压：某人「使用 1 个任意能力骰后」，威压持有者可令 1 颗能力骰点数变为固定值（FAQ 26.2.1：先于该骰的基础效果结算） */
-  | { kind: 'weiyaPick'; player: PlayerId; value: number }
+  | { kind: 'weiyaPick'; player: PlayerId; value: number; reason: 'attack' | 'defense' | 'dustRise' | 'skill' }
   /** 026 哀歌·陷阵：持有者的重掷阶段结束时，由生命最少的一方（并列 = 当前回合玩家）弃置持有者 1 颗能力骰 */
   | { kind: 'xianzhenPick'; player: PlayerId; owner: PlayerId }
   /** 025 屠虎·横贯（触发）：攻击被抵挡后，攻击者可弃置对方 1 颗点数小于该攻击的能力骰 */
