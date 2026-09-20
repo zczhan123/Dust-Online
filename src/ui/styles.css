@@ -503,11 +503,22 @@ button.pay-die {
 }
 /* 选择器「选项」按钮（024 充能第一步 我方/对方、016 献祭 ①②、026 威压 我方/对方 …）
    必须让"已选中"一眼可辨（真实事故 2026-09-20：option-btn--on 无样式 → 看不出选中，疑似卡死） */
+.option-btn {
+  /* 基础态：与 .number-btn 同一口径，保证同一面板内观感一致 */
+  padding: 5px 10px;
+  text-align: center;
+}
 .option-btn--on {
   background: #23405c;
   border-color: #23405c;
   color: #fff;
   font-weight: 700;
+}
+.option-btn--on:hover:not(:disabled) {
+  /* 与 .number-btn--on:hover / .slot-btn--on:hover 同一口径：悬停不得抢走"已选中"的背景色 */
+  background: #2d5175;
+  border-color: #2d5175;
+  color: #fff;
 }
 .option-btn--on::before { content: '✓ '; }
 
