@@ -3023,3 +3023,47 @@ describe('026/027 归属与提示（用户反馈回归）', () => {
     expect(labels.some((l) => l === '启动技能：凶弹业舞')).toBe(false);
   });
 });
+describe('重掷阶段提示：可重掷次数（龙游万象 / 雷暴额外阶段）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  const rerollState = (heroA: [string, string, string] = ['001', '002', '003']) => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA, heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    g.phase = 'reroll';
+    g.activePlayer = 'A';
+    g.rerollUsed = 0;
+    return g;
+  };
+
+  it('「龙游万象」激活 → 提示可重掷 2 次并标注来源（玩家色）', () => {
+    const g = rerollState();
+    g.players.A.artifacts.find((a) => a.id === '002')!.activeMarkerSide = 'left'; // 龙游万象（持续·左）
+    renderGame(g, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('本阶段可重掷 2 次（已用 0）');
+    expect(hint).toContain('「龙游万象」');
+    expect(root.querySelector('.hint-phase .hint-skill.player-A')).not.toBeNull();
+  });
+
+  it('未激活「龙游万象」→ 可重掷 1 次（不标注来源）', () => {
+    const g = rerollState();
+    renderGame(g, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('本阶段可重掷 1 次（已用 0）');
+    expect(hint).not.toContain('「龙游万象」');
+  });
+
+  it('013 雷暴插入的额外重掷阶段 → 仅 1 次（游龙不叠加），并标注来源', () => {
+    const g = rerollState();
+    g.players.A.artifacts.find((a) => a.id === '002')!.activeMarkerSide = 'left'; // 即使有游龙也仍是 1 次
+    g.extraReroll = { player: 'A', resume: 'B' };
+    renderGame(g, root, hooksFor());
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('本阶段可重掷 1 次（已用 0）');
+    expect(hint).toContain('「雷暴」插入的额外重掷阶段：仅 1 次');
+  });
+});

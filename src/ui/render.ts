@@ -12,7 +12,7 @@ import type {
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { HEROES } from '../core/content/artifacts';
 import { getLegalActions } from '../core/engine/game';
-import { effectiveSpeed, effectiveWill } from '../core/engine/derive';
+import { effectiveSpeed, effectiveWill, rerollAllowance } from '../core/engine/derive';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
@@ -1036,8 +1036,26 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
   switch (state.phase) {
     case 'initialReroll':
       return [{ text: '初始重掷：可点选任意数量的骰子后点「重掷选中」，或点「跳过」。' }];
-    case 'reroll':
-      return [{ text: '重掷阶段：点击你的骰子选择，再点「重掷选中」；或跳过。' }];
+    case 'reroll': {
+      // 可重掷次数与引擎**同一口径**：游龙万象 2 次、其它 1 次；013 雷暴插入的额外重掷阶段固定 1 次（不叠加）
+      const rp = state.players[state.activePlayer];
+      const allowance = state.extraReroll ? 1 : rerollAllowance(rp);
+      const parts: HintPart[] = [
+        {
+          text: `重掷阶段：本阶段可重掷 ${allowance} 次（已用 ${state.rerollUsed}）——点选骰子后点「重掷选中」；或点「跳过重掷」。`,
+        },
+      ];
+      if (state.extraReroll) {
+        parts.push({ text: '（' });
+        parts.push({ text: '「雷暴」', color: rp.id });
+        parts.push({ text: '插入的额外重掷阶段：仅 1 次）' });
+      } else if (allowance === 2 && hasActiveSkill(rp, 'youlong.wanxiang')) {
+        parts.push({ text: '（' });
+        parts.push({ text: '「龙游万象」', color: rp.id });
+        parts.push({ text: '：速度 +1，且每回合的重掷阶段可重掷 2 次）' });
+      }
+      return parts;
+    }
     case 'dustRise':
       return [{ text: '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。' }];
     case 'main':
