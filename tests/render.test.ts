@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
+import { effectiveWill } from '../src/core/engine/derive';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import type { Action, GameState } from '../src/core/model/types';
@@ -12,6 +13,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   convertPick: null,
   fengmangPick: null,
   hanguangPick: null,
+  quanzhi: null,
   dustFlow: null,
   prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, zoomMode: 'off', zoomPercent: 90, ...prefs },
   settingsOpen: false,
@@ -87,15 +89,12 @@ describe('renderGame (read-only snapshot)', () => {
     ]);
   });
 
-  it('puts self dice areas above the artifact cards；面板有「玩家A/B」归属标签', () => {
+  it('puts self dice areas above the artifact cards；不再显示「玩家A/B」归属标签', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
     const self = root.querySelector('.player--self')!;
-    // 面板归属标签（玩家色 + 英雄名）——用于区分"这一排是谁的卡"
-    const tag = self.firstElementChild!;
-    expect(tag.classList.contains('panel-tag')).toBe(true);
-    expect(tag.querySelector('.panel-tag-player')!.textContent).toBe('玩家A');
-    expect(tag.querySelector('.panel-tag-player')!.classList.contains('player-A')).toBe(true);
-    expect(tag.querySelector('.panel-tag-hero')!.textContent).toBe('（雨中剑圣·空）');
+    // 归属标签已移除：面板首个元素直接是骰区，且全文档不再存在 panel-tag
+    expect(root.querySelector('.panel-tag')).toBeNull();
+    expect(self.firstElementChild!.classList.contains('areas')).toBe(true);
     const order = Array.from(self.children);
     expect(order.indexOf(self.querySelector('.areas')!)).toBeLessThan(
       order.indexOf(self.querySelector('.cards')!),
@@ -216,7 +215,7 @@ describe('renderGame (read-only snapshot)', () => {
     const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
     gw.activeMarkerSide = 'left';
     state.players.A.areas.defense = [{ id: 'gd1', value: 4, kind: 'defense' }];
-    dealTrueDamage(state, 'A', 6);
+    dealTrueDamage(state, 'A', 6, 'B');
     renderGame(state, root, hooksFor());
     const hi = root.querySelector('.hint-phase .hint-skill')!;
     expect(hi.textContent).toBe('高塔铁幕');
@@ -1894,7 +1893,7 @@ describe('renderGame (interaction)', () => {
       { id: 'gd2', value: 2, kind: 'defense' },
       { id: 'gd3', value: 6, kind: 'defense' },
     ];
-    dealTrueDamage(state, 'A', 6);
+    dealTrueDamage(state, 'A', 6, 'B');
     renderGame(state, root, hooksFor());
     const row = root.querySelector<HTMLElement>('.actionlist-chips')!;
     const txt = row.textContent ?? '';
@@ -1911,7 +1910,7 @@ describe('renderGame (interaction)', () => {
     const gw = state.players.A.artifacts.find((a) => a.id === '009')!;
     gw.activeMarkerSide = 'left';
     state.players.A.areas.defense = [{ id: 'gd1', value: 4, kind: 'defense' }];
-    dealTrueDamage(state, 'A', 6);
+    dealTrueDamage(state, 'A', 6, 'B');
     expect(state.pending!.kind).toBe('guwangCancel');
 
     renderGame(state, root, hooksFor());
@@ -2660,7 +2659,7 @@ describe('renderGame (interaction)', () => {
     // 骰片：纯点数（无 ◆、无攻/防/冥前缀）
     const heldChips = Array.from(selfCard.querySelectorAll<HTMLElement>('.card-held .pay-die--held')).map((c) => c.textContent);
     expect(heldChips).toEqual(['3', '5']);
-    expect(root.querySelector('.hint-phase')!.textContent).toContain('凛冽之音');
+    expect(root.querySelector('.selector-title')!.textContent).toContain('凛冽之音');
 
     // 第一步：模式按钮（对方有 3 点 → ②可选）
     const moveMode = root.querySelector<HTMLButtonElement>('.selector [data-act="hanguangMode-move"]')!;
@@ -3003,7 +3002,9 @@ describe('026/027 归属与提示（用户反馈回归）', () => {
     hooks.ui.rerollSelected.add('r1');
     hooks.ui.rerollSelected.add('r2');
     renderGame(state, root, hooks);
-    expect(root.querySelector('.hint-phase')!.textContent).toContain('凛冽之音');
+    expect(root.querySelector('.hint-global')!.textContent).toBe(
+      '玩家A「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害',
+    );
     const btn = root.querySelector<HTMLButtonElement>('.btn-reroll')!;
     expect(btn.textContent).toContain('将受 2 点真实伤害');
     btn.click();
@@ -3123,5 +3124,596 @@ describe('文案与选中态修复（用户反馈）', () => {
     const on = after.filter((b) => b.classList.contains('option-btn--on'));
     expect(on.length).toBe(1);
     expect(on[0].dataset.option).toBe('self');
+  });
+
+  it('028 天罚：抵挡提示写明受「白昼之火」影响只能用冥想骰；候选只有冥想骰可点', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const A = state.players.A;
+    const B = state.players.B;
+    A.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' }];
+    A.areas.defense = [];
+    A.areas.meditation = [];
+    B.areas.attack = [];
+    B.areas.defense = [{ id: 'bd', value: 3, kind: 'defense' }];
+    B.areas.meditation = [{ id: 'bm', value: 4, kind: 'meditation' }];
+    state.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+
+    mount(state, root);
+    const hint = root.querySelector('.hint-phase')!.textContent ?? '';
+    expect(hint).toContain('「白昼之火」');
+    expect(hint).toContain('只能用冥想骰抵挡');
+    // 只能用冥想骰抵挡：防御骰不可点，冥想骰可点
+    expect(root.querySelector<HTMLElement>('.die[data-id="bd"]')!.dataset.act).not.toBe('block');
+    expect(root.querySelector<HTMLElement>('.die[data-id="bm"]')!.dataset.act).toBe('block');
+  });
+
+  it('029 全知：专用面板——全量骰片、一组一组加入、完成→预览→确认', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'quanzhiAssign', player: 'A' };
+    state.players.A.areas.attack = [
+      { id: 'q3a', value: 3, kind: 'attack' },
+      { id: 'q3b', value: 3, kind: 'attack' },
+      { id: 'q4', value: 4, kind: 'attack' },
+      { id: 'q5', value: 5, kind: 'attack' },
+      { id: 'q6', value: 6, kind: 'attack' },
+    ];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+
+    const { ui, onAction } = mount(state, root);
+    const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
+    expect(labels.filter((l) => (l ?? '').includes('全知'))).toEqual(['「全知」：分配全部能力骰落区']);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="quanzhiOpen"]')!.click();
+    expect(ui.quanzhi).not.toBeNull();
+
+    const chip = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    const act = (a: string) => root.querySelector<HTMLButtonElement>(`.selector [data-act="${a}"]`)!;
+    // 2 颗不同点 → 不构成一组，不能加入
+    chip('q4').click();
+    chip('q5').click();
+    expect(act('quanzhiAdd').disabled).toBe(true);
+    // 取消这两颗，改选 2 颗同点 3 → 加入防御组
+    chip('q4').click();
+    chip('q5').click();
+    chip('q3a').click();
+    chip('q3b').click();
+    expect(act('quanzhiAdd').disabled).toBe(false);
+    expect(act('quanzhiAdd').textContent).toContain('防御');
+    act('quanzhiAdd').click();
+    expect(chip('q3a').classList.contains('pay-die--used')).toBe(true); // 已入组不可再选
+    // 3 颗连续 → 加入攻击组
+    chip('q4').click();
+    chip('q5').click();
+    chip('q6').click();
+    expect(act('quanzhiAdd').textContent).toContain('攻击');
+    act('quanzhiAdd').click();
+    // 完成选组 → 预览 → 确认
+    act('quanzhiDone').click();
+    expect(root.querySelector('.selector [data-act="quanzhiConfirm"]')).not.toBeNull();
+    act('quanzhiConfirm').click();
+    expect(ui.quanzhi).toBeNull();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'quanzhiAssign',
+      assign: { q3a: 'defense', q3b: 'defense', q4: 'attack', q5: 'attack', q6: 'attack' },
+    });
+  });
+
+  it('029 全知：预览「取消」回到第一步并清空已入组', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'quanzhiAssign', player: 'A' };
+    state.players.A.areas.attack = [
+      { id: 'q3a', value: 3, kind: 'attack' },
+      { id: 'q3b', value: 3, kind: 'attack' },
+    ];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+    const { ui } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="quanzhiOpen"]')!.click();
+    const chip = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    const act = (a: string) => root.querySelector<HTMLButtonElement>(`.selector [data-act="${a}"]`)!;
+    chip('q3a').click();
+    chip('q3b').click();
+    act('quanzhiAdd').click();
+    act('quanzhiDone').click();
+    expect(ui.quanzhi?.preview).toBe(true);
+    act('quanzhiCancel').click();
+    expect(ui.quanzhi).toEqual({ groups: [], selected: [], preview: false });
+  });
+
+  it('029 全知：剩余仍可分组时「完成选组」禁用（强制分组）；「自动补完剩余」后可完成', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'quanzhiAssign', player: 'A' };
+    state.players.A.areas.attack = [
+      { id: 'p3a', value: 3, kind: 'attack' },
+      { id: 'p3b', value: 3, kind: 'attack' },
+      { id: 'p4', value: 4, kind: 'attack' },
+      { id: 'p5', value: 5, kind: 'attack' },
+      { id: 'p6', value: 6, kind: 'attack' },
+    ];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="quanzhiOpen"]')!.click();
+    const act = (a: string) => root.querySelector<HTMLButtonElement>(`.selector [data-act="${a}"]`)!;
+    // 一组未放 → 剩余 {3,3} 与 {4,5,6} 可分组 → 完成禁用 + 红字提示
+    expect(act('quanzhiDone').disabled).toBe(true);
+    expect(root.querySelector('.selector-hint--bad')).not.toBeNull();
+    // 自动补完剩余 → 完成可用 → 预览 → 确认
+    act('quanzhiAuto').click();
+    expect(act('quanzhiDone').disabled).toBe(false);
+    act('quanzhiDone').click();
+    act('quanzhiConfirm').click();
+    expect(ui.quanzhi).toBeNull();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'quanzhiAssign',
+      assign: { p3a: 'defense', p3b: 'defense', p4: 'attack', p5: 'attack', p6: 'attack' },
+    });
+  });
+
+  it('029 神圣干涉：装填后操作栏给出结算入口，选择器先选统一点数再选最多 3 颗', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.players.A.areas.meditation = [
+      { id: 'm1', value: 2, kind: 'meditation' },
+      { id: 'm2', value: 3, kind: 'meditation' },
+    ];
+    const a = state.players.A.artifacts.find((x) => x.id === '029')!;
+    a.activeMarkerSide = 'right';
+    a.armedSide = 'right';
+    a.armedTurn = state.turnIndex;
+    state.pending = { kind: 'activationResolve', player: 'A', artifactId: '029', side: 'right' };
+
+    const { ui, onAction } = mount(state, root);
+    const btn = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]');
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(ui.selection?.key).toBe('zhenyan.ganshe');
+    // 第一步：选统一点数（6）
+    const opt = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === '6')!;
+    opt.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    // 第二步：选 1 颗骰
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="m1"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '029',
+      side: 'right',
+      params: { value: 6, dieIds: ['m1'] },
+    });
+  });
+
+  it('030 寰宇飞升（必杀）：操作栏技能按钮 → 选择器要求恰好 4 个冥想骰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '029', '030'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a = state.players.A.artifacts.find((x) => x.id === '030')!;
+    a.activeMarkerSide = 'left';
+    state.players.A.areas.meditation = [1, 2, 3, 4].map((v) => ({ id: `m${v}`, value: v, kind: 'meditation' as const }));
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [];
+
+    const { ui, onAction } = mount(state, root);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')).find((b) =>
+      (b.textContent ?? '').includes('寰宇飞升'),
+    )!;
+    expect(btn).toBeTruthy();
+    btn.click();
+    expect(ui.selection?.key).toBe('jiushu.huanyu.ultimate');
+    for (const v of [1, 2, 3, 4]) root.querySelector<HTMLElement>(`.selector .pay-die[data-id="m${v}"]`)!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '030',
+      side: 'only',
+      params: {
+        costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }, { dieIds: ['m3'] }, { dieIds: ['m4'] }],
+      },
+    });
+  });
+
+  it('031 恶兆·清算：装填后打开选择器，弃置对方恰好 X 颗', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['031', '032', '033'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.players.A.areas.meditation = [{ id: 'mv', value: 4, kind: 'meditation' }];
+    const a = state.players.A.artifacts.find((x) => x.id === '031')!;
+    a.activeMarkerSide = 'right';
+    a.armedSide = 'right';
+    a.armedTurn = state.turnIndex;
+    a.count = 2;
+    state.players.B.areas.attack = [
+      { id: 'b1', value: 1, kind: 'attack' },
+      { id: 'b2', value: 2, kind: 'attack' },
+      { id: 'b3', value: 3, kind: 'attack' },
+    ];
+    state.pending = { kind: 'activationResolve', player: 'A', artifactId: '031', side: 'right' };
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')!.click();
+    expect(ui.selection?.key).toBe('ezhao.qingsuan');
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="b1"]')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="b2"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '031',
+      side: 'right',
+      params: { dieIds: ['b1', 'b2'] },
+    });
+  });
+
+  it('032 梦魇·恶意（启动）：选择 1 个攻击骰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['031', '032', '033'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a = state.players.A.artifacts.find((x) => x.id === '032')!;
+    a.activeMarkerSide = 'right';
+    state.players.A.areas.attack = [{ id: 'atk', value: 3, kind: 'attack' }];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+    const { ui, onAction } = mount(state, root);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')).find((b) =>
+      (b.textContent ?? '').includes('恶意'),
+    )!;
+    btn.click();
+    expect(ui.selection?.key).toBe('mengyan.eyi');
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="atk"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '032',
+      side: 'right',
+      params: { costSlots: [{ dieIds: ['atk'] }] },
+    });
+  });
+
+  it('032 梦魇·低语：操作入口 → 类型选择器（待决策直接派发）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['031', '032', '033'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    state.pending = { kind: 'kuyu', player: 'A' };
+    state.players.A.areas.meditation = [{ id: 'm', value: 1, kind: 'meditation' }];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="kuyuOpen"]')!.click();
+    expect(ui.selection?.pendingKind).toBe('kuyu');
+    const opt = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find(
+      (b) => b.dataset.option === 'defense',
+    )!;
+    opt.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'kuyuResolve', area: 'defense' });
+  });
+
+  it('033 凋零·死亡亦逝：①/② + 弃骰选择器（待决策直接派发）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['031', '032', '033'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'tiaolingPick', player: 'A' };
+    state.players.A.areas.attack = [3, 3, 5, 6].map((v, i) => ({ id: `d${i}`, value: v, kind: 'attack' as const }));
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="tiaolingOpen"]')!.click();
+    expect(ui.selection?.pendingKind).toBe('tiaolingPick');
+    const opt = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find(
+      (b) => b.dataset.option === 'diff',
+    )!;
+    opt.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="d1"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'tiaolingResolve', pick: 'diff', dieIds: ['d1'] });
+  });
+
+  it('035 千劫·超度：选择 2 颗同点冥想骰 → 选目标玩家/区域', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '035', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a = state.players.A.artifacts.find((x) => x.id === '035')!;
+    a.activeMarkerSide = 'right';
+    state.players.A.areas.meditation = [
+      { id: 'k1', value: 3, kind: 'meditation' },
+      { id: 'k2', value: 3, kind: 'meditation' },
+    ];
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [];
+    const { ui, onAction } = mount(state, root);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')).find((b) =>
+      (b.textContent ?? '').includes('超度'),
+    )!;
+    btn.click();
+    expect(ui.selection?.key).toBe('qianjie.chaodu');
+    const confirm = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="k1"]')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="k2"]')!.click();
+    confirm().click();
+    // 选目标玩家
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === 'opponent')!.click();
+    confirm().click();
+    // 选目标区域
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === 'attack')!.click();
+    confirm().click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '035',
+      side: 'right',
+      params: { costSlots: [{ dieIds: ['k1'] }, { dieIds: ['k2'] }], targetOwner: 'opponent', targetKind: 'attack' },
+    });
+  });
+
+  it('035 千劫·万丈明光：操作入口 → 弃 2 个能力骰选择器', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '035', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'wanzhangDiscard', player: 'A' };
+    state.players.A.areas.meditation = [1, 2, 3].map((v) => ({ id: `w${v}`, value: v, kind: 'meditation' as const }));
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="wanzhangOpen"]')!.click();
+    expect(ui.selection?.pendingKind).toBe('wanzhangDiscard');
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="w1"]')!.click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="w2"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'wanzhangDiscard', dieIds: ['w1', 'w2'] });
+  });
+
+  it('036 无相·万象俱灭（充能）：选择弃置一方 1 颗骰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '036'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'chargeResolve', player: 'A', artifactId: '036' };
+    state.players.A.areas.meditation = [{ id: 'm1', value: 1, kind: 'meditation' }];
+    state.players.B.areas.attack = [{ id: 'b1', value: 2, kind: 'attack' }];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')!.click();
+    expect(ui.selection?.key).toBe('wuxiang.charge');
+    const confirm = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === 'opponent')!.click();
+    confirm().click();
+    root.querySelector<HTMLElement>('.selector .pay-die[data-id="b1"]')!.click();
+    confirm().click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '036',
+      side: 'only',
+      params: { owner: 'opponent', dieId: 'b1' },
+    });
+  });
+
+  it('034 金刚·激活：一次选 3 个互不相同的点数存放到神器上', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    const a = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a.activeMarkerSide = 'left';
+    a.armedSide = 'left';
+    a.armedTurn = state.turnIndex;
+    state.pending = { kind: 'activationResolve', player: 'A', artifactId: '034', side: 'left' };
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')!.click();
+    expect(ui.selection?.key).toBe('jingang.pozhang');
+    const confirm = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    const pip = (v: string) =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn[data-pip]')).find((b) => b.dataset.pip === v)!;
+    // 单步面板：未选满 3 个时「确认」不可用
+    expect(confirm().disabled).toBe(true);
+    pip('1').click();
+    pip('2').click();
+    pip('3').click();
+    confirm().click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '034',
+      side: 'left',
+      params: { pips: [1, 2, 3] },
+    });
+  });
+
+  it('034 破障 × 035 超度：可用「神器上存放的骰」支付（新的支付来源）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '035', '036'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a34 = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a34.activeMarkerSide = 'left'; // 破障（持续）生效
+    a34.heldDice = [{ id: 'hd2', value: 2 }]; // 035 分布：冥 = 2/5 → 2 点为冥想
+    state.players.A.artifacts.find((x) => x.id === '035')!.activeMarkerSide = 'right'; // 超度
+    state.players.A.areas.meditation = [{ id: 'm2', value: 2, kind: 'meditation' }];
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [];
+    const { ui, onAction } = mount(state, root);
+    const btn = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn[data-act="skill"]')).find((b) =>
+      (b.textContent ?? '').includes('超度'),
+    )!;
+    btn.click();
+    expect(ui.selection?.key).toBe('qianjie.chaodu');
+    const chip = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    chip('hd2').click();
+    chip('m2').click();
+    const confirm = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!;
+    confirm().click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === 'opponent')!.click();
+    confirm().click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find((b) => b.dataset.option === 'attack')!.click();
+    confirm().click();
+    root.querySelector<HTMLButtonElement>('.confirm-row .btn-confirm')!.click();
+    expect(onAction).toHaveBeenCalledWith({
+      t: 'skill',
+      artifactId: '035',
+      side: 'right',
+      params: {
+        costSlots: [{ dieIds: ['hd2'] }, { dieIds: ['m2'] }],
+        targetOwner: 'opponent',
+        targetKind: 'attack',
+      },
+    });
+  });
+});
+
+describe('034 金刚：存放骰的合法出现范围（使用/消耗 vs 弃置）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+
+  it('破障生效时，「弃置」类面板（万丈明光）不出现金刚的存放骰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '035', '036'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a34 = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a34.activeMarkerSide = 'left'; // 破障（持续）生效
+    a34.heldDice = [{ id: 'hd3', value: 3 }];
+    state.players.A.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' }];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [{ id: 'm1', value: 1, kind: 'meditation' }];
+    const { ui, hooks } = mount(state, root);
+    ui.selection = {
+      key: '@wanzhangDiscard',
+      artifactId: '',
+      side: 'only',
+      stepIndex: 0,
+      chosenDice: [],
+      options: [],
+      currentSel: new Set<string>(),
+      numbers: [],
+      slots: [],
+      slotModes: [],
+      pendingKind: 'wanzhangDiscard',
+    };
+    hooks.requestRender();
+    expect(root.querySelector('.selector')).not.toBeNull();
+    // 弃置类步骤：绝不出现神器上的存放骰
+    expect(root.querySelector('.selector .pay-die[data-id="hd3"]')).toBeNull();
+    // 区域内的真骰仍在（可正常弃置）
+    expect(root.querySelector('.selector .pay-die[data-id="a1"]')).not.toBeNull();
+    expect(root.querySelector('.selector .pay-die[data-id="m1"]')).not.toBeNull();
+  });
+
+  it('027 待决策期间，其它神器（034）卡面上的存放骰不可点，只有 027 的可点', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '035', '027'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    const a34 = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a34.activeMarkerSide = 'left';
+    a34.heldDice = [{ id: 'hdX', value: 3 }];
+    const a27 = state.players.A.artifacts.find((x) => x.id === '027')!;
+    a27.heldDice = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `027-held-${v}`, value: v }));
+    state.pending = { kind: 'hanguangPick', player: 'A', costSlots: [] };
+    mount(state, root);
+    const hdX = root.querySelector<HTMLElement>('.card-held .pay-die[data-id="hdX"]');
+    expect(hdX).not.toBeNull();
+    expect(hdX!.classList.contains('clickable')).toBe(false);
+    const h27 = root.querySelector<HTMLElement>('.card-held .pay-die[data-id="027-held-1"]');
+    expect(h27).not.toBeNull();
+    expect(h27!.classList.contains('clickable')).toBe(true);
+  });
+
+  it('破障存放骰（攻击）在操作列表以中性骰片出现，点击即提出攻击', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a34 = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a34.activeMarkerSide = 'left'; // 破障（持续）生效
+    a34.heldDice = [{ id: 'hd3', value: 3 }]; // 002 分布：3 → 攻击
+    state.players.A.areas.attack = [];
+    state.players.A.areas.defense = [];
+    state.players.A.areas.meditation = [];
+    const { ui } = mount(state, root);
+    const chip = root.querySelector<HTMLButtonElement>('.actionlist-chips .pay-die--held[data-id="hd3"]');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toBe('3');
+    chip!.click();
+    expect(ui.pendingConfirm?.action).toEqual({ t: 'attack', costSlots: [{ dieIds: ['hd3'] }] });
+  });
+});
+describe('010 真实之剑·置换入口（触发类「消耗 1 颗」）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+
+  it('011 灵能屏障·触发待决策：持 010 的防御方能打开置换面板并派发 costSlots', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['010', '011', '012'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    state.pending = null;
+    state.pendingAttack = null;
+    state.players.B.artifacts.find((x) => x.id === '010')!.activeMarkerSide = 'left'; // 真实之剑·持续
+    state.players.B.artifacts.find((x) => x.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障·触发
+    state.players.B.areas.meditation = [{ id: 'bm1', value: 3, kind: 'meditation' }];
+    state.players.B.areas.attack = [{ id: 'ba1', value: 2, kind: 'attack' }];
+    state.players.B.areas.defense = [];
+    state.pending = { kind: 'dunwuHalve', player: 'B' };
+    const { ui, onAction } = mount(state, root);
+    const open = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="dunwuHalveConvert"]');
+    expect(open).not.toBeNull();
+    open!.click();
+    expect(ui.selection?.key).toBe('@dunwuHalveConvert');
+    const chip = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    chip('bm1').click();
+    chip('ba1').click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'dunwuHalve', accept: true, costSlots: [{ dieIds: ['bm1', 'ba1'] }] });
+  });
+});
+
+describe('结束阶段：超出意志上限的选择器（自选弃骰）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+
+  it('入口 → 打开选择器 → 选骰确认派发 endDiscardResolve（自选而非自动）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    state.phase = 'end';
+    state.activePlayer = 'A';
+    const p = state.players.A;
+    const will = effectiveWill(p);
+    p.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' }];
+    p.areas.defense = [{ id: 'd1', value: 2, kind: 'defense' }];
+    p.areas.meditation = [];
+    for (let i = 0; i < will - 1; i++) p.areas.meditation.push({ id: `m${i}`, value: 3, kind: 'meditation' });
+    state.pending = { kind: 'endDiscard', player: 'A' };
+    const { ui, onAction } = mount(state, root);
+    const open = root.querySelector<HTMLButtonElement>('.actionlist .btn[data-act="endDiscardOpen"]');
+    expect(open).not.toBeNull();
+    open!.click();
+    expect(ui.selection?.key).toBe('@endDiscard');
+    const chip = (id: string) => root.querySelector<HTMLElement>(`.selector .pay-die[data-id="${id}"]`)!;
+    chip('a1').click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'endDiscardResolve', dieIds: ['a1'] });
   });
 });

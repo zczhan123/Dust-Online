@@ -43,8 +43,8 @@ describe('内容 / 引擎一致性守卫', () => {
         a.activeMarkerSide = 'left';
         a.count = 5; // 018 至黑 等必杀需要计数
         for (const k of KINDS) {
-          p.areas[k] = [1, 2, 3].map((v) => ({ id: `${a.id}-${k}-${v}`, value: v, kind: k }));
-          g.players.B.areas[k] = [1, 2, 3].map((v) => ({ id: `B-${a.id}-${k}-${v}`, value: v, kind: k }));
+          p.areas[k] = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `${a.id}-${k}-${v}`, value: v, kind: k }));
+          g.players.B.areas[k] = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `B-${a.id}-${k}-${v}`, value: v, kind: k }));
         }
       }
       const acts = getLegalActions(g);

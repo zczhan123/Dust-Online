@@ -42,9 +42,21 @@ const giveDice = (g: GameState, who: PlayerId, dice: { id: string; value: number
   for (const d of dice) p.areas[d.kind].push(d);
 };
 
+/** 结束阶段超出意志上限时的选择器：按默认（AI）弃骰后继续 */
+const autoEndDiscard = (g: GameState): boolean => {
+  if (g.pending?.kind === 'endDiscard') {
+    applyAction(g, getLegalActions(g)[0]);
+    return true;
+  }
+  return false;
+};
+
 const toMain = (g: GameState): void => {
   let guard = 0;
-  while (g.phase !== 'main' && g.phase !== 'gameOver' && guard++ < 12) applyAction(g, { t: 'advance' });
+  while (g.phase !== 'main' && g.phase !== 'gameOver' && guard++ < 12) {
+    if (autoEndDiscard(g)) continue;
+    applyAction(g, { t: 'advance' });
+  }
 };
 
 
@@ -56,7 +68,10 @@ const finishTurn = (g: GameState): void => {
 
 const until = (g: GameState, pred: () => boolean, max = 60): void => {
   let i = 0;
-  while (!pred() && i++ < max && g.phase !== 'gameOver') applyAction(g, { t: 'advance' });
+  while (!pred() && i++ < max && g.phase !== 'gameOver') {
+    if (autoEndDiscard(g)) continue;
+    applyAction(g, { t: 'advance' });
+  }
 };
 const atA = (g: GameState, phase: GameState['phase']) => () => g.activePlayer === 'A' && g.phase === phase;
 const atB = (g: GameState, phase: GameState['phase']) => () => g.activePlayer === 'B' && g.phase === phase;
@@ -151,6 +166,9 @@ describe('016 虚臾（虚无形态 / 献祭）', () => {
     applyAction(g, { t: 'skill', artifactId: '016', side: 'right', params: { choice: 'dice' } });
     expect(totalDice(g.players.A)).toBe(11);
     finishTurn(g);
+    // 结束阶段：超出意志上限 → 弹出「玩家自选弃骰」选择器（不再自动弃）；按默认弃到上限
+    expect(g.pending?.kind).toBe('endDiscard');
+    applyAction(g, getLegalActions(g)[0]);
     expect(totalDice(g.players.A)).toBe(effectiveWill(g.players.A)); // 结束阶段弃回上限
   });
 });

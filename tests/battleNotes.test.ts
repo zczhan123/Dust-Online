@@ -234,3 +234,62 @@ describe('显示时机（用户反馈：被问"是否抵挡"时不该显示自�
     expect(battleNotes(g, 'A').length).toBeGreaterThan(0); // 022 前置待决策属于自己 → 仍显示
   });
 });
+
+describe('战斗提示：028 天罚 / 030 寰宇飞升', () => {
+  it('028：白昼之火 / 陨落按当前状态显示（可用 → 精确文案）', () => {
+    const g = mk(['028', '029', '030']);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    expect(notes(g, 'A')).toContainEqual({
+      label: '白昼之火',
+      text: '本回合攻击点数视为 6，且对方只能用冥想骰抵挡',
+    });
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    expect(notes(g, 'A')).toContainEqual({
+      label: '陨落',
+      text: '本回合攻击点数视为 6，且对方只能用攻击骰抵挡',
+    });
+    // 未激活 → 不出现
+    g.tianfa.A = null;
+    expect(notes(g, 'A').some((n) => n.label === '白昼之火' || n.label === '陨落')).toBe(false);
+  });
+
+  it('030：寰宇飞升（持续）由 attackDamageBonus 自动显示为「第一次攻击将 +3 伤害」', () => {
+    const g = mk(['001', '002', '003'], ['028', '029', '030']);
+    arm(g, 'B', '030', 'left');
+    g.activePlayer = 'A';
+    g.attacksThisTurn.A = 0;
+    expect(notes(g, 'A')).toContainEqual({ label: '寰宇飞升', text: '本回合第一次攻击将 +3 伤害' });
+    // 失去持续式后（必杀已用）不再显示
+    art(g, 'B', '030').continuousLost = true;
+    expect(notes(g, 'A').some((n) => n.label === '寰宇飞升')).toBe(false);
+  });
+
+  it('A：025 横贯·持续（本回合第 2 次攻击）→ 文案点明「第二次攻击」', () => {
+    const g = mk(['025', '026', '027']);
+    arm(g, 'A', '025', 'right');
+    g.attacksThisTurn.A = 1; // 本回合已是第 2 次攻击
+    expect(notes(g, 'A')).toContainEqual({ label: '横贯', text: '本回合第二次攻击将 +2 伤害' });
+    // 第 1 次攻击时该持续加成不生效 → 不显示
+    g.attacksThisTurn.A = 0;
+    expect(notes(g, 'A').some((n) => n.label === '横贯')).toBe(false);
+  });
+});
+
+describe('战斗提示：031 血祭 / 032 恶意', () => {
+  it('031：血祭（持续）按计数登记为负面状态提示', () => {
+    const g = mk(['031', '032', '033']);
+    arm(g, 'A', '031', 'left');
+    art(g, 'A', '031').count = 2;
+    expect(notes(g, 'A')).toContainEqual({
+      label: '血祭',
+      text: '攻击造成伤害后，你受到 2 点真实伤害（计数）',
+    });
+  });
+
+  it('032：恶意（持续）由 attackDamageBonus 自动显示（floor(冥想/2)）', () => {
+    const g = mk(['031', '032', '033']);
+    arm(g, 'A', '032', 'right');
+    for (let v = 1; v <= 4; v++) putDie(g, 'A', 'meditation', v);
+    expect(notes(g, 'A')).toContainEqual({ label: '恶意', text: '攻击伤害 +2' });
+  });
+});

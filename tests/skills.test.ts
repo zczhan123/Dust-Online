@@ -1079,6 +1079,24 @@ describe('011 灵能屏障·触发', () => {
     expect(g.players.B.areas.meditation).toHaveLength(1);
   });
 
+  it('010 置换 × 011：用 2 颗任意骰代替 1 颗冥想骰，同样减半并消耗 2 颗', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['010', '011', '012'] });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // A -> main
+    g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑·持续
+    g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障·触发
+    g.players.B.areas.meditation = [];
+    g.players.B.areas.attack = [{ id: 'b1', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'b2', value: 4, kind: 'defense' }];
+    g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
+    expect(g.pending?.kind).toBe('dunwuHalve');
+    applyAction(g, { t: 'dunwuHalve', accept: true, costSlots: [{ dieIds: ['b1', 'b2'] }] });
+    expect(g.pendingAttack!.value).toBe(2); // floor(5/2)
+    expect(g.players.B.areas.attack).toHaveLength(0);
+    expect(g.players.B.areas.defense).toHaveLength(0);
+  });
+
   it('防御方无冥想骰时不挂起', () => {
     const g = setupDefender();
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';

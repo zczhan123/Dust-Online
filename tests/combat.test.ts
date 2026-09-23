@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
-import { doAttack, resolveBlock, dealTrueDamage } from '../src/core/engine/combat';
+import { createGame } from '../src/core/engine/game';
+import { doAttack, resolveBlock, dealTrueDamage, finalizeAttackResolution } from '../src/core/engine/combat';
 import { totalDice } from '../src/core/engine/derive';
 
 describe('combat', () => {
@@ -55,13 +56,13 @@ describe('combat', () => {
   it('true damage ignores defense dice', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 7);
+    dealTrueDamage(g, 'B', 7, 'A');
     expect(g.players.B.life).toBe(before - 7);
   });
 
   it('ends the game when life reaches 0', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
-    dealTrueDamage(g, 'B', 50);
+    dealTrueDamage(g, 'B', 50, 'A');
     expect(g.phase).toBe('gameOver');
     expect(g.winner).toBe('A');
   });
@@ -110,7 +111,7 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     const g = guwangGame();
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 5 });
     expect(g.players.B.life).toBe(before);
 
@@ -123,18 +124,45 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     const g = guwangGame();
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     applyAction(g, { t: 'guwangCancel', cancel: true, defenseDieId: 'd1' });
     expect(g.players.B.areas.defense.some((d) => d.id === 'd1')).toBe(false);
     expect(g.players.B.life).toBe(before);
     expect(g.pending).toBeNull();
   });
 
+  it('010 置换 × 009：用 2 颗任意骰代替 1 颗防御骰，取消真伤并消耗 2 颗', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', heroB: ['010', '002', '009'] });
+    g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑·持续
+    g.players.B.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left'; // 高塔铁幕·触发
+    g.players.B.areas.defense = [];
+    g.players.B.areas.attack = [{ id: 'b1', value: 3, kind: 'attack' }];
+    g.players.B.areas.meditation = [{ id: 'b2', value: 5, kind: 'meditation' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5, 'A');
+    expect(g.pending?.kind).toBe('guwangCancel');
+    applyAction(g, { t: 'guwangCancel', cancel: true, costSlots: [{ dieIds: ['b1', 'b2'] }] });
+    expect(g.players.B.life).toBe(before);
+    expect(g.players.B.areas.attack).toHaveLength(0);
+    expect(g.players.B.areas.meditation).toHaveLength(0);
+    expect(g.pending).toBeNull();
+  });
+
+  it('009 只对「来自对方」的真伤挂起：自己造成的真伤不触发（009 卡面）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', heroB: ['009', '002', '003'] });
+    g.players.B.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left';
+    g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
+    const before = g.players.B.life;
+    dealTrueDamage(g, 'B', 5, 'B'); // 自伤（来源=自己）
+    expect(g.pending).toBeNull();
+    expect(g.players.B.life).toBe(before - 5);
+  });
+
   it('resolving with cancel=false applies the deferred damage', () => {
     const g = guwangGame();
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     applyAction(g, { t: 'guwangCancel', cancel: false });
     expect(g.players.B.life).toBe(before - 5);
     expect(g.players.B.areas.defense.length).toBe(1);
@@ -145,7 +173,7 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     const g = guwangGame();
     g.players.B.areas.defense = [];
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     expect(g.pending).toBeNull();
     expect(g.players.B.life).toBe(before - 5);
   });
@@ -154,7 +182,7 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A', heroB: ['009', '002', '003'] });
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     expect(g.pending).toBeNull();
     expect(g.players.B.life).toBe(before - 5);
   });
@@ -164,8 +192,38 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     g.pending = { kind: 'caiyuliu', player: 'A', dieId: 'x', value: 3 };
     const before = g.players.B.life;
-    dealTrueDamage(g, 'B', 5);
+    dealTrueDamage(g, 'B', 5, 'A');
     expect(g.pending.kind).toBe('caiyuliu');
     expect(g.players.B.life).toBe(before - 5);
+  });
+});
+
+describe('抵挡 与 伤害 是两个独立概念（FAQ 21.1.7：021 半伤为 0 不算被抵挡）', () => {
+  const jueyiGame = (count: number) => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '021'], heroB: ['005', '006', '007'] });
+    const wf = g.players.A.artifacts.find((a) => a.id === '021')!;
+    wf.activeMarkerSide = 'left';
+    wf.count = count;
+    g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right'; // 锋芒·触发
+    return g;
+  };
+
+  it('1 点攻击 + 021 满计数 → 半减为 0：不算被抵挡（不弹「锋芒」）', () => {
+    const g = jueyiGame(5);
+    const pa = { attacker: 'A' as const, value: 1, unblockable: false, physical: true, baseValue: 1 };
+    g.pendingAttack = pa;
+    finalizeAttackResolution(g, pa, true);
+    expect(g.pending?.kind ?? null).not.toBe('fengmang');
+    expect(g.pendingQueue.some((p) => p.kind === 'fengmang')).toBe(false);
+    expect(g.players.B.life).toBe(g.players.B.lifeMax); // 0 伤害
+  });
+
+  it('2 点攻击 + 021 满计数 → 半减为 1：仍算被抵挡（弹「锋芒」）', () => {
+    const g = jueyiGame(5);
+    const pa = { attacker: 'A' as const, value: 2, unblockable: false, physical: true, baseValue: 2 };
+    g.pendingAttack = pa;
+    finalizeAttackResolution(g, pa, true);
+    const kinds = [g.pending?.kind ?? null, ...g.pendingQueue.map((p) => p.kind)];
+    expect(kinds).toContain('fengmang');
   });
 });

@@ -33,7 +33,12 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   // A 攻击伤害加成（含带来源的本回合 Buff，例如「献祭」②）
   const bonus = attackDamageBonus(g, player);
   if (bonus.value > 0) {
-    notes.push({ label: bonus.label ?? '攻击加成', text: `攻击伤害 +${bonus.value}` });
+    const label = bonus.label ?? '攻击加成';
+    // 025 横贯 / 030 寰宇飞升 是"按第几次攻击"生效的加成 → 文案点明第几次
+    let text = `攻击伤害 +${bonus.value}`;
+    if (bonus.label === '横贯') text = `本回合第二次攻击将 +${bonus.value} 伤害`;
+    else if (bonus.label === '寰宇飞升') text = `本回合第一次攻击将 +${bonus.value} 伤害`;
+    notes.push({ label, text });
   }
 
   // A/D 攻击前的选择：025 屠虎·奇袭（持续·左）：有「点数不在对方任意区域」的能力骰时可用
@@ -99,9 +104,24 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     notes.push({ label: '中央突破', text: '本回合攻击不可抵挡' });
   }
 
+  // C 不可抵挡的变体：028 天罚·白昼之火 / 陨落（本回合状态：点数视为 6，且只能用某类骰抵挡）
+  const tianfa = g.tianfa[player];
+  if (tianfa) {
+    notes.push({
+      label: tianfa.blockKind === 'meditation' ? '白昼之火' : '陨落',
+      text: `本回合攻击点数视为 6，且对方只能用${tianfa.blockKind === 'meditation' ? '冥想' : '攻击'}骰抵挡`,
+    });
+  }
+
   // E 负面状态：023 蛇蝎·畏惧（仅其下个回合内生效）
   if (p.attackHalvedNextTurn) {
     notes.push({ label: '畏惧', text: '本回合攻击伤害减半' });
+  }
+
+  // E 负面状态：031 恶兆·血祭（持续）——自己的攻击造成伤害后，按计数受到真实伤害
+  if (hasActiveSkill(p, 'ezhao.xueji')) {
+    const xueji = artifactWithSkill(p, 'ezhao.xueji');
+    notes.push({ label: '血祭', text: `攻击造成伤害后，你受到 ${xueji?.count ?? 0} 点真实伤害（计数）` });
   }
 
   return notes;

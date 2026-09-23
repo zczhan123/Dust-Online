@@ -1,4 +1,5 @@
 import type { PlayerId } from '../core/model/types';
+import { APP_VERSION_LABEL } from '../version';
 
 export const HEROES = {
   kong: ['001', '002', '003'] as [string, string, string], // 雨中剑圣 空
@@ -10,9 +11,12 @@ export const HEROES = {
   nisa: ['019', '020', '021'] as [string, string, string], // 荒野行者 尼萨
   xiva: ['022', '023', '024'] as [string, string, string], // 黑枪 希瓦
   lifeng: ['025', '026', '027'] as [string, string, string], // 天殇的战鬼 李封
+  mate: ['028', '029', '030'] as [string, string, string], // 破晓之剑 玛特
+  aiwa: ['031', '032', '033'] as [string, string, string], // 受缚邪灵 艾娃
+  miyun: ['034', '035', '036'] as [string, string, string], // 渡世行僧 弥云
 };
 
-const HERO_KEYS = ['kong', 'ying', 'batton', 'tata', 'zoray', 'xiu', 'nisa', 'xiva', 'lifeng'] as const;
+const HERO_KEYS = ['kong', 'ying', 'batton', 'tata', 'zoray', 'xiu', 'nisa', 'xiva', 'lifeng', 'mate', 'aiwa', 'miyun'] as const;
 const HERO_LABELS: Record<(typeof HERO_KEYS)[number], string> = {
   kong: '雨中剑圣·空',
   ying: '永暗之刃·影',
@@ -23,6 +27,9 @@ const HERO_LABELS: Record<(typeof HERO_KEYS)[number], string> = {
   nisa: '荒野行者·尼萨',
   xiva: '黑枪·希瓦',
   lifeng: '天殇的战鬼·李封',
+  mate: '破晓之剑·玛特',
+  aiwa: '受缚邪灵·艾娃',
+  miyun: '渡世行僧·弥云',
 };
 
 export interface SetupOptions {
@@ -237,5 +244,11 @@ export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => 
   }
 
   sync();
+
+  // 首页右下角：一行小字显示版本号（唯一来源 package.json → __APP_VERSION__）
+  const version = el('div', 'app-version');
+  version.textContent = APP_VERSION_LABEL;
+  wrap.appendChild(version);
+
   root.appendChild(wrap);
 }

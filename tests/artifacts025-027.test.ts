@@ -645,3 +645,23 @@ describe('026 陷阵 × 013 雷暴（额外重掷阶段，待办 §G 修复回�
     expect(g.pending && g.pending.kind === 'xianzhenPick' ? g.pending.player : null).toBe('A');
   });
 });
+
+describe('消耗语义（走 paySlots）→ 触发 026 威压（概念一致性修复回归）', () => {
+  it('022「填弹」（消耗 1–6 能力骰）会触发 026 威压，reason=skill', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '026', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    const fill = art(g, 'A', '022');
+    fill.activeMarkerSide = 'left';
+    fill.armedSide = 'left';
+    fill.armedTurn = g.turnIndex;
+    art(g, 'A', '026').activeMarkerSide = 'right'; // 威压（触发）
+    g.players.A.areas.attack = [{ id: 'a2', value: 2, kind: 'attack' }];
+    g.players.A.areas.defense = [];
+    g.players.A.areas.meditation = [];
+    g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }]; // 供威压改点
+    applyAction(g, { t: 'skill', artifactId: '022', side: 'left', params: { dieIds: ['a2'] } });
+    expect(g.pending?.kind).toBe('weiyaPick');
+    expect(g.pending && g.pending.kind === 'weiyaPick' ? g.pending.reason : null).toBe('skill');
+  });
+});

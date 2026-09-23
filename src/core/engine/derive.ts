@@ -43,6 +43,13 @@ function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } 
   if (hasActiveSkill(p, 'jueyi.wildfire.continuous')) {
     if ((artifactByKey(p, 'jueyi.wildfire.continuous')?.count ?? 0) >= 3) speed = Math.max(speed, 1);
   }
+  // 029 真言·全知（持续）：你的速度 +1
+  if (hasActiveSkill(p, 'zhenyan.quanzhi')) speed = Math.max(speed, 1);
+  // 035 千劫·万丈明光（持续）：你的速度 +3、意志 +2
+  if (hasActiveSkill(p, 'qianjie.wanzhang')) {
+    speed = Math.max(speed, 3);
+    will = Math.max(will, 2);
+  }
   return { speed, will };
 }
 

@@ -30,7 +30,8 @@ export interface SlotFill {
 export interface EffectiveDie {
   kind: DiceKind;
   value: number;
-  source: 'real' | 'converted' | 'treated';
+  /** real=区域真骰；converted=真实之剑置换；treated=奇袭视为；artifact=034 破障（神器上的骰当能力骰） */
+  source: 'real' | 'converted' | 'treated' | 'artifact';
   realIds: string[];
 }
 
@@ -43,9 +44,9 @@ export type Action =
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
   | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
   | { t: 'guwangCharge'; dieId?: string }
-  | { t: 'guwangCancel'; cancel: boolean; defenseDieId?: string }
+  | { t: 'guwangCancel'; cancel: boolean; defenseDieId?: string; costSlots?: SlotFill[] }
   | { t: 'shenhongKill'; accept: boolean }
-  | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string }
+  | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string; costSlots?: SlotFill[] }
   | { t: 'dunwuPulse'; accept: boolean }
   | { t: 'leibaoReroll'; accept: boolean }
   | { t: 'dianxing'; accept?: false; dieIds?: string[] }
@@ -56,8 +57,8 @@ export type Action =
   | { t: 'chenaiFreeRise'; accept: boolean }
   /** 022 死契·处刑通牒：使用攻击骰前的强制决定（不发动 / ①伤害+1且不可抵挡 / ②伤害+5） */
   | { t: 'chuxingPick'; pick: 'none' | 'unblockable' | 'bonus5' }
-  /** 023 蛇蝎·畏惧：对方被迫消耗他选择的那颗能力骰 */
-  | { t: 'weijuPay'; dieId: string }
+  /** 023 蛇蝎·畏惧：对方被迫消耗他选择的那颗能力骰（可用 010 置换：costSlots 2 颗顶 1） */
+  | { t: 'weijuPay'; dieId?: string; costSlots?: SlotFill[] }
   /** 023 蛇蝎·共振：选择 ①双方各得 2 颗 / ②双方各弃置 2 颗（弃置由发起者指定） */
   | { t: 'gongzhenResolve'; pick: 'gain' | 'discard'; myIds?: string[]; oppIds?: string[] }
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
@@ -70,6 +71,18 @@ export type Action =
   | { t: 'hengguan'; dieId?: string }
   /** 027 寒光·必杀：使用攻击骰前的二选一（① 把神器上的骰移入对应区域 / ② 移除它并弃置对方同点数骰） */
   | { t: 'hanguangPick'; pick: 'move' | 'discard'; dieId: string; targetDieId?: string }
+  /** 029 真言·全知：把全部能力骰分配到三区（dieId → 目标类型） */
+  | { t: 'quanzhiAssign'; assign: Record<string, DiceKind> }
+  /** 032 梦魇·低语：宣称 1 个能力骰类型 */
+  | { t: 'kuyuResolve'; area: DiceKind }
+  /** 033 凋零·死亡亦逝：择①全相同/②全不同，并弃置所选骰 */
+  | { t: 'tiaolingResolve'; pick: 'same' | 'diff'; dieIds: string[] }
+  /** 结束阶段：弃置指定的 N 颗能力骰（超出意志上限），N = 当前超出数 */
+  | { t: 'endDiscardResolve'; dieIds: string[] }
+  /** 035 千劫·万丈明光：主要阶段开始时，弃置 2 个能力骰 */
+  | { t: 'wanzhangDiscard'; dieIds: string[] }
+  /** 034 金刚·不动菩提：是否移除神器上同点数骰以取消其效果 */
+  | { t: 'putiResolve'; accept: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
 export interface PendingAttack {
@@ -89,6 +102,8 @@ export interface PendingAttack {
   bonusLabel?: string;
   /** 减半来源名（如「畏惧」），供提示栏显示 */
   halveReason?: string;
+  /** 028 天罚：本次攻击对方**只能用该类型**的骰抵挡（'meditation'=白昼之火 / 'attack'=陨落）；未设 = 正常防御骰 */
+  blockKind?: DiceKind;
 }
 
 export type Pending =
@@ -127,7 +142,19 @@ export type Pending =
   /** 025 屠虎·横贯（触发）：攻击被抵挡后，攻击者可弃置对方 1 颗点数小于该攻击的能力骰 */
   | { kind: 'hengguan'; player: PlayerId; value: number }
   /** 027 寒光·必杀：使用攻击骰前，必须先决定是否使用神器上的骰子（暂存本次攻击的支付） */
-  | { kind: 'hanguangPick'; player: PlayerId; costSlots: SlotFill[] };
+  | { kind: 'hanguangPick'; player: PlayerId; costSlots: SlotFill[] }
+  /** 029 真言·全知（持续）：补充阶段与重掷阶段落区后，由玩家把**全部能力骰**自行分配到 防御(同点成对)/攻击(顺点三连)/冥想(其余) */
+  | { kind: 'quanzhiAssign'; player: PlayerId }
+  /** 032 梦魇·低语（持续）：持有者**主要阶段结束时**，宣称 1 个能力骰类型（获得 1 随机骰并移入该区） */
+  | { kind: 'kuyu'; player: PlayerId }
+  /** 033 凋零·死亡亦逝（持续）：某玩家**回合结束时**，亲自择①全相同/②全不同并弃自己的能力骰 */
+  | { kind: 'tiaolingPick'; player: PlayerId }
+  /** 结束阶段：能力骰总数超过「意志」上限时，由**当前回合玩家自行选择**弃置哪几颗（说明书 page_09） */
+  | { kind: 'endDiscard'; player: PlayerId }
+  /** 035 千劫·万丈明光（持续）：持有者**主要阶段开始时**，弃置 2 个能力骰 */
+  | { kind: 'wanzhangDiscard'; player: PlayerId }
+  /** 034 金刚·不动菩提（触发）：对方使用防御/攻击骰后，持有者可移除神器上同点数骰，取消其效果 */
+  | { kind: 'putiPick'; player: PlayerId; owner: PlayerId; value: number; mode: 'block' | 'attack'; attack?: PendingAttack };
 
 export interface Distribution {
   defense: number[];
@@ -243,4 +270,6 @@ export interface GameState {
   attacksThisTurn: Record<PlayerId, number>;
   /** 027 寒光·凛冽之音（充能）：持有者自己的下个尘起阶段开始前，任何玩家重掷能力骰都会受到等量真实伤害 */
   rerollPunish: Record<PlayerId, boolean>;
+  /** 028 天罚（激活·本回合）：该玩家的攻击点数「视为固定值」，且对方只能用某类骰抵挡；damageCount 统计本回合通过攻击造成伤害的次数（满 2 次即结束主要阶段） */
+  tianfa: Record<PlayerId, { blockKind: 'meditation' | 'attack'; value: number; damageCount: number } | null>;
 }

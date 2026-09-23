@@ -1,6 +1,7 @@
 import type { GameState, Pending, PlayerId } from '../model/types';
 import { hasActiveSkill } from './skill-state';
 import { gainRandomAbilityDice, withRngState } from './effects';
+import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 
 /** 012/015/018 通用的「失去持续式效果」判定：持续技能的 key + 神器标记 */
@@ -43,7 +44,11 @@ function checkZhihaiForced(g: GameState): boolean {
 export function pumpPending(g: GameState): void {
   if (g.pending || g.phase === 'gameOver') return;
   if (checkZhihaiForced(g)) return;
-  const next = g.pendingQueue.shift();
+  let next = g.pendingQueue.shift();
+  // 结束阶段「超出意志上限」的选择：若前面（032/033 等）已把骰弃到上限内，则跳过、不打扰玩家
+  while (next && next.kind === 'endDiscard' && totalDice(g.players[next.player]) <= effectiveWill(g.players[next.player])) {
+    next = g.pendingQueue.shift();
+  }
   if (next) g.pending = next;
 }
 

@@ -7,10 +7,11 @@ import type {
   SlotFill,
   SlotSpec,
 } from '../model/types';
-import { newDieId, createDie, placeDieByDistribution } from '../model/dice';
+import { newDieId, createDie, placeDieByDistribution, areaOf } from '../model/dice';
 import { SeededRng } from '../rng/rng';
 import { logLine, pname } from './log';
-import { skillActive } from './skill-state';
+import { hasActiveSkill, skillActive } from './skill-state';
+import { emptyDistribution } from './derive';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
@@ -25,6 +26,30 @@ export function findDieOf(g: GameState, player: PlayerId, dieId: string): { kind
     if (die) return { kind, die };
   }
   return null;
+}
+
+/** 034 金刚·破障（持续）：神器上存放的骰可当能力骰「使用/消耗」，类型按持有者第二列分布。
+ *  返回 { value, kind }；若未激活 / 不在神器上 / 无分布则返回 null。 */
+export function heldAsAbility(g: GameState, player: PlayerId, id: string): { value: number; kind: DiceKind } | null {
+  if (!hasActiveSkill(g.players[player], 'jingang.pozhang.continuous')) return null;
+  const card = g.players[player].artifacts.find((a) => (a.heldDice ?? []).some((h) => h.id === id));
+  const h = card?.heldDice?.find((x) => x.id === id);
+  if (!h) return null;
+  const dist = emptyDistribution(g.players[player]);
+  if (!dist) return null;
+  return { value: h.value, kind: areaOf(h.value, dist) };
+}
+
+/** 某颗骰作为「可支付能力骰」的信息：优先区域真骰，其次 034 破障的神器存放骰 */
+export function abilityDieInfo(
+  g: GameState,
+  player: PlayerId,
+  id: string,
+): { value: number; kind: DiceKind; source: 'area' | 'artifact' } | null {
+  const found = findDieOf(g, player, id);
+  if (found) return { value: found.die.value, kind: found.kind, source: 'area' };
+  const h = heldAsAbility(g, player, id);
+  return h ? { value: h.value, kind: h.kind, source: 'artifact' } : null;
 }
 
 /** 变更某颗骰的点数（保留其所在区域）。返回旧点数 */
@@ -93,34 +118,40 @@ export function paySlots(
     for (const id of ids) {
       if (used.has(id)) throw new Error(`duplicate die id: ${id}`);
       used.add(id);
-      if (!findDieOf(g, player, id)) throw new Error(`not your die: ${id}`);
+      if (!findDieOf(g, player, id) && !heldAsAbility(g, player, id)) throw new Error(`not your die: ${id}`);
     }
     if (ids.length === 1) {
-      const found = findDieOf(g, player, ids[0])!;
+      const found = findDieOf(g, player, ids[0]);
+      const held = found ? null : heldAsAbility(g, player, ids[0]);
       const treated = fills[i]?.treated === true;
-      if (found.kind !== kind && !treated) throw new Error(`slot needs a ${kind} die, got ${found.kind}`);
+      const actualKind = found ? found.kind : held!.kind;
+      const actualValue = found ? found.die.value : held!.value;
+      if (actualKind !== kind && !treated) throw new Error(`slot needs a ${kind} die, got ${actualKind}`);
       effective.push({
         kind,
-        value: found.die.value,
-        source: treated ? 'treated' : 'real',
+        value: actualValue,
+        source: found ? (treated ? 'treated' : 'real') : 'artifact',
         realIds: [ids[0]],
       });
-      if (treated && found.kind !== kind) {
+      if (treated && actualKind !== kind) {
         logLine(
           g,
-          `${pname(player)} 使用「奇袭」视为：${kindCnOf(found.kind)}骰 ${found.die.value} 点 → 视为${kindCnOf(kind)}骰`,
+          `${pname(player)} 使用「奇袭」视为：${kindCnOf(actualKind)}骰 ${actualValue} 点 → 视为${kindCnOf(kind)}骰`,
         );
       }
     } else {
-      converted.push({ kind, values: ids.map((id) => findDieOf(g, player, id)?.die.value ?? 0) });
+      converted.push({ kind, values: ids.map((id) => abilityDieInfo(g, player, id)?.value ?? 0) });
       effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
     }
     toRemove.push(...ids);
   }
-  // 移除并返还供应堆（按当前所在区域移除）
+  // 移除并返还供应堆（按当前所在区域移除；034 破障的神器骰从 heldDice 移除）
   for (const id of toRemove) {
     for (const k of KINDS) {
       g.players[player].areas[k] = g.players[player].areas[k].filter((d) => d.id !== id);
+    }
+    for (const a of g.players[player].artifacts) {
+      if (a.heldDice) a.heldDice = a.heldDice.filter((h) => h.id !== id);
     }
   }
   // 「真实之剑」置换留痕（战报）

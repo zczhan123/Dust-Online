@@ -54,6 +54,7 @@ describe('model types', () => {
     freeNoCostRise: 0,
     attacksThisTurn: { A: 0, B: 0 },
     rerollPunish: { A: false, B: false },
+    tianfa: { A: null, B: null },
     };
     expect(g.players.A.life).toBe(50);
     expect(g.skillConsumedThisAction).toBe(0);

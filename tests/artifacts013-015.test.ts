@@ -22,10 +22,20 @@ const charge = (g: GameState, id: string): void => {
   a.armedTurn = g.turnIndex;
 };
 
+/** 结束阶段超出意志上限时的选择器：按默认（AI）弃骰后继续 */
+const autoEndDiscard = (g: GameState): boolean => {
+  if (g.pending?.kind === 'endDiscard') {
+    applyAction(g, getLegalActions(g)[0]);
+    return true;
+  }
+  return false;
+};
+
 /** 推进到「主要阶段」（必要时跳过尘起） */
 const toMain = (g: GameState): void => {
   let guard = 0;
   while (g.phase !== 'main' && g.phase !== 'gameOver' && guard++ < 10) {
+    if (autoEndDiscard(g)) continue;
     applyAction(g, { t: 'advance' });
   }
 };
@@ -56,7 +66,10 @@ const finishTurn = (g: GameState): void => {
 /** 反复推进（advance）直到谓词成立（guard 防死循环） */
 const until = (g: GameState, pred: () => boolean, max = 40): void => {
   let i = 0;
-  while (!pred() && i++ < max && g.phase !== 'gameOver') applyAction(g, { t: 'advance' });
+  while (!pred() && i++ < max && g.phase !== 'gameOver') {
+    if (autoEndDiscard(g)) continue;
+    applyAction(g, { t: 'advance' });
+  }
 };
 const atA = (g: GameState, phase: GameState['phase']) => () =>
   g.activePlayer === 'A' && g.phase === phase;

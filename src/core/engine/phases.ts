@@ -1,4 +1,4 @@
-import type { GameState, PlayerId } from '../model/types';
+import type { DiceKind, GameState, PlayerId } from '../model/types';
 import type { Rng } from '../rng/rng';
 import { createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { effectiveSpeed, effectiveWill, emptyDistribution, totalDice } from './derive';
@@ -60,32 +60,56 @@ export function doReroll(g: GameState, player: PlayerId, dieIds: string[], rng: 
   rerollPhase(g, player, dieIds, rng);
   if (dieIds.length === 0) return;
   // 027 寒光·凛冽之音（充能）：持有者的下个尘起阶段开始前，任何人重掷都会使「被重掷方」受伤
-  const punished = (['A', 'B'] as PlayerId[]).some((id) => g.rerollPunish[id]);
-  if (!punished) return;
+  const holders = (['A', 'B'] as PlayerId[]).filter((id) => g.rerollPunish[id]);
+  if (holders.length === 0) return;
   if (g.phase === 'gameOver') return;
-  dealTrueDamage(g, player, dieIds.length);
+  // 伤害来源 = 027 持有者；若持有者恰为「被重掷方」（自掷）则取另一方（保证「来自对方」的 009 判定正确）
+  const source = holders.find((id) => id !== player) ?? player;
+  dealTrueDamage(g, player, dieIds.length, source);
   logLine(
     g,
     `${pname(player)} 因「凛冽之音」受到 ${dieIds.length} 点真实伤害（被重掷 ${dieIds.length} 颗能力骰）`,
   );
 }
 
-/** 结束阶段：弃置多余能力骰至意志上限；返回实际弃置数量 */
-export function endPhase(g: GameState, player: PlayerId): number {
+/** 结束阶段：弃置多余能力骰至意志上限。
+ *  `dieIds` = 玩家显式选择的骰（必须恰好等于当前超出数）；省略 → 按 冥想→攻击→防御 的**默认**顺序弃（仅供 AI/测试）。
+ *  返回实际弃置数量。 */
+export function endPhase(g: GameState, player: PlayerId, dieIds?: string[]): number {
   const p = g.players[player];
   const will = effectiveWill(p);
-  let excess = totalDice(p) - will;
+  const excess = totalDice(p) - will;
   if (excess <= 0) return 0;
-  const toDiscard = excess;
-  const order: ('meditation' | 'attack' | 'defense')[] = ['meditation', 'attack', 'defense'];
-  for (const kind of order) {
-    while (excess > 0 && p.areas[kind].length > 0) {
-      p.areas[kind].pop();
-      excess -= 1;
+  let discarded = 0;
+  if (dieIds) {
+    if (dieIds.length !== excess) throw new Error(`结束阶段需弃置恰好 ${excess} 颗能力骰`);
+    if (new Set(dieIds).size !== dieIds.length) throw new Error('duplicate die id');
+    const kinds: DiceKind[] = ['attack', 'defense', 'meditation'];
+    // 先整体校验归属（不通过则不改状态）
+    for (const id of dieIds) {
+      if (!kinds.some((k) => p.areas[k].some((d) => d.id === id))) throw new Error(`not your ability die: ${id}`);
     }
-    if (excess <= 0) break;
+    for (const id of dieIds) {
+      for (const k of kinds) {
+        const idx = p.areas[k].findIndex((d) => d.id === id);
+        if (idx >= 0) {
+          p.areas[k].splice(idx, 1);
+          break;
+        }
+      }
+    }
+    discarded = dieIds.length;
+  } else {
+    let left = excess;
+    for (const kind of ['meditation', 'attack', 'defense'] as const) {
+      while (left > 0 && p.areas[kind].length > 0) {
+        p.areas[kind].pop();
+        left -= 1;
+      }
+      if (left <= 0) break;
+    }
+    discarded = excess - left;
   }
-  const discarded = toDiscard - excess;
   if (discarded > 0) {
     logLine(g, `${pname(player)} 弃置 ${discarded} 颗能力骰（超出意志上限）`, 'end');
   }

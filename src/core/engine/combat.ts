@@ -9,6 +9,13 @@ export function artifactWithSkill(p: PlayerState, key: string): Artifact | undef
   return p.artifacts.find((a) => a.skills.some((s) => s.key === key));
 }
 
+/** 010「真实之剑」置换可用且拥有 ≥2 颗任意能力骰 → 「消耗 1 颗」的触发即使没有对应类型骰也可发动 */
+function canSwordConvert(p: PlayerState): boolean {
+  if (!hasActiveSkill(p, 'shenhong.sword')) return false;
+  const total = p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length;
+  return total >= 2;
+}
+
 /** 攻击伤害加成的来源（同属性取最大；label 供文案显示） */
 export function attackDamageBonus(
   g: GameState,
@@ -40,6 +47,20 @@ export function attackDamageBonus(
   // 025 屠虎·横贯（持续）：本回合的**第 2 次**攻击伤害 +2（与其它加成取最大）
   if (hasActiveSkill(p, 'tuohu.hengguan') && g.attacksThisTurn[player] === 1) {
     consider(2, '横贯');
+  }
+  // 030 救赎·寰宇飞升（持续·双向）：双方各自回合的**第一次**攻击伤害 +3（FAQ 30.1.1；任一方持有并激活即生效）
+  if (g.attacksThisTurn[player] === 0) {
+    for (const id of ['A', 'B'] as PlayerId[]) {
+      if (hasActiveSkill(g.players[id], 'jiushu.huanyu')) {
+        consider(3, '寰宇飞升');
+        break;
+      }
+    }
+  }
+  // 032 梦魇·恶意（持续）：你的攻击伤害 +X，X = 你的冥想骰数量的一半（向下取整）
+  // （FAQ 32.2.1：按"支付代价后"的状态计算；doAttack 里 paySlots 先于本函数，故天然满足）
+  if (hasActiveSkill(p, 'mengyan.eyi.continuous')) {
+    consider(Math.floor(p.areas.meditation.length / 2), '恶意');
   }
   return best;
 }
@@ -121,32 +142,64 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
   const effDie = eff[0];
+  // 028 天罚（激活·本回合）：攻击点数「始终视为固定值」（FAQ 28.1.1）；同时记录对方只能用哪类骰抵挡
+  const tianfa = g.tianfa[player];
+  const attackPoint = tianfa ? tianfa.value : effDie.value;
   const base = attackDamageBonus(g, player);
   const bonus = Math.max(base.value, mods?.minBonus ?? 0);
   const bonusLabel = mods?.minBonus !== undefined && mods.minBonus > base.value ? mods.bonusLabel : base.label;
-  const value = effDie.value + bonus;
-  g.pendingAttack = {
+  const value = attackPoint + bonus;
+  const pa: PendingAttack = {
     attacker: player,
     value,
     unblockable: g.unblockableThisTurn || mods?.forceUnblockable === true,
     physical: true,
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
-    baseValue: effDie.value,
+    baseValue: attackPoint,
     bonusValue: bonus,
     bonusLabel,
+    ...(tianfa ? { blockKind: tianfa.blockKind } : {}),
   };
-  applyNextTurnHalving(g, player, g.pendingAttack);
-  // 025 屠虎·横贯（持续）：记入本回合攻击次数（第 2 次攻击时加成已在 attackDamageBonus 中生效）
+  applyNextTurnHalving(g, player, pa);
+  // 025 屠虎·横贯（持续）：记入本回合攻击次数（即使随后被「不动菩提」取消）
   g.attacksThisTurn[player] += 1;
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
-  const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${g.pendingAttack.value} 点）` : '';
-  logLine(g, `${pname(player)} 使用 ${effDie.value} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${pa.value} 点）` : '';
+  logLine(g, `${pname(player)} 使用 ${attackPoint} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  // 034 金刚·不动菩提（触发）：防守方可用「神器上同点数存放骰」取消该攻击 → 先询问
+  const puti = artifactWithSkill(g.players[defender], 'jingang.puti.trigger');
+  if (
+    puti &&
+    hasActiveSkill(g.players[defender], 'jingang.puti.trigger') &&
+    g.pending === null &&
+    g.pendingQueue.length === 0 &&
+    (puti.heldDice ?? []).some((h) => h.value === effDie.value)
+  ) {
+    queuePending(g, {
+      kind: 'putiPick',
+      player: defender,
+      owner: player,
+      value: effDie.value,
+      mode: 'attack',
+      attack: pa,
+    });
+    pumpPending(g);
+    return;
+  }
+  commitAttack(g, pa);
+}
+
+/** 正式提交一次攻击为「待结算」（设置 pendingAttack；011 灵能屏障触发） */
+export function commitAttack(g: GameState, pa: PendingAttack): void {
+  if (g.pendingAttack) throw new Error('pending attack unresolved');
+  g.pendingAttack = pa;
+  const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   // 011 顿悟·灵能屏障 触发：当对方使用 1 个攻击骰后，可消耗 1 个冥想骰使伤害减半
   if (
     g.pending === null &&
     hasActiveSkill(g.players[defender], 'dunwu.barrier.trigger') &&
-    g.players[defender].areas.meditation.length >= 1
+    (g.players[defender].areas.meditation.length >= 1 || canSwordConvert(g.players[defender]))
   ) {
     g.pending = { kind: 'dunwuHalve', player: defender };
   }
@@ -176,28 +229,61 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   const pa = g.pendingAttack;
   if (!pa) throw new Error('no pending attack');
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
-  const defender = g.players[defenderId];
-  let blocked = false;
-  let damageDealt = 0;
 
   if (!pa.unblockable && costSlots && costSlots.length > 0) {
-    const eff = paySlots(g, defenderId, [{ kind: 'defense' }], costSlots, undefined, 'defense');
-    blocked = true;
-    logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点防御骰抵挡了攻击`);
-    // 021 决意（持续·计数 5）：被抵挡时仍造成一半伤害
-    damageDealt = count5HalfDamage(g, pa);
-  } else {
-    // 020 兽魂：由攻击方选择「取消伤害（持有者计数 −1）」还是「正常造成伤害」——时机在抵挡决定之后
-    const sh = shouhunCard(g, defenderId);
-    if (sh && g.pending === null) {
+    // 028 天罚：若本次攻击限制了抵挡骰类型（白昼之火=冥想 / 陨落=攻击），则按该类型支付
+    const blockKind = pa.blockKind ?? 'defense';
+    const eff = paySlots(g, defenderId, [{ kind: blockKind }], costSlots, undefined, 'defense');
+    const kindCn = blockKind === 'attack' ? '攻击' : blockKind === 'meditation' ? '冥想' : '防御';
+    logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点${kindCn}骰抵挡了攻击`);
+    // 034 金刚·不动菩提（触发）：攻击方可用「神器上同点数存放骰」取消对方这次抵挡
+    const puti = artifactWithSkill(g.players[pa.attacker], 'jingang.puti.trigger');
+    if (
+      puti &&
+      hasActiveSkill(g.players[pa.attacker], 'jingang.puti.trigger') &&
+      g.pending === null &&
+      g.pendingQueue.length === 0 &&
+      (puti.heldDice ?? []).some((h) => h.value === eff[0].value)
+    ) {
       g.pendingAttack = null;
-      queuePending(g, { kind: 'shouhunCancel', player: pa.attacker, owner: defenderId, attack: pa });
+      queuePending(g, {
+        kind: 'putiPick',
+        player: pa.attacker,
+        owner: defenderId,
+        value: eff[0].value,
+        mode: 'block',
+        attack: pa,
+      });
       pumpPending(g);
       return;
     }
-    damageDealt = pa.value;
+    finalizeAttackResolution(g, pa, true);
+    return;
   }
 
+  // 未抵挡：020 兽魂（由攻击方决定「取消伤害 / 正常造成伤害」，时机在抵挡决定之后）
+  const sh = shouhunCard(g, defenderId);
+  if (sh && g.pending === null) {
+    g.pendingAttack = null;
+    queuePending(g, { kind: 'shouhunCancel', player: pa.attacker, owner: defenderId, attack: pa });
+    pumpPending(g);
+    return;
+  }
+  finalizeAttackResolution(g, pa, false);
+}
+
+/** 一次攻击的收尾（被抵挡/未抵挡皆可）：扣血、事件点、028×013 电刑、推进多段队列 */
+export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocked: boolean): void {
+  const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defender = g.players[defenderId];
+  let damageDealt = pa.value;
+  // 「被抵挡」= 用了防御骰（一个事实）；与「伤害=0」是两回事。唯一例外：021 半伤为 0 时按 FAQ 21.1.7 不算被抵挡
+  let blockedForTriggers = blocked;
+  if (blocked) {
+    const r = count5HalfDamage(g, pa);
+    damageDealt = r.damage;
+    blockedForTriggers = !(r.halfApplied && damageDealt === 0);
+  }
   if (damageDealt > 0 || !blocked) {
     const before = defender.life;
     applyLifeLoss(g, defenderId, damageDealt);
@@ -210,24 +296,34 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;
-  afterAttackResolved(g, pa, { blocked, damageDealt });
+  afterAttackResolved(g, pa, { blocked: blockedForTriggers, damageDealt });
+  // FAQ 28.2.1：028「陨落」限制下，对方用**攻击骰**抵挡 = “使用攻击骰” → 可触发其「电刑」（在攻击方的回合反击）
+  if (
+    blocked &&
+    pa.blockKind === 'attack' &&
+    hasActiveSkill(defender, 'minglei.dianxing') &&
+    defender.areas.meditation.length >= 2
+  ) {
+    queuePending(g, { kind: 'dianxing', player: defenderId });
+  }
   // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
   pumpAttackQueue(g);
 }
 
-/** 021 决意「野火燎原」（持续·计数 5）：被抵挡时仍造成一半伤害（向下取整；同种削减不叠加） */
-function count5HalfDamage(g: GameState, pa: PendingAttack): number {
+/** 021 决意「野火燎原」（持续·计数 5）：被抵挡时仍造成一半伤害（向下取整；同种削减不叠加）。
+ *  返回 `halfApplied` 以区分「021 半伤」与「无 021 的普通抵挡」——前者半减为 0 时按 FAQ 21.1.7 不算被抵挡。 */
+function count5HalfDamage(g: GameState, pa: PendingAttack): { damage: number; halfApplied: boolean } {
   const card = artifactWithSkill(g.players[pa.attacker], 'jueyi.wildfire.continuous');
-  if (!card || card.count < 5) return 0;
+  if (!card || card.count < 5) return { damage: 0, halfApplied: false };
   const def = card.skills.find((s) => s.key === 'jueyi.wildfire.continuous');
-  if (!def || !skillActive(card, def)) return 0;
+  if (!def || !skillActive(card, def)) return { damage: 0, halfApplied: false };
   // 同种削减不叠加（FAQ 21.1.5）：已被「灵能屏障」减半 → 不再二次减半，直接按已减半的伤害结算
   if (pa.halved) {
     logLine(
       g,
       `${pname(pa.attacker)} 「野火燎原」：本次攻击被抵挡，仍造成 ${pa.value} 点伤害（与减半不叠加，只减半一次）`,
     );
-    return pa.value;
+    return { damage: pa.value, halfApplied: true };
   }
   pa.halved = true;
   const half = Math.floor(pa.value / 2);
@@ -237,7 +333,7 @@ function count5HalfDamage(g: GameState, pa: PendingAttack): number {
       ? `${pname(pa.attacker)} 「野火燎原」：本次攻击被抵挡，仍造成一半伤害 ${half} 点（向下取整）`
       : `${pname(pa.attacker)} 「野火燎原」：半伤为 0 → 本次既不算被抵挡、也不算造成伤害`,
   );
-  return half > 0 ? half : 0;
+  return { damage: half, halfApplied: true };
 }
 
 /** 020 兽魂：该玩家是否有「兽魂」持续处于激活状态且计数 ≥1（用于「攻击方可取消伤害」） */
@@ -258,6 +354,26 @@ export function afterAttackResolved(
   res: { blocked: boolean; damageDealt: number },
 ): void {
   const atk = g.players[pa.attacker];
+  // 028 天罚：统计本回合通过攻击造成伤害的次数（满 2 次由 game.ts 结束主要阶段）
+  const tf = g.tianfa[pa.attacker];
+  if (res.damageDealt > 0 && tf && g.activePlayer === pa.attacker) {
+    tf.damageCount += 1;
+  }
+  // 031 恶兆·血祭（持续）：进行 1 次攻击后计数 +1（含虚拟攻击）；造成伤害后按**新计数**受 X 真实伤害
+  // （FAQ 31.1.1：0 伤害也 +1、但不受真伤；FAQ 31.1.2：先 +1 再按新计数结算）
+  {
+    const xueji = artifactWithSkill(atk, 'ezhao.xueji');
+    if (xueji && hasActiveSkill(atk, 'ezhao.xueji')) {
+      const before = xueji.count;
+      xueji.count = Math.min(xueji.countCap ?? 7, xueji.count + 1);
+      logLine(g, `「${xueji.name}」：进行 1 次攻击，计数 ${before} → ${xueji.count}`);
+      if (res.damageDealt > 0 && (g.phase as string) !== 'gameOver') {
+        logLine(g, `${pname(pa.attacker)} 「血祭」：攻击造成伤害，受到 ${xueji.count} 点真实伤害`);
+        dealTrueDamage(g, pa.attacker, xueji.count, pa.attacker);
+        if ((g.phase as string) === 'gameOver') return;
+      }
+    }
+  }
   // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
   if (res.damageDealt > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
   // 001 裁雨流：当你使用攻击骰造成伤害后（每回合最多 3 次）
@@ -320,7 +436,7 @@ function onAttackDamage(g: GameState, attacker: PlayerId, value: number): void {
   if (!hasActiveSkill(atk, 'youming.mingjie.continuous')) return;
   if (value === 6) {
     logLine(g, `${pname(attacker)} 「冥界行走」：攻击点数为 6，受到 3 点真实伤害`);
-    dealTrueDamage(g, attacker, 3);
+    dealTrueDamage(g, attacker, 3, attacker);
     return;
   }
   const n = heal(g, attacker, Math.ceil(value / 2));
@@ -332,15 +448,17 @@ function onAttackDamage(g: GameState, attacker: PlayerId, value: number): void {
   );
 }
 
-/** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消） */
-export function dealTrueDamage(g: GameState, target: PlayerId, amount: number): void {
+/** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消）。
+ *  `source` = 造成该真伤的**来源玩家**（009 只在「来自对方」即 source !== target 时挂起）。 */
+export function dealTrueDamage(g: GameState, target: PlayerId, amount: number, source: PlayerId): void {
   const p = g.players[target];
-  // 009 高塔铁幕触发：受到真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
+  // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
   if (
+    source !== target &&
     g.pending === null &&
     g.phase !== 'gameOver' &&
     hasActiveSkill(p, 'guwang.trigger') &&
-    p.areas.defense.length >= 1
+    (p.areas.defense.length >= 1 || canSwordConvert(p))
   ) {
     g.pending = { kind: 'guwangCancel', player: target, amount };
     return; // 伤害延后到决策解决时结算

@@ -16,7 +16,10 @@ const XIU = ['016', '017', '018'];
 const NISA = ['019', '020', '021'];
 const XIVA = ['022', '023', '024'];
 const LIFENG = ['025', '026', '027'];
-const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU, NISA, XIVA, LIFENG];
+const MATE = ['028', '029', '030'];
+const AIWA = ['031', '032', '033'];
+const MIYUN = ['034', '035', '036'];
+const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU, NISA, XIVA, LIFENG, MATE, AIWA, MIYUN];
 
 describe('renderSetup', () => {
   let root: HTMLElement;
@@ -30,8 +33,8 @@ describe('renderSetup', () => {
     expect(root.textContent).toContain('尘起时刻 · 开始新对局');
     expect(root.querySelector('.setup')).not.toBeNull();
     expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
-    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(10); // 9 英雄 + 随机
-    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(10); // 9 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(13); // 12 英雄 + 随机
+    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(13); // 12 英雄 + 随机
     expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
   });
 
@@ -40,10 +43,17 @@ describe('renderSetup', () => {
     expect(root.classList.contains('setup-page')).toBe(true);
   });
 
+  it('首页右下角显示版本号小字（来源 package.json → __APP_VERSION__）', () => {
+    renderSetup(root, () => {});
+    const v = root.querySelector('.app-version');
+    expect(v).not.toBeNull();
+    expect(v!.textContent).toMatch(/^v/); // 形如 v0.1.0（测试兜底环境为 vdev）
+  });
+
   it('选将矩阵：单列对齐，每个英雄恰好出现一次（不重不漏）', () => {
     renderSetup(root, () => {});
-    // 11 行 = 表头 + 10 行（9 个英雄 + 随机）
-    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(11);
+    // 14 行 = 表头 + 13 行（12 个英雄 + 随机）
+    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(14);
     const labels = Array.from(root.querySelectorAll('.hero-matrix-row .setup-label'))
       .map((n) => n.textContent)
       .filter((t) => t !== '');
@@ -57,6 +67,9 @@ describe('renderSetup', () => {
       '荒野行者·尼萨',
       '黑枪·希瓦',
       '天殇的战鬼·李封',
+      '破晓之剑·玛特',
+      '受缚邪灵·艾娃',
+      '渡世行僧·弥云',
       '随机',
     ]);
   });

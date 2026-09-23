@@ -233,6 +233,136 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
       { side: 'only', kind: 'ultimate', key: 'hanguang.ultimate' },
     ],
   },
+  '028': {
+    id: '028',
+    name: '天罚',
+    weapon: '大剑',
+    column: 1,
+    speed: 4,
+    will: 8,
+    skills: [
+      // 白昼之火（激活）：本回合你的攻击不可用防御骰抵挡，改为只能用冥想骰抵挡；攻击点数始终视为 6
+      { side: 'left', kind: 'activation', key: 'tianfa.bairi' },
+      // 陨落（激活）：同上，改为只能用攻击骰抵挡
+      { side: 'right', kind: 'activation', key: 'tianfa.yunluo' },
+    ],
+  },
+  '029': {
+    id: '029',
+    name: '真言',
+    weapon: '圣典',
+    column: 2,
+    distribution: { defense: [1, 6], attack: [3, 4], meditation: [2, 5] },
+    skills: [
+      // 全知（持续）：速度 +1；补充阶段与重掷阶段不按常规分布落区，由玩家自行分配全部能力骰
+      { side: 'left', kind: 'continuous', key: 'zhenyan.quanzhi' },
+      // 神圣干涉（激活）：最多 3 颗能力骰统一改为指定点数并移到对应区域；然后回复 3 点生命
+      { side: 'right', kind: 'activation', key: 'zhenyan.ganshe' },
+    ],
+  },
+  '030': {
+    id: '030',
+    name: '救赎',
+    weapon: '头环',
+    column: 3,
+    life: 45,
+    chargeReq: 2,
+    skills: [
+      // 寰宇飞升（持续·双向）：双方各自回合的第一次攻击伤害 +3
+      { side: 'only', kind: 'continuous', key: 'jiushu.huanyu' },
+      // 寰宇飞升（必杀）：消耗 4 冥想骰 → 3 攻击骰 + 3 防御骰 → 回复 10 → 失去持续式
+      { side: 'only', kind: 'ultimate', key: 'jiushu.huanyu.ultimate' },
+    ],
+  },
+  '031': {
+    id: '031',
+    name: '恶兆',
+    weapon: '匕首',
+    column: 1,
+    speed: 4,
+    will: 7,
+    countCap: 7,
+    skills: [
+      // 血祭（持续）：每次攻击后计数 +1（上限 7）；造成伤害后按新计数受等量真实伤害
+      { side: 'left', kind: 'continuous', key: 'ezhao.xueji' },
+      // 清算（激活）：弃置对方 X 颗（X=计数），每少 1 颗造成 3 真伤；随后计数 −1
+      { side: 'right', kind: 'activation', key: 'ezhao.qingsuan' },
+    ],
+  },
+  '032': {
+    id: '032',
+    name: '梦魇',
+    weapon: '披风',
+    column: 2,
+    distribution: { defense: [1, 6], attack: [2, 5], meditation: [3, 4] },
+    skills: [
+      // 低语（持续）：主要阶段结束时宣称 1 个类型，获得 1 随机骰并移入该区；不符分布则尘落 +1
+      { side: 'left', kind: 'continuous', key: 'mengyan.diyu' },
+      // 恶意（启动）：消耗 1 攻击骰 → 获得 2 随机冥想骰
+      { side: 'right', kind: 'activate', key: 'mengyan.eyi' },
+      // 恶意（持续）：攻击伤害 + floor(冥想骰数 / 2)
+      { side: 'right', kind: 'continuous', key: 'mengyan.eyi.continuous' },
+    ],
+  },
+  '033': {
+    id: '033',
+    name: '凋零',
+    weapon: '枷锁',
+    column: 3,
+    life: 40,
+    chargeReq: 2,
+    skills: [
+      // 死亡亦逝（充能）：生命抹零——对方降至个位 0、自己尽可能回至个位 0（非伤害）
+      { side: 'only', kind: 'charge', key: 'diaoling.charge' },
+      // 死亡亦逝（持续）：双方各自回合结束时，择①全相同/②全不同并弃自己的能力骰
+      { side: 'only', kind: 'continuous', key: 'diaoling.siwang' },
+    ],
+  },
+  '035': {
+    id: '035',
+    name: '千劫',
+    weapon: '佛灯',
+    column: 2,
+    distribution: { defense: [1, 6], attack: [3, 4], meditation: [2, 5] },
+    skills: [
+      // 万丈明光（持续）：速度 +3、意志 +2；你的主要阶段开始时，弃置 2 个能力骰
+      { side: 'left', kind: 'continuous', key: 'qianjie.wanzhang' },
+      // 超度（启动）：消耗 2 个点数相同的冥想骰 → 5 真伤 → 重掷任意玩家一区并按分布落区
+      { side: 'right', kind: 'activate', key: 'qianjie.chaodu' },
+    ],
+  },
+  '036': {
+    id: '036',
+    name: '无相',
+    weapon: '念珠',
+    column: 3,
+    life: 50,
+    chargeReq: 4,
+    skills: [
+      // 万象俱灭（充能·必执行）：弃任意玩家 1 个能力骰 → 该玩家回复 3 点生命（需选择 → needsChoice）
+      { side: 'only', kind: 'charge', key: 'wuxiang.charge', needsChoice: true },
+      // 万象俱灭（必杀）：双方 6 区 1–6 点各存时启动；各保留 1 个，弃其余全部，真伤=被弃不同点数之和
+      { side: 'only', kind: 'ultimate', key: 'wuxiang.wanxiang.ultimate' },
+    ],
+  },
+  '034': {
+    id: '034',
+    name: '金刚',
+    weapon: '禅杖',
+    column: 1,
+    speed: 3,
+    will: 8,
+    skills: [
+      // 破障（激活）：清空神器上存放骰 → 取 3 个点数互不相同的骰放神器上（不入区域）
+      { side: 'left', kind: 'activation', key: 'jingang.pozhang' },
+      // 破障（持续）：可将神器上的骰当作自己的能力骰使用/消耗（类型由点数决定）
+      { side: 'left', kind: 'continuous', key: 'jingang.pozhang.continuous' },
+      // 不动菩提（激活）：同上清空并取 3 个点数互不相同的骰
+      { side: 'right', kind: 'activation', key: 'jingang.puti' },
+      // 不动菩提（触发）：对方使用防御/攻击骰后，移除神器上同点数骰，取消其效果
+      { side: 'right', kind: 'trigger', key: 'jingang.puti.trigger' },
+    ],
+  },
 };
 
 export function makeArtifact(id: string): Artifact {
@@ -268,4 +398,7 @@ export const HEROES = {
   nisa: { name: '荒野行者 尼萨', artifacts: ['019', '020', '021'] },
   xiva: { name: '黑枪 希瓦', artifacts: ['022', '023', '024'] },
   lifeng: { name: '天殇的战鬼 李封', artifacts: ['025', '026', '027'] },
+  mate: { name: '破晓之剑 玛特', artifacts: ['028', '029', '030'] },
+  aiwa: { name: '受缚邪灵 艾娃', artifacts: ['031', '032', '033'] },
+  miyun: { name: '渡世行僧 弥云', artifacts: ['034', '035', '036'] },
 } as const;

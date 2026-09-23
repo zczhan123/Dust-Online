@@ -360,3 +360,22 @@ describe('024 狂舞（凶弹业舞）', () => {
     expect(getLegalActions(g).some((a) => a.t === 'skill' && a.artifactId === '024')).toBe(false);
   });
 });
+
+describe('010 真实之剑 × 023 畏惧（置换「消耗 1 颗任意能力骰」）', () => {
+  it('用 2 颗任意能力骰置换 1 颗，点数视为 5', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '023', '024'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    activate(g, 'A', '010', 'left'); // 真实之剑·持续
+    activate(g, 'A', '023', 'left'); // 畏惧·启动
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    g.players.A.areas.defense = [{ id: 'a2', value: 3, kind: 'defense' }];
+    g.players.A.areas.meditation = [];
+    g.players.B.areas.attack = [{ id: 'bd', value: 4, kind: 'attack' }];
+    applyAction(g, { t: 'skill', artifactId: '023', side: 'left', params: { costSlots: [{ dieIds: ['a1', 'a2'] }] } });
+    expect(g.pending?.kind).toBe('weijuPay');
+    expect(g.pending && g.pending.kind === 'weijuPay' ? g.pending.initiatorValue : null).toBe(5);
+    expect(g.players.A.areas.attack).toHaveLength(0);
+    expect(g.players.A.areas.defense).toHaveLength(0);
+  });
+});

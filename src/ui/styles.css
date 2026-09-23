@@ -366,9 +366,6 @@ body {
 }
 .hint-player { font-weight: 700; }
 .hint-phase { white-space: pre-wrap; }
-.panel-tag { display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: #6b7280; margin: 0 0 4px 2px; }
-.panel-tag-player { font-weight: 700; }
-.panel-tag-hero { color: #6b7280; }
 .player-A { color: #2563eb; }
 .player-B { color: #dc2626; }
 
@@ -413,10 +410,8 @@ body {
   color: #4b5563;
 }
 /* 「置于『寒光』上的骰子」等标签：用玩家色（与 .sub-delta.player-A/B 同一套路） */
-.chip-label.panel-tag { display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: #6b7280; margin: 0 0 4px 2px; }
-.panel-tag-player { font-weight: 700; }
-.panel-tag-hero { color: #6b7280; }
 .player-A { color: #2563eb; }
+.chip-label.player-A { color: #2563eb; }
 .chip-label.player-B { color: #dc2626; }
 button.pay-die {
   border: 0;
@@ -452,6 +447,10 @@ button.pay-die {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+/* 「流式」修饰（寒光面板）：标题不再独占整行，与骰片同行，压缩到更少行 */
+.selector--flow .selector-head {
+  flex: 0 1 auto;
 }
 /* 长文本（标题/提示）必须可收缩、可断行，否则会把面板顶出容器（表现为“操作栏变宽”） */
 .selector-head .selector-title,
@@ -1026,6 +1025,8 @@ button.pay-die {
 }
 .actionzone .actionlist { background: transparent; border: 0; padding: 0; }
 .hint-skill { font-weight: 700; }
+/* 全场常驻提醒（如 027「凛冽之音」）：独立元素、加粗；配色走 .player-A/B */
+.hint-global { font-weight: 700; }
 
 /* ===== 双方生命（两行；顺序与面板一致） ===== */
 .vitals {
@@ -1043,9 +1044,9 @@ button.pay-die {
 .vitals-who { font-size: 12px; color: var(--muted); }
 .vitals-life { font-weight: 700; font-size: 15px; }
 
-/* 提示行：左=提示（可换行），右=尘落（不换行） */
+/* 提示行：左=提示（可换行，占据剩余宽度），右=尘落（不换行、始终第一行右上角） */
 .hint { justify-content: space-between; }
-.hint-left { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
+.hint-left { flex: 1 1 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
 .hint-notes { flex: 1 1 100%; font-size: 12px; color: #6b7280; overflow-wrap: anywhere; }
 .hint-dust { flex: 0 0 auto; color: #7a5a1e; font-weight: 700; white-space: nowrap; padding-left: 12px; }
 
@@ -1181,3 +1182,16 @@ button.pay-die {
 .app.density-compact { --actionzone-min-h: 104px; }     /* 电脑模式（紧凑） */
 .app.density-comfortable { --actionzone-min-h: 128px; } /* 触屏模式（舒适） */
 .actionzone { min-height: var(--actionzone-min-h, 104px); }
+
+/* 首页右下角：版本号小字（唯一来源 package.json → __APP_VERSION__） */
+.app-version {
+  position: fixed;
+  right: 10px;
+  bottom: 6px;
+  font-size: 11px;
+  line-height: 1;
+  color: #8a8f98;
+  pointer-events: none;
+  user-select: none;
+  z-index: 20;
+}

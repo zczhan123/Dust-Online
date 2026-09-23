@@ -16,6 +16,7 @@ const ui: UiState = {
   convertPick: null,
   fengmangPick: null,
   hanguangPick: null,
+  quanzhi: null,
   dustFlow: null,
   prefs: loadPrefs(),
   settingsOpen: false,
