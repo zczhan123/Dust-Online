@@ -1,182 +1,372 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderSetup, type SetupOptions } from '../src/ui/setupScreen';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  HEROES,
+  renderBuildSetup,
+  renderHeroSetup,
+  renderRotationSetup,
+  renderSetup,
+  type SetupOptions,
+} from '../src/ui/setupScreen';
 
-const click = (root: HTMLElement, selector: string): void => {
-  const node = root.querySelector<HTMLElement>(selector);
-  if (!node) throw new Error(`missing element: ${selector}`);
-  node.click();
+type El = HTMLElement;
+const q = <T extends El = El>(root: El, sel: string): T | null => root.querySelector<T>(sel);
+const qa = <T extends El = El>(root: El, sel: string): T[] => Array.from(root.querySelectorAll<T>(sel));
+const clickEl = (n: El | null): void => {
+  if (!n) throw new Error('missing element');
+  n.click();
+};
+const dbl = (n: El): void => {
+  n.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+};
+const ab = (root: El, hero: string, side: 'A' | 'B'): El => {
+  const n = qa(root, `.pick-ab.${side}`).find((b) => b.dataset.hero === hero);
+  if (!n) throw new Error(`missing ab ${hero}/${side}`);
+  return n;
+};
+const candSlotBySrc = (root: El, side: 'A' | 'B', id: string): El | undefined =>
+  qa(root, `.pick-col.cand.${side} .pick-slot`).find(
+    (s) => s.querySelector('img')?.getAttribute('src') === `./cards/${id}.jpg`,
+  );
+const colOfId = (id: string): number => {
+  for (const k of Object.keys(HEROES) as Array<keyof typeof HEROES>) {
+    const i = (HEROES[k] as string[]).indexOf(id);
+    if (i >= 0) return i + 1;
+  }
+  return 0;
 };
 
-const KONG = ['001', '002', '003'];
-const YING = ['004', '005', '006'];
-const BAT = ['007', '008', '009'];
-const TATA = ['010', '011', '012'];
-const ZORAY = ['013', '014', '015'];
-const XIU = ['016', '017', '018'];
-const NISA = ['019', '020', '021'];
-const XIVA = ['022', '023', '024'];
-const LIFENG = ['025', '026', '027'];
-const MATE = ['028', '029', '030'];
-const AIWA = ['031', '032', '033'];
-const MIYUN = ['034', '035', '036'];
-const HERO_SETS = [KONG, YING, BAT, TATA, ZORAY, XIU, NISA, XIVA, LIFENG, MATE, AIWA, MIYUN];
+const HERO_LABEL_ORDER = [
+  '雨中剑圣·空',
+  '永暗之刃·影',
+  '孤塔之王·巴顿二世',
+  '地狱的魔女·塔塔萝丝',
+  '轰鸣审判官·佐雷',
+  '漆黑死神·修',
+  '荒野行者·尼萨',
+  '黑枪·希瓦',
+  '天殇的战鬼·李封',
+  '破晓之剑·玛特',
+  '受缚邪灵·艾娃',
+  '渡世行僧·弥云',
+];
 
-describe('renderSetup', () => {
-  let root: HTMLElement;
-  beforeEach(() => {
-    document.body.innerHTML = '<div id="app"></div>';
-    root = document.getElementById('app')!;
-  });
+let root: El;
+beforeEach(() => {
+  document.body.innerHTML = '<div id="app"></div>';
+  root = document.getElementById('app')!;
+});
 
-  it('renders the setup form and its choices', () => {
-    renderSetup(root, () => {});
-    expect(root.textContent).toContain('尘起时刻 · 开始新对局');
-    expect(root.querySelector('.setup')).not.toBeNull();
-    expect(root.querySelector('.setup-start')?.textContent).toBe('开始游戏');
-    expect(root.querySelectorAll('[data-role="heroA"]').length).toBe(13); // 12 英雄 + 随机
-    expect(root.querySelectorAll('[data-role="heroB"]').length).toBe(13); // 12 英雄 + 随机
-    expect(root.querySelectorAll('[data-role="first"]').length).toBe(3);
-  });
-
-  it('marks the app root as the setup page (封面背景由 CSS 负责)', () => {
-    renderSetup(root, () => {});
+describe('renderHeroSetup（预选模式 · 3 栏）', () => {
+  it('结构：3 栏 / 12 行（单列名 + A/B）/ 顶栏文案 / 附加模组禁用', () => {
+    renderHeroSetup(root, () => {});
     expect(root.classList.contains('setup-page')).toBe(true);
-  });
-
-  it('首页右下角显示版本号小字（来源 package.json → __APP_VERSION__）', () => {
-    renderSetup(root, () => {});
-    const v = root.querySelector('.app-version');
-    expect(v).not.toBeNull();
-    expect(v!.textContent).toMatch(/^v/); // 形如 v0.1.0（测试兜底环境为 vdev）
-  });
-
-  it('选将矩阵：单列对齐，每个英雄恰好出现一次（不重不漏）', () => {
-    renderSetup(root, () => {});
-    // 14 行 = 表头 + 13 行（12 个英雄 + 随机）
-    expect(root.querySelectorAll('.hero-matrix-row').length).toBe(14);
-    const labels = Array.from(root.querySelectorAll('.hero-matrix-row .setup-label'))
-      .map((n) => n.textContent)
-      .filter((t) => t !== '');
-    expect(labels).toEqual([
-      '雨中剑圣·空',
-      '永暗之刃·影',
-      '孤塔之王·巴顿二世',
-      '地狱的魔女·塔塔萝丝',
-      '轰鸣审判官·佐雷',
-      '漆黑死神·修',
-      '荒野行者·尼萨',
-      '黑枪·希瓦',
-      '天殇的战鬼·李封',
-      '破晓之剑·玛特',
-      '受缚邪灵·艾娃',
-      '渡世行僧·弥云',
-      '随机',
+    const board = q(root, '.pick-board')!;
+    expect(board.classList.contains('yuxuan')).toBe(true);
+    expect(board.children).toHaveLength(3);
+    expect(qa(root, '.pick-cell')).toHaveLength(12);
+    expect(qa(root, '.pick-cell .pick-name').map((n) => n.textContent)).toEqual(HERO_LABEL_ORDER);
+    expect(qa(root, '.pick-cell .pick-ab')).toHaveLength(24);
+    expect(q(root, '.pick-ttl')!.textContent).toBe('预选模式');
+    expect(q(root, '.pick-back')!.textContent).toBe('返回');
+    expect(q(root, '.pick-start')!.textContent).toBe('开始游戏');
+    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual([
+      '使用传奇英雄面板',
+      '使用战术牌',
+    ]);
+    expect(q(root, '.pick-tbtn[data-first="random"]')!.classList.contains('on')).toBe(true);
+    expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
+      '第一列',
+      '第二列',
+      '第三列',
     ]);
   });
 
-  it('defaults 随机 as selected for both rows', () => {
-    renderSetup(root, () => {});
-    expect(
-      root.querySelector('[data-role="heroA"][data-value="random"]')!.classList.contains('selected'),
-    ).toBe(true);
-    expect(
-      root.querySelector('[data-role="heroB"][data-value="random"]')!.classList.contains('selected'),
-    ).toBe(true);
-    expect(
-      root.querySelector('[data-role="first"][data-value="random"]')!.classList.contains('selected'),
-    ).toBe(true);
+  it('点 A 选定英雄 → 确认列出现其 3 张卡；确定盖章；取消清空', () => {
+    renderHeroSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    expect(qa(root, '.pick-col.confirm.A .pick-slot img').map((i) => i.getAttribute('src'))).toEqual([
+      './cards/001.jpg',
+      './cards/002.jpg',
+      './cards/003.jpg',
+    ]);
+    expect(q(root, '.pick-col.confirm.A .pick-chead .sub')!.textContent).toBe('雨中剑圣·空');
+    clickEl(q(root, '.pick-col.confirm.A .pick-ok'));
+    expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(1);
+    clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
+    expect(qa(root, '.pick-col.confirm.A .pick-slot img')).toHaveLength(0);
+    expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(0);
   });
 
-  it('disables the opposite column cell of the same specific hero', () => {
-    renderSetup(root, () => {});
-    // A 选“空” → B 的“空”单元格禁用
-    click(root, '[data-role="heroA"][data-value="kong"]');
-    const bKong = root.querySelector<HTMLButtonElement>('[data-role="heroB"][data-value="kong"]')!;
-    expect(bKong.disabled).toBe(true);
-    expect(bKong.classList.contains('choice--muted')).toBe(true);
-    // 随机永不被互斥
-    expect(
-      root.querySelector<HTMLButtonElement>('[data-role="heroB"][data-value="random"]')!.disabled,
-    ).toBe(false);
-
-    // 回到 A=随机 后，B 选“空” → A 的“空”单元格禁用（反之亦然）
-    click(root, '[data-role="heroA"][data-value="random"]');
-    expect(bKong.disabled).toBe(false);
-    click(root, '[data-role="heroB"][data-value="kong"]');
-    const aKong = root.querySelector<HTMLButtonElement>('[data-role="heroA"][data-value="kong"]')!;
-    expect(aKong.disabled).toBe(true);
-    expect(aKong.classList.contains('choice--muted')).toBe(true);
+  it('同一英雄互斥：A 选 kong 后，B 行 kong 的按钮禁用且不生效', () => {
+    renderHeroSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    const bBtn = ab(root, 'kong', 'B');
+    expect(bBtn.classList.contains('is-taken')).toBe(true);
+    bBtn.click();
+    expect(q(root, '.pick-col.confirm.A .pick-chead .sub')!.textContent).toBe('雨中剑圣·空');
+    expect(qa(root, '.pick-col.confirm.B .pick-slot img')).toHaveLength(0);
   });
 
-  it('starts deterministically when both columns pick specific heroes', () => {
+  it('开始游戏：先手与双方英雄正确', () => {
     const onStart = vi.fn();
-    renderSetup(root, onStart);
-    click(root, '[data-role="heroA"][data-value="kong"]');
-    click(root, '[data-role="heroB"][data-value="ying"]');
-    click(root, '.setup-start');
+    renderHeroSetup(root, onStart);
+    ab(root, 'kong', 'A').click();
+    ab(root, 'ying', 'B').click();
+    clickEl(q(root, '.pick-tbtn[data-first="A"]'));
+    clickEl(q(root, '.pick-start'));
     expect(onStart).toHaveBeenCalledTimes(1);
-    const opts = onStart.mock.calls[0][0] as SetupOptions;
-    expect(opts.heroA).toEqual(KONG);
-    expect(opts.heroB).toEqual(YING);
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.heroA).toEqual(['001', '002', '003']);
+    expect(o.heroB).toEqual(['004', '005', '006']);
+    expect(o.firstPlayer).toBe('A');
   });
 
-  it('selects 雨中剑圣·空 + 玩家A 先手 (对手是另一位英雄)', () => {
+  it('未选的一方随机补足，且双方不同英雄', () => {
     const onStart = vi.fn();
-    renderSetup(root, onStart);
-    click(root, '[data-role="heroA"][data-value="kong"]');
-    click(root, '[data-role="first"][data-value="A"]');
-    expect(
-      root.querySelector('[data-role="heroA"][data-value="kong"]')!.classList.contains('selected'),
-    ).toBe(true);
-    click(root, '.setup-start');
-    expect(onStart).toHaveBeenCalledTimes(1);
-    const opts = onStart.mock.calls[0][0] as SetupOptions;
-    expect(opts.heroA).toEqual(KONG);
-    expect(opts.firstPlayer).toBe('A');
-    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroB))).toBe(true);
-    expect(JSON.stringify(opts.heroB)).not.toBe(JSON.stringify(KONG));
+    renderHeroSetup(root, onStart);
+    ab(root, 'batton', 'A').click();
+    clickEl(q(root, '.pick-start'));
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.heroA).toEqual(['007', '008', '009']);
+    expect(new Set(o.heroB).size).toBe(3);
+    expect(o.heroB).not.toEqual(['007', '008', '009']);
   });
 
-  it('can select 孤塔之王·巴顿二世', () => {
+  it('返回 →「左右互搏」玩法菜单', () => {
+    renderHeroSetup(root, () => {});
+    clickEl(q(root, '.pick-back'));
+    expect(qa(root, '.menu .menu-item .word').map((n) => n.textContent)).toEqual([
+      '轮选模式',
+      '预选模式',
+      '构筑模式',
+    ]);
+  });
+});
+
+describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
+  it('结构：5 栏（确认A/候选A/名单/候选B/确认B）；附加=异相/战术', () => {
+    renderBuildSetup(root, () => {});
+    const board = q(root, '.pick-board')!;
+    expect(board.classList.contains('gouzu')).toBe(true);
+    const cols = qa(root, '.pick-board > .pick-col').map((c) => c.className);
+    expect(cols).toHaveLength(5);
+    expect(cols[0]).toContain('confirm');
+    expect(cols[0]).toContain('A');
+    expect(cols[1]).toContain('cand');
+    expect(cols[1]).toContain('A');
+    expect(cols[2]).toContain('names');
+    expect(cols[3]).toContain('cand');
+    expect(cols[3]).toContain('B');
+    expect(cols[4]).toContain('confirm');
+    expect(cols[4]).toContain('B');
+    expect(q(root, '.pick-ttl')!.textContent).toBe('构筑模式');
+    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual([
+      '使用异相神器',
+      '使用战术牌',
+    ]);
+    expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
+      '第一列',
+      '第二列',
+      '第三列',
+    ]);
+  });
+
+  it('点名 → 候选 3 件；选中→确定 → 按列落入确认列', () => {
+    renderBuildSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    expect(q(root, '.pick-col.cand.A .pick-chead .sub')!.textContent).toBe('雨中剑圣·空');
+    expect(qa(root, '.pick-col.cand.A .pick-slot')).toHaveLength(3);
+    candSlotBySrc(root, 'A', '002')!.click();
+    expect(candSlotBySrc(root, 'A', '002')!.classList.contains('picked')).toBe(true);
+    clickEl(q(root, '.pick-col.cand.A .pick-ok'));
+    const slot = q(root, '.pick-col.confirm.A .pick-slot[data-col="2"]')!;
+    expect(slot.querySelector('img')!.getAttribute('src')).toBe('./cards/002.jpg');
+  });
+
+  it('双击候选卡 = 直接确定', () => {
+    renderBuildSetup(root, () => {});
+    ab(root, 'ying', 'A').click();
+    dbl(candSlotBySrc(root, 'A', '004')!);
+    expect(q(root, '.pick-col.confirm.A .pick-slot[data-col="1"] img')!.getAttribute('src')).toBe(
+      './cards/004.jpg',
+    );
+  });
+
+  it('已被选取：一方确定后，另一方候选同名神器显示「已被选取」', () => {
+    renderBuildSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    dbl(candSlotBySrc(root, 'A', '001')!);
+    ab(root, 'kong', 'B').click();
+    expect(qa(root, '.pick-col.cand.B .pick-slot.taken .pick-taken').map((n) => n.textContent)).toEqual([
+      '已被选取',
+    ]);
+  });
+
+  it('满 3 件 → 印章 + 候选列锁定；取消后解除', () => {
+    renderBuildSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    dbl(candSlotBySrc(root, 'A', '001')!);
+    dbl(candSlotBySrc(root, 'A', '002')!);
+    dbl(candSlotBySrc(root, 'A', '003')!);
+    expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(1);
+    expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(true);
+    clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
+    expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(0);
+    expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(false);
+  });
+
+  it('开始游戏：双方各 3 件、每列一件、六件互不重复', () => {
     const onStart = vi.fn();
-    renderSetup(root, onStart);
-    click(root, '[data-role="heroA"][data-value="batton"]');
-    click(root, '.setup-start');
-    expect(onStart).toHaveBeenCalledTimes(1);
-    const opts = onStart.mock.calls[0][0] as SetupOptions;
-    expect(opts.heroA).toEqual(BAT);
-    expect(JSON.stringify(opts.heroB)).not.toBe(JSON.stringify(BAT));
-  });
-
-  it('resolves random defaults to two different heroes', () => {
-    const onStart = vi.fn();
-    renderSetup(root, onStart);
-    click(root, '.setup-start');
-    expect(onStart).toHaveBeenCalledTimes(1);
-    const opts = onStart.mock.calls[0][0] as SetupOptions;
-    expect(['A', 'B']).toContain(opts.firstPlayer);
-    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroA))).toBe(true);
-    expect(HERO_SETS.some((h) => JSON.stringify(h) === JSON.stringify(opts.heroB))).toBe(true);
-    expect(JSON.stringify(opts.heroA)).not.toBe(JSON.stringify(opts.heroB));
-  });
-
-  it('shows mode/draft placeholder options (disabled, marked 开发中)', () => {
-    renderSetup(root, () => {});
-    expect(root.querySelectorAll('[data-role="mode"]').length).toBe(4);
-    expect(root.querySelectorAll('[data-role="draft"]').length).toBe(4);
-    // 默认可用项被选中
-    expect(
-      root.querySelector('[data-role="mode"][data-value="hotseat"]')!.classList.contains('selected'),
-    ).toBe(true);
-    expect(
-      root.querySelector('[data-role="draft"][data-value="hero"]')!.classList.contains('selected'),
-    ).toBe(true);
-    // 占位项禁用并标注“开发中”
-    const soon = Array.from(root.querySelectorAll<HTMLButtonElement>('.choice--soon'));
-    expect(soon.length).toBe(6); // 3 个禁用模式 + 3 个禁用选将
-    for (const b of soon) {
-      expect(b.disabled).toBe(true);
-      expect(b.textContent).toContain('开发中');
+    renderBuildSetup(root, onStart);
+    ab(root, 'kong', 'A').click();
+    dbl(candSlotBySrc(root, 'A', '001')!);
+    clickEl(q(root, '.pick-start'));
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.heroA[0]).toBe('001');
+    const all = [...o.heroA, ...o.heroB];
+    expect(new Set(all).size).toBe(6);
+    for (const trio of [o.heroA, o.heroB]) {
+      trio.forEach((id, i) => expect(colOfId(id)).toBe(i + 1));
     }
+  });
+});
+
+describe('渲染入口 / 菜单', () => {
+  it('renderSetup 第二层：「构筑模式」进入构筑界面', () => {
+    renderSetup(root, () => {});
+    clickEl(q(root, '.menu-item[data-act="jubai"]'));
+    clickEl(q(root, '.menu-item[data-act="gouzu"]'));
+    expect(q(root, '.pick-board.gouzu')).not.toBeNull();
+  });
+
+  it('renderSetup 第二层：「轮选模式」进入轮选准备态', () => {
+    renderSetup(root, () => {});
+    clickEl(q(root, '.menu-item[data-act="jubai"]'));
+    clickEl(q(root, '.menu-item[data-act="lunxuan"]'));
+    expect(q(root, '.pick-ttl')!.textContent).toBe('轮选模式 · 准备');
+  });
+});
+
+describe('renderRotationSetup（轮选模式）', () => {
+  const legal = (): HTMLElement[] => qa(root, '.pick-boardwrap .pick-slot.legal');
+  const enterAs = (val: 'A' | 'B' | 'random'): void =>
+    clickEl(q(root, `.pick-tbtn[data-first="${val}"]`));
+
+  it('准备态 → 点先手即进入：九宫格 9 件 / 第 1 步 / 9 件可选 / 开始游戏禁用', () => {
+    renderRotationSetup(root, () => {});
+    expect(q(root, '.pick-ttl')!.textContent).toBe('轮选模式 · 准备');
+    expect(qa(root, '.pick-tbtn[data-first]')).toHaveLength(3);
+    expect(qa(root, '.pick-tbtn.on')).toHaveLength(0); // 三个值不默认选中
+    expect(q(root, '.pick-start')).toBeNull(); // 已去掉「进入轮选」
+    expect(q(root, '.pick-board')).toBeNull();
+    enterAs('random');
+    expect(q(root, '.pick-board.lunxuan')).not.toBeNull();
+    expect(qa(root, '.pick-boardwrap .pick-slot')).toHaveLength(9);
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 1/6 步');
+    expect(legal()).toHaveLength(9);
+    const start = q<HTMLButtonElement>(root, '.pick-start')!;
+    expect(start.textContent).toBe('开始游戏');
+    expect(start.disabled).toBe(true);
+  });
+
+  it('准备态可选先手：点玩家B → 进入后先手＝玩家B', () => {
+    renderRotationSetup(root, () => {});
+    enterAs('B');
+    expect(q(root, '.pick-top .pick-tbtn.on.B')!.textContent).toBe('玩家B');
+  });
+
+  it('完整 6 步：移除 → 后手选＋另 1 件归先手 → … → 完成；开始游戏回调正确', () => {
+    const onStart = vi.fn();
+    renderRotationSetup(root, onStart);
+    enterAs('random');
+
+    // 步 1：移除 1 件
+    legal()[0].click();
+    expect(qa(root, '.pick-boardwrap .pick-slot.removed')).toHaveLength(1);
+    expect(qa(root, '.pick-boardwrap .pick-removed-tag').map((n) => n.textContent)).toEqual(['已移除']);
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 2/6 步');
+    expect(legal()).toHaveLength(2); // 被移除神器所在列剩 2 件
+
+    // 步 2：后手选 1，另 1 件归先手（同列）
+    legal()[0].click();
+    const aIds = qa(root, '.pick-col.confirm.A .pick-slot[data-card-id]').map((s) => s.getAttribute('data-card-id')!);
+    const bIds = qa(root, '.pick-col.confirm.B .pick-slot[data-card-id]').map((s) => s.getAttribute('data-card-id')!);
+    expect(aIds).toHaveLength(1);
+    expect(bIds).toHaveLength(1);
+    expect(colOfId(aIds[0])).toBe(colOfId(bIds[0]));
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 3/6 步');
+
+    // 步 3：先手任选 1
+    legal()[0].click();
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 4/6 步');
+
+    // 步 4：连点两次（各列一次）
+    legal()[0].click();
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 4/6 步');
+    legal()[0].click();
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 5/6 步');
+
+    // 步 5：先手补最后 1 件 → 完成
+    expect(legal()).toHaveLength(2);
+    legal()[0].click();
+    expect(q(root, '.pick-step-n')!.textContent).toBe('已完成');
+    expect(qa(root, '.pick-boardwrap .pick-slot.removed')).toHaveLength(3);
+    expect(qa(root, '.pick-boardwrap .pick-slot.taken')).toHaveLength(6);
+
+    const start = q<HTMLButtonElement>(root, '.pick-start')!;
+    expect(start.disabled).toBe(false);
+    start.click();
+    expect(onStart).toHaveBeenCalledTimes(1);
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(new Set([...o.heroA, ...o.heroB]).size).toBe(6);
+    for (const trio of [o.heroA, o.heroB]) trio.forEach((id, i) => expect(colOfId(id)).toBe(i + 1));
+  });
+
+  it('重新随机：重置进度与九宫格', () => {
+    renderRotationSetup(root, () => {});
+    enterAs('random');
+    legal()[0].click();
+    expect(qa(root, '.pick-boardwrap .pick-slot.removed')).toHaveLength(1);
+    clickEl(q(root, '.pick-reroll'));
+    expect(q(root, '.pick-step-n')!.textContent).toBe('第 1/6 步');
+    expect(qa(root, '.pick-boardwrap .pick-slot.removed')).toHaveLength(0);
+    expect(legal()).toHaveLength(9);
+  });
+});
+
+describe('详情浮窗（右键 / 单实例替换 / 离开后解除监听）', () => {
+  let origEfp: unknown;
+  beforeEach(() => {
+    origEfp = (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+  });
+  afterEach(() => {
+    if (origEfp) (document as unknown as { elementFromPoint: unknown }).elementFromPoint = origEfp;
+    else delete (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+  });
+
+  it('右键卡打开弹窗；再右键另一张＝单实例替换；返回后监听解除', async () => {
+    renderHeroSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    const slots = qa(root, '.pick-col.confirm.A .pick-slot[data-card-id]');
+    expect(slots).toHaveLength(3);
+
+    (document as unknown as { elementFromPoint: () => Element }).elementFromPoint = () => slots[0];
+    const e1 = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 });
+    root.dispatchEvent(e1);
+    expect(e1.defaultPrevented).toBe(true);
+    expect(q(root, '.pick-modal.on')).not.toBeNull();
+    const src1 = q(root, '.pick-modal-box img')!.getAttribute('src');
+
+    await new Promise((r) => setTimeout(r, 150)); // 越过切换节流（120ms）
+    (document as unknown as { elementFromPoint: () => Element }).elementFromPoint = () => slots[1];
+    const e2 = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 });
+    root.dispatchEvent(e2);
+    expect(qa(root, '.pick-modal')).toHaveLength(1);
+    expect(q(root, '.pick-modal-box img')!.getAttribute('src')).not.toBe(src1);
+
+    clickEl(q(root, '.pick-back'));
+    const e3 = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 });
+    root.dispatchEvent(e3);
+    expect(e3.defaultPrevented).toBe(false);
   });
 });

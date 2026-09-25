@@ -1195,3 +1195,321 @@ button.pay-die {
   user-select: none;
   z-index: 20;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   首页「同页多级菜单」（3. 墨迹菜单）
+   仅作用于 #app.setup-page，绝不影响对战页/卡牌样式。
+   ───────────────────────────────────────────────────────────── */
+/* 首页行草字体（离线子集：仅含首页用到的字；新增行草文字需重新生成子集） */
+@font-face {
+  font-family: "Zhi Mang Xing";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/zhimangxing-subset.woff2") format("woff2");
+}
+#app.setup-page {
+  --menu-ink: #111014;
+  --menu-brush: "Zhi Mang Xing", "STKaiti", "KaiTi", "Kaiti SC", "楷体", serif;
+  --menu-sans: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  /* 统一无衬线：合并 body 默认与 --menu-sans 两套栈 */
+  --pick-ui: system-ui, "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  /* 文字（主 / 次 / 纸白底上的字 / 禁用）*/
+  --t1: #f3f0e8; --t2: #c9c3b6; --t-on: #111014; --t-mute: #8a8a90;
+  /* 面 / 线 */
+  --panel: rgba(10,10,11,.55);
+  --panel-2: rgba(4,4,5,.62);
+  --panel-3: rgba(8,8,9,.42);
+  --panel-flat: rgba(0,0,0,.35);
+  --line: rgba(255,255,255,.14);
+  --line-strong: rgba(255,255,255,.34);
+  --line-pill: rgba(255,255,255,.5);
+  /* 语义色 */
+  --pa: #2e74c0; --pb: #c43d30; --green: #3c6b4a; --paper: #f5f4f0;
+  /* 半径 / 禁用 / 阴影 */
+  --r-sm: 6px; --r-md: 9px; --r-pill: 999px;
+  --disabled: .35;
+  --shadow-ink: 3px 3px 0 rgba(0,0,0,.5);
+  /* 字号层级：大标题 / 标题 / 正文 / 次要 */
+  --fs-1: clamp(28px, 4vh, 40px);
+  --fs-2: clamp(18px, 2.7vh, 27px);
+  --fs-3: clamp(15px, 2vh, 18px);
+  --fs-4: clamp(12px, 1.6vh, 14px);
+}
+#app.setup-page .menu-surface { position: relative; width: 100%; min-height: calc(100vh - 24px); }
+
+/* 左上：标题 */
+#app.setup-page .menu-brand { position: absolute; left: 22px; top: 12px; }
+#app.setup-page .menu-brand-cn {
+  display: block;
+  font-family: var(--menu-brush);
+  color: #fff; font-size: 48px; line-height: 1; letter-spacing: 0.06em;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+}
+#app.setup-page .menu-brand-ver {
+  display: block; margin-top: 6px; margin-left: 6px;
+  font-family: var(--menu-brush); font-size: 22px; color: #fff; letter-spacing: 0.22em;
+}
+#app.setup-page .menu-brand-stroke {
+  width: 150px; height: 10px; margin-top: 12px; background: var(--menu-ink);
+  clip-path: polygon(0 44%, 16% 18%, 42% 48%, 68% 14%, 100% 42%, 100% 64%, 70% 86%, 44% 54%, 18% 84%, 0 60%);
+}
+
+/* 菜单区：整块居中、项内左对齐 */
+#app.setup-page .menu-wrap {
+  min-height: calc(100vh - 24px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 76px 20px; box-sizing: border-box;
+}
+#app.setup-page .menu { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(10px, 2.2vh, 30px); }
+
+#app.setup-page .menu-item,
+#app.setup-page .menu-back {
+  position: relative; z-index: 0;
+  font-family: var(--menu-brush); font-weight: 400;
+  line-height: 1.1; letter-spacing: 0.06em; color: #fff;
+  font-size: clamp(22px, 5.4vh, 56px);
+  padding: 6px 40px;
+  margin: 0; background: none; border: 0; border-radius: 0;
+  text-shadow: 1px 2px 0 rgba(0, 0, 0, 0.55);
+  cursor: pointer; user-select: none; -webkit-appearance: none; appearance: none;
+  display: inline-flex; align-items: baseline; gap: 12px;
+  text-decoration: none;
+  transition: transform 0.16s ease;
+}
+#app.setup-page .menu-back {
+  font-size: clamp(16px, 3vh, 26px);
+  padding: 2px 40px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.92);
+}
+#app.setup-page .menu-item .tag {
+  font-family: var(--pick-ui); font-size: 12px; letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.7);
+}
+/* 不可点：白字 + 文字中间一条横线 */
+#app.setup-page .menu-item.is-disabled { cursor: default; }
+#app.setup-page .menu-item.is-disabled .word {
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 255, 255, 0.92);
+  text-decoration-thickness: 3px;
+}
+
+/* 常态墨底：紧贴文字的墨条（SVG #dust-ink；translateZ 提升为独立图层 → 悬停只动文字、不重算滤镜） */
+#app.setup-page .menu-item .word,
+#app.setup-page .menu-back { position: relative; z-index: 0; }
+#app.setup-page .menu-item .word::before,
+#app.setup-page .menu-back::before {
+  content: ""; position: absolute; z-index: -1;
+  left: -10px; right: -10px; top: -3px; bottom: -3px;
+  background: #0a0a0b;
+  filter: url(#dust-ink);
+  transform: translateZ(0);
+  pointer-events: none;
+}
+/* 悬停：文字"抖一下"（只动文字，不重算墨条滤镜） */
+@keyframes dust-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-2px); }
+  40% { transform: translateX(2px); }
+  60% { transform: translateX(-1px); }
+  80% { transform: translateX(1px); }
+}
+@media (hover: hover) {
+  #app.setup-page .menu-item:not(.is-disabled):hover .word,
+  #app.setup-page .menu-back:hover { animation: dust-shake 0.18s ease-out; }
+}
+#app.setup-page .menu-item:focus-visible,
+#app.setup-page .menu-back:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* 手机横屏（#1 高度自适应字号已生效；此处再压内边距 + #3 封面靠右，避免裁掉人物） */
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.setup-page { background-position: center right; }
+  #app.setup-page .menu-wrap { padding: 44px 16px; }
+  #app.setup-page .menu-brand { left: 14px; top: 6px; }
+  #app.setup-page .menu-brand-cn { font-size: 32px; }
+  #app.setup-page .menu-brand-ver { font-size: 15px; }
+  #app.setup-page .menu-brand-stroke { width: 104px; height: 8px; margin-top: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app.setup-page .menu-item:hover .word,
+  #app.setup-page .menu-back:hover { animation: none; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   预选模式（3 栏）/ 构筑模式（5 栏）「分栏选择器」
+   仅作用于 #app.setup-page，绝不影响对战页/卡牌样式。
+   ───────────────────────────────────────────────────────────── */
+#app.setup-page { --pick-ease: cubic-bezier(0.16, 1, 0.3, 1); --pick-pop: cubic-bezier(0.34, 1.56, 0.64, 1); --pa: #2e74c0; --pb: #c43d30; }
+
+#app.setup-page .pick-surface { position: relative; width: 100%; min-height: calc(100vh - 24px); display: flex; flex-direction: column; font-family: var(--pick-ui); color: var(--t1); }
+#app.setup-page .pick-surface::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 120px; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,.62), rgba(0,0,0,.16) 60%, rgba(0,0,0,0));
+}
+
+/* 顶栏 */
+#app.setup-page .pick-top {
+  position: relative; z-index: 5; display: flex; align-items: center; flex-wrap: wrap;
+  gap: 10px 16px; padding: 9px 18px 8px; color: #f3f0e8;
+  font-size: clamp(15px, 2vh, 19px); text-shadow: 0 1px 2px rgba(0,0,0,.7);
+}
+#app.setup-page .pick-grp { display: inline-flex; align-items: center; gap: 8px; }
+#app.setup-page .pick-lab { font-size: var(--fs-4); font-weight: 600; color: var(--t2); }
+#app.setup-page .pick-ttl { position: relative; z-index: 0; display: inline-block; padding: 0 8px; font-family: var(--menu-brush); font-size: var(--fs-1); line-height: 1; }
+#app.setup-page .pick-ttl-state { font-family: var(--pick-ui); font-size: var(--fs-3); color: var(--t2); margin-left: 10px; letter-spacing: 0; }
+#app.setup-page .pick-ttl::before { content: ""; position: absolute; z-index: -1; left: -5px; right: -5px; top: -3px; bottom: -3px; background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
+#app.setup-page .pick-back { cursor: pointer; padding: 8px 15px; min-height: 46px; display: inline-flex; align-items: center; border: 1px solid var(--line-pill); border-radius: var(--r-pill); background: none; color: inherit; font: inherit; transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-back:active { transform: scale(.96); }
+#app.setup-page .pick-tbtn { cursor: pointer; user-select: none; padding: 8px 14px; min-height: 46px; display: inline-flex; align-items: center; border-radius: var(--r-md); border: 1px solid var(--line-strong); color: var(--t1); transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-tbtn:active { transform: scale(.96); }
+#app.setup-page .pick-tbtn.on { background: #f5f4f0; color: #111; border-color: #f5f4f0; }
+#app.setup-page .pick-tbtn.on.A { background: var(--pa); color: #fff; border-color: var(--pa); }
+#app.setup-page .pick-tbtn.on.B { background: var(--pb); color: #fff; border-color: var(--pb); }
+/* 附加模组：胶囊；暂未接引擎 → 禁用（横线、不可点） */
+#app.setup-page .pick-sw { cursor: default; user-select: none; min-height: 46px; display: inline-flex; align-items: center; gap: 9px; padding: 8px 16px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--panel-flat); font-weight: 600; font-size: var(--fs-3); }
+#app.setup-page .pick-dot { width: 11px; height: 11px; border-radius: 50%; background: rgba(255,255,255,.28); }
+#app.setup-page .pick-sw.is-disabled { opacity: var(--disabled); }
+#app.setup-page .pick-sw.is-disabled .pick-swlab { text-decoration: line-through; text-decoration-thickness: 2px; }
+#app.setup-page .pick-start { margin-left: auto; padding: 12px 34px; min-height: 52px; border: 1.5px solid #274a33; border-radius: var(--r-md); background: var(--green); color: #fff; font: 700 var(--fs-3) var(--pick-ui); cursor: pointer; box-shadow: var(--shadow-ink); transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-start:active { transform: scale(.96); }
+
+/* 分栏（预选 3 栏 / 构筑 5 栏）*/
+#app.setup-page .pick-board { position: relative; z-index: 2; flex: 1 1 auto; min-height: 0; padding: 4px 18px 14px; display: grid; gap: 10px; }
+#app.setup-page .pick-board.yuxuan { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1.55fr); }
+#app.setup-page .pick-board.gouzu { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.15fr); }
+
+#app.setup-page .pick-col { position: relative; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 9px 10px 10px; border-radius: var(--r-md); background: var(--panel); }
+#app.setup-page .pick-col.A { --pc: var(--pa); }
+#app.setup-page .pick-col.B { --pc: var(--pb); }
+#app.setup-page .pick-col.confirm { border: 1.5px dashed rgba(255,255,255,.22); }
+#app.setup-page .pick-col.confirm.confirmed { border: 2px solid var(--pc); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+#app.setup-page .pick-col.cand { border: 1.5px dashed rgba(255,255,255,.3); background: var(--panel-2); }
+#app.setup-page .pick-col.cand.locked { opacity: .5; }
+#app.setup-page .pick-col.names { background: var(--panel-3); border: 1px solid var(--line); }
+
+#app.setup-page .pick-chead { display: flex; align-items: baseline; gap: 8px; min-height: 24px; }
+#app.setup-page .pick-chead .who { font-weight: 700; font-size: var(--fs-3); color: var(--pc, var(--t1)); }
+#app.setup-page .pick-col.names .pick-chead .who { color: inherit; }
+#app.setup-page .pick-chead .sub { font-size: var(--fs-4); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 卡槽 */
+#app.setup-page .pick-cards { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(3, 1fr); gap: 7px; }
+#app.setup-page .pick-slot { position: relative; min-height: 0; display: flex; }
+#app.setup-page .pick-art { position: relative; flex: 1 1 auto; min-height: 0; border: 2px solid #111014; background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#app.setup-page .pick-art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+#app.setup-page .pick-slot.ink .pick-art { background: #0a0a0b; border-color: #3a3a40; }
+#app.setup-page .pick-slot.empty { border: 1.5px dashed rgba(255,255,255,.22); border-radius: var(--r-sm); align-items: center; justify-content: center; }
+#app.setup-page .pick-colno { font-size: var(--fs-4); color: var(--t2); opacity: .7; }
+#app.setup-page .pick-slot.clickable .pick-art { cursor: pointer; }
+#app.setup-page .pick-slot.picked .pick-art { outline: 2px solid var(--green); outline-offset: 2px; }
+#app.setup-page .pick-slot.taken .pick-art { background: #1b1b1f; border-color: #3a3a40; color: var(--t2); font: 700 var(--fs-3) var(--pick-ui); letter-spacing: 1px; }
+#app.setup-page .pick-taken { font: 700 var(--fs-3) var(--pick-ui); letter-spacing: 1px; }
+#app.setup-page .pick-slot.pop .pick-art { animation: pick-pop .2s var(--pick-ease); }
+@keyframes pick-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* 底部按钮 */
+#app.setup-page .pick-foot { display: flex; gap: 8px; }
+#app.setup-page .pick-cbtn { flex: 1 1 0; min-height: 44px; padding: 0 14px; border-radius: var(--r-md); cursor: pointer; font: 700 var(--fs-3) var(--pick-ui); border: 1px solid var(--line-strong); background: var(--panel-flat); color: var(--t1); transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-cbtn:active { transform: scale(.96); }
+#app.setup-page .pick-cbtn:disabled { opacity: var(--disabled); cursor: default; }
+#app.setup-page .pick-cbtn:disabled:active { transform: none; }
+#app.setup-page .pick-ok { background: var(--green); border-color: #274a33; color: #fff; }
+#app.setup-page .pick-ok.on { background: var(--pc); border-color: var(--pc); }
+
+/* 印章 */
+#app.setup-page .pick-seal { position: absolute; top: 10px; right: 10px; width: 66px; height: 66px; display: grid; place-items: center; border: 3px solid var(--pc); color: var(--pc); border-radius: 7px; background: rgba(0,0,0,.3); font: 700 16px var(--pick-ui); letter-spacing: 2px; transform: rotate(-8deg); animation: pick-seal .18s var(--pick-pop); pointer-events: none; }
+@keyframes pick-seal { from { opacity: 0; transform: rotate(-8deg) scale(1.4); } to { opacity: .9; transform: rotate(-8deg) scale(1); } }
+
+/* 中栏名单：单列、A/B 跟名后；随机吸顶；可滚（桌面 12 行不外溢）*/
+#app.setup-page .pick-names { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 3px; scrollbar-width: thin; }
+#app.setup-page .pick-names::-webkit-scrollbar { width: 7px; }
+#app.setup-page .pick-names::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 999px; }
+#app.setup-page .pick-rand-row { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; padding: 2px 0 5px; background: linear-gradient(180deg, rgba(8,8,9,.99), rgba(8,8,9,.92)); }
+#app.setup-page .pick-rand { flex: 1 1 0; min-height: 44px; font: 700 var(--fs-4) var(--pick-ui); cursor: pointer; border-radius: var(--r-pill); border: 1px solid #55555c; background: var(--panel-flat); color: var(--t2); transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-rand:active { transform: scale(.96); }
+#app.setup-page .pick-rand.A { border-color: var(--pa); }
+#app.setup-page .pick-rand.B { border-color: var(--pb); }
+#app.setup-page .pick-cell { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 8px; }
+#app.setup-page .pick-cell.is-taken .pick-name { opacity: .38; }
+#app.setup-page .pick-name { position: relative; z-index: 0; flex: 1 1 auto; min-width: 0; display: inline-block; padding: 2px 6px; font-family: var(--menu-brush); font-size: clamp(18px, 2.7vh, 27px); line-height: 1.15; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#app.setup-page .pick-name::before { content: ""; position: absolute; z-index: -1; left: -3px; right: -3px; top: -2px; bottom: -2px; background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
+#app.setup-page .pick-acts { flex: 0 0 auto; display: flex; gap: 6px; }
+#app.setup-page .pick-ab { font: 700 16px var(--pick-ui); width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border-radius: var(--r-md); border: 1px solid transparent; color: #fff; transition: transform .1s var(--pick-ease); }
+#app.setup-page .pick-ab:active { transform: scale(.9); }
+#app.setup-page .pick-ab.A { background: var(--pa); }
+#app.setup-page .pick-ab.B { background: var(--pb); }
+#app.setup-page .pick-ab.is-taken { background: #3a3a40; color: #8a8a90; cursor: default; }
+#app.setup-page .pick-ab.is-taken:active { transform: none; }
+#app.setup-page .pick-ab.is-mine { outline: 2px solid #fff; outline-offset: 1px; }
+#app.setup-page .pick-ab.is-cur { box-shadow: inset 0 0 0 3px #fff; }
+
+/* 详情浮窗：透明背景；点击处附近弹出（窄屏回退居中）；从点击点放大；关闭直接消失 */
+#app.setup-page .pick-modal { position: fixed; inset: 0; z-index: 60; display: none; }
+#app.setup-page .pick-modal.on { display: block; }
+#app.setup-page .pick-modal-box { position: fixed; box-sizing: border-box; width: min(720px, 92vw); max-height: 90vh; overflow-x: hidden; overflow-y: auto; background: #141416; border: 1px solid #3a3a40; border-radius: var(--r-md); padding: 14px 16px; color: var(--t1); box-shadow: 0 20px 60px rgba(0,0,0,.6); animation: pick-open .22s var(--pick-pop); }
+#app.setup-page .pick-modal-box.soft { animation: pick-fade .12s ease-out; }
+#app.setup-page .pick-modal-box img { box-sizing: border-box; width: 100%; max-width: 100%; border: 2px solid #000; border-radius: 4px; background: #fff; display: block; }
+#app.setup-page .pick-sk { border-top: 1px solid #2a2a30; padding: 9px 2px; }
+#app.setup-page .pick-sk:first-of-type { border-top: none; }
+#app.setup-page .pick-sk-t { font-weight: 700; font-size: 15px; color: #f3f0e8; }
+#app.setup-page .pick-sk-type { font-weight: 400; font-size: 12px; color: #c9c3b6; margin-left: 6px; }
+#app.setup-page .pick-sk-d { margin-top: 3px; font-size: 14px; line-height: 1.65; color: #d8d3c8; }
+@keyframes pick-open { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes pick-fade { from { opacity: .35; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  #app.setup-page .pick-slot.pop .pick-art,
+  #app.setup-page .pick-seal,
+  #app.setup-page .pick-modal-box { animation: none; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   轮选模式（3 区：A确认 ｜ 九宫格板(内 3 列) ｜ B确认）
+   仅作用于 #app.setup-page。
+   ───────────────────────────────────────────────────────────── */
+#app.setup-page .pick-board.lunxuan { grid-template-columns: minmax(0, 0.85fr) minmax(0, 3.30fr) minmax(0, 0.85fr); gap: 18px; }
+#app.setup-page .pick-boardwrap { min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 8px; border-radius: var(--r-md); background: var(--panel-2); border: 1px solid var(--line); }
+#app.setup-page .pick-col.grid { background: transparent; border: 0; padding: 0; gap: 6px; }
+#app.setup-page .pick-col.confirm.acting { border-color: var(--pc); border-style: solid; background: color-mix(in srgb, var(--pc) 10%, var(--panel)); box-shadow: 0 0 0 2px var(--pc), inset 0 0 0 1px rgba(255,255,255,.08); transition: box-shadow .18s ease-out, border-color .18s ease-out, background .18s ease-out; }
+
+/* 九宫格四态 */
+#app.setup-page .pick-slot.legal .pick-art { outline: 2px solid var(--pc); outline-offset: 2px; cursor: pointer; }
+#app.setup-page .pick-slot.removed .pick-art img { filter: grayscale(1) brightness(.45); }
+#app.setup-page .pick-removed-tag { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.85); font: 700 var(--fs-3) var(--pick-ui); letter-spacing: 2px; pointer-events: none; }
+/* 键盘焦点环 + 六步进度点 */
+#app.setup-page .pick-slot:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .pick-tbtn:focus-visible,
+#app.setup-page .pick-ab:focus-visible,
+#app.setup-page .pick-cbtn:focus-visible,
+#app.setup-page .pick-rand:focus-visible,
+#app.setup-page .pick-reroll:focus-visible,
+#app.setup-page .pick-start:focus-visible,
+#app.setup-page .pick-back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .pick-dots { display: inline-flex; gap: 5px; }
+#app.setup-page .pick-dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.24); }
+#app.setup-page .pick-dots i.on { background: #fff; }
+
+/* 步骤条 */
+#app.setup-page .pick-stepbar { position: relative; z-index: 4; display: flex; align-items: center; gap: 12px; margin: 2px 18px 6px; padding: 8px 12px; border-radius: var(--r-md); background: var(--panel); border: 1px solid var(--line); font-size: var(--fs-3); color: var(--t1); }
+#app.setup-page .pick-step-n { font-family: var(--pick-ui); font-size: var(--fs-2); color: var(--t1); line-height: 1; }
+#app.setup-page .pick-step-who { font-weight: 700; }
+#app.setup-page .pick-step-who.A { color: var(--pa); }
+#app.setup-page .pick-step-who.B { color: var(--pb); }
+#app.setup-page .pick-step-txt { opacity: .9; }
+#app.setup-page .pick-reroll { margin-left: auto; padding: 8px 14px; min-height: 40px; display: inline-flex; align-items: center; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--panel-flat); color: var(--t1); font: 600 var(--fs-3) var(--pick-ui); cursor: pointer; transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-reroll:active { transform: scale(.96); }
+
+/* 步骤条动作强调 + 准备态面板 */
+#app.setup-page .pick-step-txt b { font-weight: 800; color: #fff; }
+#app.setup-page .pick-prep { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+#app.setup-page .pick-prep-card { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 28px 38px; border-radius: var(--r-md); background: var(--panel); border: 1px solid var(--line); }
+#app.setup-page .pick-prep-title { position: relative; z-index: 0; font-family: var(--pick-ui); font-size: clamp(34px, 6vh, 60px); line-height: 1.1; color: var(--t1); padding: 0 10px; }
+#app.setup-page .pick-prep-title::before { content: ""; position: absolute; z-index: -1; left: -6px; right: -6px; top: -4px; bottom: -4px; background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
+#app.setup-page .pick-prep-note { font-size: var(--fs-3); color: var(--t2); text-shadow: 0 1px 2px rgba(0,0,0,.7); text-align: center; }
+#app.setup-page .pick-prep-chips { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+#app.setup-page .pick-prep .pick-tbtn { font-size: clamp(17px, 2.4vh, 22px); padding: 12px 26px; min-height: 56px; }
+#app.setup-page .pick-prep .pick-tbtn:not(.on) { background: var(--panel-flat); }
+#app.setup-page .pick-prep .pick-start { margin-left: 0; }
+#app.setup-page .pick-start:disabled { opacity: var(--disabled); cursor: default; box-shadow: none; }
+#app.setup-page .pick-start:disabled:active { transform: none; }
