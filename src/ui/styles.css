@@ -1388,7 +1388,7 @@ button.pay-die {
 #app.setup-page .pick-col.cand.locked { opacity: .5; }
 #app.setup-page .pick-col.names { background: var(--panel-3); border: 1px solid var(--line); }
 
-#app.setup-page .pick-chead { display: flex; align-items: baseline; gap: 8px; min-height: 24px; }
+#app.setup-page .pick-chead { display: flex; align-items: baseline; gap: 8px; min-height: 24px; flex-wrap: wrap; }
 #app.setup-page .pick-chead .who { font-weight: 700; font-size: var(--fs-3); color: var(--pc, var(--t1)); }
 #app.setup-page .pick-col.names .pick-chead .who { color: inherit; }
 #app.setup-page .pick-chead .sub { font-size: var(--fs-4); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1513,3 +1513,27 @@ button.pay-die {
 #app.setup-page .pick-prep .pick-start { margin-left: 0; }
 #app.setup-page .pick-start:disabled { opacity: var(--disabled); cursor: default; box-shadow: none; }
 #app.setup-page .pick-start:disabled:active { transform: none; }
+
+/* ─────────────────────────────────────────────────────────────
+   挑战模式 · 选择界面（4 列：挑战者确认 / 候选 / 名单(挑·传) / 昔日传奇）
+   ───────────────────────────────────────────────────────────── */
+#app.setup-page .pick-board.jiaozhan { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 2.15fr); gap: 12px; }
+#app.setup-page .pick-col.L { --pc: var(--pb); }
+#app.setup-page .pick-legend-full { position: relative; z-index: 0; display: inline-block; padding: 2px 6px; margin-left: 6px; font-family: var(--menu-brush); font-size: clamp(18px, 2.7vh, 27px); line-height: 1.15; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.85); white-space: nowrap; }
+#app.setup-page .pick-legend-full::before { content: ""; position: absolute; z-index: -1; left: -3px; right: -3px; top: -2px; bottom: -2px; background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
+#app.setup-page .pick-legend-info { flex: 0 0 auto; font-size: var(--fs-4); color: var(--t2); line-height: 1.6; }
+#app.setup-page .pick-portrait { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 2px solid var(--pb); border-radius: var(--r-sm); background: #0a0a0b; cursor: context-menu; }
+#app.setup-page .pick-portrait img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
+#app.setup-page .pick-portrait:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .pick-legend-arts { flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+#app.setup-page .pick-legend-arts .pick-slot { height: clamp(60px, 9vh, 96px); }
+#app.setup-page .pick-ab.L { background: var(--pb); }
+/* 自动结算：必填二选一分段控件（放昔日传奇标题行右侧）*/
+#app.setup-page .pick-seg { margin-left: auto; display: inline-flex; gap: 6px; }
+#app.setup-page .pick-seg-btn { cursor: pointer; user-select: none; padding: 4px 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--panel-flat); color: var(--t1); font-size: var(--fs-4); font-weight: 600; transition: transform .12s var(--pick-ease); }
+#app.setup-page .pick-seg-btn:active { transform: scale(.96); }
+#app.setup-page .pick-seg-btn.on { background: var(--paper); color: var(--t-on); border-color: var(--paper); }
+#app.setup-page .pick-seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .pick-chal-title { font-family: var(--menu-brush); font-size: 26px; color: var(--t1); margin: 2px 2px 6px; }
+#app.setup-page .pick-chal-meta { font-size: 13px; color: var(--t2); line-height: 1.7; border-bottom: 1px solid #2a2a30; padding-bottom: 8px; margin-bottom: 4px; }
+#app.setup-page .pick-chal-phrase { display: inline; font-size: 12px; color: var(--t2); margin-left: 6px; }

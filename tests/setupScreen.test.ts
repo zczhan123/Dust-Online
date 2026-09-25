@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   HEROES,
   renderBuildSetup,
+  renderChallengeSetup,
   renderHeroSetup,
   renderRotationSetup,
   renderSetup,
@@ -368,5 +369,132 @@ describe('详情浮窗（右键 / 单实例替换 / 离开后解除监听）', (
     const e3 = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 });
     root.dispatchEvent(e3);
     expect(e3.defaultPrevented).toBe(false);
+  });
+});
+
+describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
+  const abOf = (hero: string, act: 'pick' | 'legend'): HTMLElement => {
+    const n = qa(root, '.pick-ab').find((b) => b.dataset.hero === hero && b.dataset.act === act);
+    if (!n) throw new Error(`missing ${hero}/${act}`);
+    return n;
+  };
+  const modalOpen = (): void => {
+    const pt = q(root, '.pick-portrait')!;
+    pt.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }));
+  };
+
+  it('结构：4 列 / 12 行(挑·传) / 昔日传奇头像+信息 / 附加禁用 / 开始挑战禁用', () => {
+    renderChallengeSetup(root, () => {});
+    const board = q(root, '.pick-board.jiaozhan')!;
+    expect(board).not.toBeNull();
+    expect(board.children).toHaveLength(4);
+    expect(qa(root, '.pick-cell')).toHaveLength(12);
+    expect(qa(root, '.pick-ab')).toHaveLength(24);
+    expect(q(root, '.pick-ab[data-act="pick"]')!.textContent).toBe('挑');
+    expect(q(root, '.pick-ab[data-act="legend"]')!.textContent).toBe('传');
+    expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“雨中剑圣”');
+    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L01.jpg');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
+    expect(qa(root, '.pick-legend-arts .pick-slot')).toHaveLength(3);
+    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(2);
+    expect((q(root, '.pick-start') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('传：把该英雄设为昔日传奇（名字/头像/信息随动；未转写显示"待转写"）', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('xiu', 'legend').click();
+    expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“漆黑死神”');
+    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L06.jpg');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('待转写');
+  });
+
+  it('挑：候选切到该英雄；点候选卡 → 落入挑战者确认对应列', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('ying', 'pick').click();
+    expect(q(root, '.pick-col.cand.A .pick-chead .sub')!.textContent).toBe('永暗之刃·影');
+    const cands = qa(root, '.pick-col.cand.A .pick-slot');
+    expect(cands).toHaveLength(3);
+    cands[0].click(); // 004 → 第一列
+    expect(q(root, '.pick-col.confirm.A .pick-slot img')!.getAttribute('src')).toBe('./cards/004.jpg');
+  });
+
+  it('头像右键 → 弹窗显示结构化技能（6 条 + 条件文本）', () => {
+    renderChallengeSetup(root, () => {});
+    modalOpen();
+    expect(q(root, '.pick-modal.on')).not.toBeNull();
+    expect(q(root, '.pick-chal-title')!.textContent).toBe('传说中的“雨中剑圣”');
+    expect(qa(root, '.pick-modal .pick-sk')).toHaveLength(6);
+    expect(qa(root, '.pick-chal-phrase').map((n) => n.textContent)).toEqual([
+      '（必发动）',
+      '（必发动）',
+      '（满足 5 个〔2/5点〕驱动骰时发动；怜悯*：第一回合跳过检查）',
+      '（满足 3 个〔2/5点〕驱动骰时发动）',
+      '（必发动）',
+      '（必发动）',
+    ]);
+  });
+
+  it('取消：清空挑战者确认', () => {
+    renderChallengeSetup(root, () => {});
+    qa(root, '.pick-col.cand.A .pick-slot')[0].click();
+    expect(qa(root, '.pick-col.confirm.A .pick-slot img')).toHaveLength(1);
+    clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
+    expect(qa(root, '.pick-col.confirm.A .pick-slot img')).toHaveLength(0);
+  });
+
+  it('挑战者候选：已选中的神器显示「已被选取」、不可再点；取消后恢复', () => {
+    renderChallengeSetup(root, () => {});
+    qa(root, '.pick-col.cand.A .pick-slot')[0].click(); // 取 001
+    expect(qa(root, '.pick-col.cand.A .pick-slot.taken .pick-taken').map((n) => n.textContent)).toEqual([
+      '已被选取',
+    ]);
+    expect(qa(root, '.pick-col.cand.A .pick-slot img')).toHaveLength(2);
+    clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
+    expect(qa(root, '.pick-col.cand.A .pick-slot.taken')).toHaveLength(0);
+    expect(qa(root, '.pick-col.cand.A .pick-slot img')).toHaveLength(3);
+  });
+
+  it('选满 3 件 → 自动确认（印章）+ 候选列锁定；取消后解除', () => {
+    renderChallengeSetup(root, () => {});
+    for (let n = 0; n < 3; n++) {
+      const c = qa(root, '.pick-col.cand.A .pick-slot').find((s) => s.querySelector('img'));
+      c!.click();
+    }
+    expect(q(root, '.pick-col.confirm.A')!.classList.contains('confirmed')).toBe(true);
+    expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(1);
+    expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(true);
+    clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
+    expect(q(root, '.pick-col.confirm.A')!.classList.contains('confirmed')).toBe(false);
+    expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(false);
+  });
+
+  it('右键候选卡 → 神器详情弹窗；昔日传奇预置神器不可右键', () => {
+    const orig = (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+    try {
+      renderChallengeSetup(root, () => {});
+      const slot = q(root, '.pick-col.cand.A .pick-slot[data-card-id]')!;
+      expect(slot.dataset.cardId).toBe('001');
+      expect(q(root, '.pick-legend-arts .pick-slot[data-card-id]')).toBeNull();
+      (document as unknown as { elementFromPoint: () => Element }).elementFromPoint = () => slot;
+      root.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 60 }));
+      expect(qa(root, '.pick-modal.on img').map((i) => i.getAttribute('src'))).toEqual(['./cards/001.jpg']);
+    } finally {
+      if (orig) (document as unknown as { elementFromPoint: unknown }).elementFromPoint = orig;
+      else delete (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+    }
+  });
+
+  it('自动结算：默认「标准」、必填单选、点击切换', () => {
+    renderChallengeSetup(root, () => {});
+    const seg = (val: string): HTMLElement => qa(root, '.pick-seg-btn').find((b) => b.dataset.auto === val)!;
+    expect(seg('favor').textContent).toBe('结算玩家有利·标准');
+    expect(seg('against').textContent).toBe('结算玩家不利·挑战自我');
+    expect(seg('favor').classList.contains('on')).toBe(true);
+    expect(seg('against').classList.contains('on')).toBe(false);
+    seg('against').click();
+    expect(seg('favor').classList.contains('on')).toBe(false);
+    expect(seg('against').classList.contains('on')).toBe(true);
+    seg('against').click(); // 必填：点当前项不取消
+    expect(seg('against').classList.contains('on')).toBe(true);
   });
 });

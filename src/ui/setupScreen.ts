@@ -1,5 +1,6 @@
 import type { PlayerId } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
+import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 
 export const HEROES = {
@@ -120,7 +121,8 @@ function createCardInspector(
     if (wasOn) { modal.style.visibility = 'hidden'; modal.style.pointerEvents = 'none'; }
     let id: string | null = null;
     try {
-      const hit = document.elementFromPoint(x, y);
+      const efp = document.elementFromPoint;
+      const hit = typeof efp === 'function' ? efp.call(document, x, y) : null;
       const slot = hit && hit.closest ? (hit.closest('[data-card-id]') as HTMLElement | null) : null;
       if (slot) id = slot.dataset.cardId ?? null;
     } finally {
@@ -314,7 +316,13 @@ function renderMenu(
     };
     dead('联机游戏', '开发中');
     live('左右互搏');
-    dead('挑战模式', '开发中');
+    const challenge = button('menu-item', '');
+    challenge.dataset.act = 'challenge';
+    const cw = el('span', 'word');
+    cw.textContent = '挑战模式';
+    challenge.appendChild(cw);
+    challenge.addEventListener('click', () => renderChallengeSetup(root, onStart));
+    menu.appendChild(challenge);
     const link = document.createElement('a');
     link.className = 'menu-item';
     link.href = MENU_EXTERNAL;
@@ -1125,6 +1133,281 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     else { buildStepbar(); buildBoard(); }
     surface.appendChild(version);
     ANIM = null;
+  }
+
+  render();
+}
+
+/**
+ * 「单人挑战 · 选择界面」：4 列（挑战者确认 / 挑战者候选 / 名单〔挑·传〕/ 昔日传奇）。
+ * `挑`＝选神器（自由选，每列 1 件）；`传`＝把该英雄定为昔日传奇。仅界面，无引擎。
+ */
+export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
+  root.innerHTML = '';
+  root.classList.add('setup-page');
+  ensureInkFilter();
+
+  const ac = new AbortController();
+  const signal = ac.signal;
+
+  let legendIdx = 0;
+  let pickHeroIdx = 0;
+  let autoResolve: 'favor' | 'against' = 'favor';
+  const slots: (string | null)[] = [null, null, null]; // 挑战者，按列
+
+  const surface = el('div', 'pick-surface');
+  const version = el('div', 'app-version');
+  version.textContent = APP_VERSION_LABEL;
+  root.appendChild(surface);
+
+  const modal = el('div', 'pick-modal');
+  const modalBox = el('div', 'pick-modal-box');
+  modal.appendChild(modalBox);
+  root.appendChild(modal);
+
+  const inspector = createCardInspector(root, signal);
+  root.appendChild(inspector.modal);
+
+  function colHead(who: string, sub: string): HTMLElement {
+    const h = el('div', 'pick-chead');
+    const w = el('span', 'who'); w.textContent = who;
+    const s = el('span', 'sub'); s.textContent = sub;
+    h.appendChild(w); h.appendChild(s);
+    return h;
+  }
+  function cardImg(id: string, inspect = true): HTMLElement {
+    const s = el('div', 'pick-slot');
+    if (inspect) s.dataset.cardId = id;
+    const art = el('div', 'pick-art');
+    const im = document.createElement('img'); im.src = cardUrl(id); im.alt = '';
+    art.appendChild(im); s.appendChild(art);
+    return s;
+  }
+  function emptySlot(c: number): HTMLElement {
+    const s = el('div', 'pick-slot empty');
+    const t = el('span', 'pick-colno'); t.textContent = COL_LABELS[c];
+    s.appendChild(t);
+    return s;
+  }
+  function legendFile(idx: number): string { return `L${String(idx + 1).padStart(2, '0')}`; }
+
+  function buildTop(): void {
+    const top = el('div', 'pick-top');
+    const back = button('pick-back', '返回');
+    back.addEventListener('click', () => { ac.abort(); renderMenu(root, onStart, 'home'); });
+    top.appendChild(back);
+    const ttl = el('span', 'pick-ttl'); ttl.textContent = '挑战模式'; top.appendChild(ttl);
+    const g2 = el('span', 'pick-grp');
+    const l2 = el('span', 'pick-lab'); l2.textContent = '附加模组'; g2.appendChild(l2);
+    for (const label of ['使用异相神器', '使用战术牌']) {
+      const w = el('span', 'pick-sw is-disabled');
+      w.appendChild(el('span', 'pick-dot'));
+      const lab = el('span', 'pick-swlab'); lab.textContent = label;
+      w.appendChild(lab); g2.appendChild(w);
+    }
+    top.appendChild(g2);
+    const start = button('pick-start', '开始挑战');
+    start.disabled = true;
+    top.appendChild(start);
+    surface.appendChild(top);
+  }
+
+  function confirmCol(): HTMLElement {
+    const confirmed = slots.every((s) => s != null);
+    const col = el('div', 'pick-col A confirm' + (confirmed ? ' confirmed' : ''));
+    col.appendChild(colHead('挑战者', '已选 ' + slots.filter(Boolean).length + '/3'));
+    const cards = el('div', 'pick-cards');
+    for (let c = 0; c < 3; c++) cards.appendChild(slots[c] ? cardImg(slots[c] as string) : emptySlot(c));
+    col.appendChild(cards);
+    const foot = el('div', 'pick-foot');
+    const cancel = button('pick-cbtn', '取消');
+    cancel.disabled = slots.every((s) => !s);
+    cancel.addEventListener('click', () => { slots[0] = slots[1] = slots[2] = null; render(); });
+    foot.appendChild(cancel);
+    col.appendChild(foot);
+    if (confirmed) {
+      const seal = el('div', 'pick-seal');
+      seal.textContent = '已确认';
+      col.appendChild(seal);
+    }
+    return col;
+  }
+
+  function takenSlot(): HTMLElement {
+    const s = el('div', 'pick-slot taken');
+    const art = el('div', 'pick-art');
+    const lbl = el('span', 'pick-taken'); lbl.textContent = '已被选取';
+    art.appendChild(lbl); s.appendChild(art);
+    return s;
+  }
+
+  function candCol(): HTMLElement {
+    const confirmed = slots.every((s) => s != null);
+    const col = el('div', 'pick-col A cand' + (confirmed ? ' locked' : ''));
+    col.appendChild(colHead('挑战者 候选', HERO_LABELS[HERO_KEYS[pickHeroIdx]]));
+    const cards = el('div', 'pick-cards');
+    HEROES[HERO_KEYS[pickHeroIdx]].forEach((id, i) => {
+      if (slots.includes(id)) { cards.appendChild(takenSlot()); return; }
+      const s = cardImg(id);
+      s.classList.add('ink');
+      if (!confirmed) {
+        s.classList.add('clickable');
+        s.addEventListener('click', () => { if (inspector.consumeLp()) return; slots[i] = id; render(); });
+      }
+      cards.appendChild(s);
+    });
+    col.appendChild(cards);
+    return col;
+  }
+
+  function namesCol(): HTMLElement {
+    const col = el('div', 'pick-col names');
+    col.appendChild(colHead('选择神器 · 选择昔日传奇', ''));
+    const sc = el('div', 'pick-names');
+    HERO_KEYS.forEach((key, i) => {
+      const cell = el('div', 'pick-cell');
+      const nm = el('div', 'pick-name'); nm.textContent = HERO_LABELS[key]; cell.appendChild(nm);
+      const acts = el('div', 'pick-acts');
+      const a = button('pick-ab A', '挑'); if (pickHeroIdx === i) a.classList.add('is-cur');
+      a.dataset.hero = key; a.dataset.act = 'pick';
+      a.addEventListener('click', () => { pickHeroIdx = i; render(); });
+      const b = button('pick-ab L', '传'); if (legendIdx === i) b.classList.add('is-cur');
+      b.dataset.hero = key; b.dataset.act = 'legend';
+      b.addEventListener('click', () => { legendIdx = i; render(); });
+      acts.appendChild(a); acts.appendChild(b); cell.appendChild(acts);
+      sc.appendChild(cell);
+    });
+    col.appendChild(sc);
+    return col;
+  }
+
+  function legendCol(): HTMLElement {
+    const card = CHALLENGES[legendIdx];
+    const col = el('div', 'pick-col L');
+    const head = el('div', 'pick-chead');
+    const who = el('span', 'who'); who.textContent = '昔日传奇';
+    const full = el('span', 'pick-legend-full'); full.textContent = `传说中的“${card.legacy}”`;
+    head.appendChild(who); head.appendChild(full);
+    const seg = el('span', 'pick-seg');
+    const segBtn = (val: 'favor' | 'against', label: string): void => {
+      const b = el('span', 'pick-seg-btn' + (autoResolve === val ? ' on' : ''));
+      b.textContent = label;
+      b.dataset.auto = val;
+      b.addEventListener('click', () => {
+        if (autoResolve === val) return; // 必填：点当前项不取消
+        autoResolve = val;
+        render();
+      });
+      seg.appendChild(b);
+    };
+    segBtn('favor', '结算玩家有利·标准');
+    segBtn('against', '结算玩家不利·挑战自我');
+    head.appendChild(seg);
+    col.appendChild(head);
+
+    const info = el('div', 'pick-legend-info');
+    const life = card.life != null ? `生命 ${card.life}` : '生命 待转写';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 待转写';
+    const rule = card.defenseRule ?? '防御规则 待转写';
+    info.textContent = `${life}　｜　${cap}　｜　${rule}`;
+    col.appendChild(info);
+
+    const pt = el('div', 'pick-portrait');
+    const im = document.createElement('img');
+    im.src = `/legend/${legendFile(legendIdx)}.jpg`;
+    im.alt = card.legacy;
+    pt.appendChild(im);
+    pt.tabIndex = 0;
+    const openAt = (x: number | null, y: number | null): void => openChallengeModal(card, x, y);
+    pt.addEventListener('contextmenu', (e) => { e.preventDefault(); openAt(e.clientX, e.clientY); });
+    pt.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAt(null, null); }
+    });
+    let lp: number | null = null;
+    pt.addEventListener('touchstart', (e) => {
+      const t = e.touches[0]; if (!t) return;
+      lp = window.setTimeout(() => openAt(t.clientX, t.clientY), 500);
+    }, { passive: true });
+    const cl = (): void => { if (lp != null) { clearTimeout(lp); lp = null; } };
+    pt.addEventListener('touchend', cl);
+    pt.addEventListener('touchmove', cl);
+    pt.addEventListener('touchcancel', cl);
+    col.appendChild(pt);
+
+    const arts = el('div', 'pick-legend-arts');
+    for (const id of card.artifacts) { const s = cardImg(id, false); s.classList.add('ink', 'compact'); arts.appendChild(s); }
+    col.appendChild(arts);
+    return col;
+  }
+
+  function buildBoard(): void {
+    const board = el('div', 'pick-board jiaozhan');
+    board.appendChild(confirmCol());
+    board.appendChild(candCol());
+    board.appendChild(namesCol());
+    board.appendChild(legendCol());
+    surface.appendChild(board);
+  }
+
+  function openChallengeModal(card: ChallengeCard, x: number | null, y: number | null): void {
+    modalBox.innerHTML = '';
+    const title = el('div', 'pick-chal-title');
+    title.textContent = `传说中的“${card.legacy}”`;
+    modalBox.appendChild(title);
+    const meta = el('div', 'pick-chal-meta');
+    const life = card.life != null ? `生命 ${card.life}` : '生命 待转写';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 待转写';
+    const rule = card.defenseRule ?? '防御规则 待转写';
+    meta.textContent = `${life}　｜　${cap}　｜　${rule}`;
+    modalBox.appendChild(meta);
+    if (card.skills) {
+      card.skills.forEach((sk, i) => {
+        const row = el('div', 'pick-sk');
+        const t = el('div', 'pick-sk-t');
+        t.textContent = `${i}) ${sk.name}`;
+        let phraseText = slotPhrase(sk.slots);
+        if (sk.marker === '怜悯*') phraseText = phraseText.replace(/）$/, '；怜悯*：第一回合跳过检查）');
+        const phrase = el('span', 'pick-chal-phrase');
+        phrase.textContent = phraseText;
+        t.appendChild(phrase);
+        const d = el('div', 'pick-sk-d'); d.textContent = sk.effect;
+        row.appendChild(t); row.appendChild(d);
+        modalBox.appendChild(row);
+      });
+    } else {
+      const d = el('div', 'pick-sk-d'); d.textContent = '（技能转写待补）';
+      modalBox.appendChild(d);
+    }
+    modal.classList.add('on');
+    const vw = window.innerWidth, vh = window.innerHeight;
+    modalBox.style.left = '0px';
+    modalBox.style.top = '0px';
+    const w = modalBox.offsetWidth, h = modalBox.offsetHeight;
+    const tiny = vw < 560 || vh < 460 || w > vw - 16 || h > vh - 16 || x == null || y == null;
+    if (tiny) {
+      modalBox.style.left = Math.max(8, (vw - w) / 2) + 'px';
+      modalBox.style.top = Math.max(8, (vh - h) / 2) + 'px';
+      modalBox.style.transformOrigin = 'center center';
+    } else {
+      let l = Math.max(8, Math.min(x + 12, vw - w - 8));
+      let t = Math.max(8, Math.min(y + 12, vh - h - 8));
+      modalBox.style.left = l + 'px';
+      modalBox.style.top = t + 'px';
+      modalBox.style.transformOrigin = (x - l) + 'px ' + (y - t) + 'px';
+    }
+    modalBox.style.animation = 'none';
+    void modalBox.offsetWidth;
+    modalBox.style.animation = '';
+  }
+  function closeChallengeModal(): void { modal.classList.remove('on'); }
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeChallengeModal(); }, { signal });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChallengeModal(); }, { signal });
+
+  function render(): void {
+    surface.innerHTML = '';
+    buildTop();
+    buildBoard();
+    surface.appendChild(version);
   }
 
   render();
