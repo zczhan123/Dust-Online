@@ -1,6 +1,7 @@
 import type { DiceKind, GameState, PlayerId } from '../model/types';
 import { hasActiveSkill } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
+import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
@@ -11,8 +12,6 @@ export interface BattleNote {
   label: string;
   text: string;
 }
-
-const countOf = (g: GameState, who: PlayerId, k: DiceKind): number => g.players[who].areas[k].length;
 
 /**
  * 主要阶段的「攻击提示」：列出**此刻真正可用**的、与攻击相关的修正与追击效果。
@@ -73,16 +72,15 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     }
   }
 
-  // B 被抵挡时：004 不祥·锋芒·触发（需 1 攻击骰 + 1 冥想骰）
+  // B 被抵挡时：004 不祥·锋芒·触发（需 1 攻击骰 + 1 冥想骰；含置换与 034/A03 存放骰）
   if (
     hasActiveSkill(p, 'buxiang.fengmang.trigger') &&
-    countOf(g, player, 'attack') >= 1 &&
-    countOf(g, player, 'meditation') >= 1
+    canPayCosts(g, player, { attack: 1, meditation: 1 }, { held: true })
   ) {
     notes.push({ label: '锋芒', text: '攻击被抵挡时，可追加 2 真实伤害' });
   }
-  // B 被抵挡时：013 鸣雷·雷暴·触发（需 1 冥想骰）
-  if (hasActiveSkill(p, 'minglei.leibao.trigger') && countOf(g, player, 'meditation') >= 1) {
+  // B 被抵挡时：013 鸣雷·雷暴·触发（需 1 冥想骰；含置换与 034/A03 存放骰）
+  if (hasActiveSkill(p, 'minglei.leibao.trigger') && canPayCosts(g, player, { meditation: 1 }, { held: true })) {
     notes.push({ label: '雷暴', text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区' });
   }
   // B 被抵挡时：021 决意·野火燎原（计数 = 5）
@@ -104,13 +102,21 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     notes.push({ label: '中央突破', text: '本回合攻击不可抵挡' });
   }
 
-  // C 不可抵挡的变体：028 天罚·白昼之火 / 陨落（本回合状态：点数视为 6，且只能用某类骰抵挡）
+  // C 不可抵挡的变体：028 天罚·白昼之火 / 陨落（本回合状态）；A05 异相无固定值（+3 伤害由上面的攻击加成提示给出）
   const tianfa = g.tianfa[player];
   if (tianfa) {
-    notes.push({
-      label: tianfa.blockKind === 'meditation' ? '白昼之火' : '陨落',
-      text: `本回合攻击点数视为 6，且对方只能用${tianfa.blockKind === 'meditation' ? '冥想' : '攻击'}骰抵挡`,
-    });
+    const blockCn = tianfa.blockKind === 'meditation' ? '冥想' : '攻击';
+    if (tianfa.value !== undefined) {
+      notes.push({
+        label: tianfa.blockKind === 'meditation' ? '白昼之火' : '陨落',
+        text: `本回合攻击点数视为 ${tianfa.value}，且对方只能用${blockCn}骰抵挡`,
+      });
+    } else {
+      notes.push({
+        label: tianfa.blockKind === 'meditation' ? '深空之火' : '陨落',
+        text: `本回合对方只能用${blockCn}骰抵挡；你造成 2 次伤害后立即结束主要阶段`,
+      });
+    }
   }
 
   // E 负面状态：023 蛇蝎·畏惧（仅其下个回合内生效）

@@ -354,7 +354,7 @@ describe('018 至黑（漆黑绽放）', () => {
     applyAction(g, { t: 'block' }); // A 不抵挡 → 受伤 → 计数 5 → 强制必杀
     expect(card.count).toBe(5);
     expect(card.continuousLost).toBe(true);
-    expect(g.ultimatesUsed).toContain('zhihai.bloom.ultimate');
+    expect(g.ultimatesUsed).toContain('A:zhihai.bloom.ultimate');
     expect(g.pending?.kind).toBe('zhihaiReroll');
     expect(g.pending && g.pending.kind === 'zhihaiReroll' ? g.pending.x : 0).toBe(5);
     expect(totalDice(g.players.A)).toBe(g1.before + 5); // 已获得 5 个随机能力骰
@@ -366,7 +366,7 @@ describe('018 至黑（漆黑绽放）', () => {
     const firstDie = g.players.A.areas.attack[0] ?? g.players.A.areas.defense[0];
     applyAction(g, { t: 'zhihaiReroll', dieIds: firstDie ? [firstDie.id] : [] });
     expect(g.pending).toBeNull();
-    expect(g.ultimatesUsed).toContain('zhihai.bloom.ultimate');
+    expect(g.ultimatesUsed).toContain('A:zhihai.bloom.ultimate');
   });
 
   it('计数 1–4 时可主动发动必杀（FAQ 18.1.3）', () => {

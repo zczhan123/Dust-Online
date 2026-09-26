@@ -95,6 +95,140 @@ export function heal(g: GameState, player: PlayerId, amount: number): number {
   return p.life - before;
 }
 
+/** 可作为「使用/消耗」支付来源的能力骰池：区域真骰 + 034/A03 破障的神器存放骰（启用破障时）。
+ *  存放骰的类型按持有者**第二列**分布判定；顺序：攻击→防御→冥想。 */
+export interface AbilityDie {
+  id: string;
+  value: number;
+  kind: DiceKind;
+  source: 'area' | 'artifact';
+}
+
+export function abilityDicePool(g: GameState, player: PlayerId): AbilityDie[] {
+  const p = g.players[player];
+  const out: AbilityDie[] = [];
+  for (const k of KINDS) {
+    for (const d of p.areas[k]) out.push({ id: d.id, value: d.value, kind: k, source: 'area' });
+  }
+  if (hasActiveSkill(p, 'jingang.pozhang.continuous')) {
+    const dist = emptyDistribution(p);
+    if (dist) {
+      for (const a of p.artifacts) {
+        for (const h of a.heldDice ?? []) {
+          out.push({ id: h.id, value: h.value, kind: areaOf(h.value, dist), source: 'artifact' });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export interface CostNeed {
+  attack?: number;
+  defense?: number;
+  meditation?: number;
+}
+
+/** 从给定池判断 `need` 是否可支付：每格 1 颗同类型能力骰；或（持 010/A02「真实之剑」）2 颗任意能力骰置换为 1 格（点数视为 5）。 */
+function canPayFromPool(g: GameState, player: PlayerId, pool: AbilityDie[], need: CostNeed): boolean {
+  const count = (k: DiceKind): number => pool.filter((d) => d.kind === k).length;
+  const nA = need.attack ?? 0;
+  const nD = need.defense ?? 0;
+  const nM = need.meditation ?? 0;
+  const N = nA + nD + nM;
+  if (N === 0) return true;
+  const deficit =
+    Math.max(0, nA - count('attack')) +
+    Math.max(0, nD - count('defense')) +
+    Math.max(0, nM - count('meditation'));
+  if (deficit === 0) return true; // 全部用同类型骰（T ≥ N 必然成立）
+  if (!hasActiveSkill(g.players[player], 'shenhong.sword')) return false;
+  return pool.length - N >= deficit;
+}
+
+/** `need` 是否可支付（门槛/提示判定用）。
+ *  `opts.held` 是否把 034/A03 存放骰计入来源（选择向导尚不支持存放骰的技能传 false，避免"按钮点进去做不完"）。 */
+export function canPayCosts(g: GameState, player: PlayerId, need: CostNeed, opts: { held: boolean }): boolean {
+  const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
+  return canPayFromPool(g, player, pool, need);
+}
+
+/** 某类型最多能凑出几格（含置换；`max` 为上限，0 表示一格都付不起）。供"可变数量"技能的默认参数/范围。 */
+export function maxAffordableSlots(
+  g: GameState,
+  player: PlayerId,
+  kind: DiceKind,
+  max: number,
+  opts: { held: boolean },
+): number {
+  const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
+  for (let n = Math.min(max, Math.floor(pool.length)); n >= 1; n--) {
+    if (canPayFromPool(g, player, pool, { [kind]: n })) return n;
+  }
+  return 0;
+}
+
+/** 构造一个**可行**的 `SlotFill[]`：优先用同类型真骰/存放骰，缺口用 2 颗任意骰置换。
+ *  顺序 = 攻击→防御→冥想（每类重复 N 次），与调用方按该顺序给的 spec 对齐。 */
+export function defaultCostFills(
+  g: GameState,
+  player: PlayerId,
+  need: CostNeed,
+  opts: { held: boolean },
+): SlotFill[] {
+  const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
+  if (!canPayFromPool(g, player, pool, need)) throw new Error('defaultCostFills: cost not payable');
+  const used = new Set<string>();
+  const take = (pred: (d: AbilityDie) => boolean): AbilityDie | undefined => {
+    const d = pool.find((x) => !used.has(x.id) && pred(x));
+    if (d) used.add(d.id);
+    return d;
+  };
+  const specOrder: DiceKind[] = [];
+  for (const k of ['attack', 'defense', 'meditation'] as DiceKind[]) {
+    for (let i = 0; i < (need[k] ?? 0); i++) specOrder.push(k);
+  }
+  const fills: SlotFill[] = [];
+  const deferred: DiceKind[] = [];
+  for (const k of specOrder) {
+    const d = take((x) => x.kind === k);
+    if (d) fills.push({ dieIds: [d.id] });
+    else deferred.push(k);
+  }
+  for (const _k of deferred) {
+    const a = take(() => true);
+    const b = take(() => true);
+    if (!a || !b) throw new Error('defaultCostFills: not enough dice for conversion');
+    fills.push({ dieIds: [a.id, b.id] });
+  }
+  return fills;
+}
+
+/** A06 异相·「幽魂不散」（持续）：某玩家的**防御/冥想骰**被「使用」（抵挡/尘起）或「弃置」（技能效果）后，
+ *  获得 **X 点攻击骰**（X = 其「虚臾」神器上的攻击骰数量）；**每玩家回合上限 2**；X=0 则不获得（不提示）。
+ *  注意：**「消耗」不触发**（不要在任何"消耗代价"路径调用本函数；`paySlots(reason='skill')` 已排除）。 */
+export function xuyuYouhunTrigger(g: GameState, player: PlayerId, count: number): void {
+  if (count <= 0) return;
+  const p = g.players[player];
+  const card = p.artifacts.find((a) => a.skills.some((s) => s.key === 'xuyu.alt.youhun'));
+  if (!card) return;
+  const sk = card.skills.find((s) => s.key === 'xuyu.alt.youhun');
+  if (!sk || !skillActive(card, sk)) return;
+  const x = (card.heldDice ?? []).length; // 本神器上的攻击骰数量（由「勾魂」所置）
+  if (x <= 0) return; // X=0：不获得（也不提示）
+  const before = g.hunhunGained[player] ?? 0;
+  const n = Math.min(count, Math.max(0, 2 - before));
+  if (n <= 0) return;
+  for (let i = 0; i < n; i++) {
+    p.areas.attack.push(createDie(newDieId(`${player}-`), x, 'attack'));
+  }
+  g.hunhunGained[player] = before + n;
+  logLine(
+    g,
+    `${pname(player)} 「幽魂不散」：防御/冥想骰被使用或弃置 ${count} 个 → 获得 ${n} 个 ${x} 点攻击骰（本回合已获得 ${g.hunhunGained[player]}/2）`,
+  );
+}
+
 /** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(置换,值5)。
  *  移除所有真骰(返还供应堆)；返回各格“有效骰”；reportConsumed 按“格数”上报。 */
 export function paySlots(
@@ -171,6 +305,12 @@ export function paySlots(
     }
   }
   reportConsumed?.(spec.length);
+  // A06 异相·「幽魂不散」：「使用」防御/冥想骰（抵挡 reason='defense' / 尘起 reason='dustRise'）时触发；
+  // 「消耗」（reason='skill'）与攻击支付（reason='attack'）不触发。
+  if (reason === 'defense' || reason === 'dustRise') {
+    const usedDefMed = effective.filter((e) => e.kind === 'defense' || e.kind === 'meditation').length;
+    if (usedDefMed > 0) xuyuYouhunTrigger(g, player, usedDefMed);
+  }
   // 026 哀歌·威压（触发）：某人「使用 1 个任意能力骰后」→ 若其持有威压，弹出强制选择
   // （FAQ 26.2.1：先结算「威压」，再结算该骰的基础效果 —— 支付后立即排队，挡在后续结算之前）
   const weiyaCard = g.players[player].artifacts.find((a) => a.skills.some((s) => s.key === 'aige.weiya'));

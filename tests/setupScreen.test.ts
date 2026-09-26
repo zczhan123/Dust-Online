@@ -161,10 +161,8 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     expect(cols[4]).toContain('confirm');
     expect(cols[4]).toContain('B');
     expect(q(root, '.pick-ttl')!.textContent).toBe('构筑模式');
-    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual([
-      '使用异相神器',
-      '使用战术牌',
-    ]);
+    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual(['使用战术牌']);
+    expect(qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent)).toEqual(['使用异相神器', '使用战术牌']);
     expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
       '第一列',
       '第二列',
@@ -396,7 +394,8 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L01.jpg');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
     expect(qa(root, '.pick-legend-arts .pick-slot')).toHaveLength(3);
-    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(2);
+    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(1);
+    expect(qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent)).toEqual(['使用异相神器', '使用战术牌']);
     expect((q(root, '.pick-start') as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -496,5 +495,72 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(seg('against').classList.contains('on')).toBe(true);
     seg('against').click(); // 必填：点当前项不取消
     expect(seg('against').classList.contains('on')).toBe(true);
+  });
+});
+
+describe('异相（A01–A03）· 选择界面', () => {
+  const anomalySwitch = (): HTMLElement =>
+    qa(root, '.pick-sw').find((w) => w.querySelector('.pick-swlab')?.textContent === '使用异相神器')!;
+
+  it('预选模式不提供「使用异相神器」开关', () => {
+    renderHeroSetup(root, () => {});
+    const labels = qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent);
+    expect(labels).toEqual(['使用传奇英雄面板', '使用战术牌']);
+  });
+
+  it('构筑：开启开关后，有异相映射的卡出现「切换」并可用；无异相映射的没有', () => {
+    renderBuildSetup(root, () => {});
+    expect(anomalySwitch().classList.contains('is-disabled')).toBe(false);
+    anomalySwitch().click(); // 开启
+    // batton 的第三列 009 → A01
+    ab(root, 'batton', 'A').click();
+    const base = candSlotBySrc(root, 'A', '009')!;
+    expect(base.querySelector('.pick-alt-badge')).toBeNull();
+    expect(base.querySelector('.pick-alt-switch')).not.toBeNull();
+    (base.querySelector('.pick-alt-switch') as HTMLElement).click();
+    const alt = candSlotBySrc(root, 'A', 'A01')!;
+    expect(alt.querySelector('.pick-alt-badge')!.textContent).toBe('异相');
+    expect(alt.querySelector('.pick-alt-switch')).not.toBeNull();
+    // 再点还原
+    (alt.querySelector('.pick-alt-switch') as HTMLElement).click();
+    expect(candSlotBySrc(root, 'A', '009')).not.toBeUndefined();
+    // lifeng（025/026/027）无异相/特典映射
+    ab(root, 'lifeng', 'A').click();
+    expect(qa(root, '.pick-col.cand.A .pick-alt-switch')).toHaveLength(0);
+  });
+
+  it('挑战：候选列同样支持「切换」（010 ↔ A02）', () => {
+    renderChallengeSetup(root, () => {});
+    anomalySwitch().click();
+    qa(root, '.pick-ab').find((b) => b.dataset.hero === 'tata' && b.dataset.act === 'pick')!.click();
+    const srcOf = (id: string): HTMLElement | undefined =>
+      qa(root, '.pick-col.cand.A .pick-slot').find(
+        (s) => s.querySelector('img')?.getAttribute('src') === `./cards/${id}.jpg`,
+      );
+    const slot = srcOf('010')!;
+    (slot.querySelector('.pick-alt-switch') as HTMLElement).click();
+    expect(srcOf('A02')).not.toBeUndefined();
+    expect(srcOf('A02')!.querySelector('.pick-alt-badge')!.textContent).toBe('异相');
+  });
+
+  it('异相落确认区：切换后确定 → 确认区显示异相图（colOf 修复）', () => {
+    renderBuildSetup(root, () => {});
+    anomalySwitch().click();
+    ab(root, 'batton', 'A').click(); // 009（第三列）
+    (candSlotBySrc(root, 'A', '009')!.querySelector('.pick-alt-switch') as HTMLElement).click(); // → A01
+    candSlotBySrc(root, 'A', 'A01')!.click(); // 选中
+    clickEl(q(root, '.pick-col.cand.A .pick-ok'));
+    const slot = q(root, '.pick-col.confirm.A .pick-slot[data-col="3"]')!;
+    expect(slot.querySelector('img')!.getAttribute('src')).toBe('./cards/A01.jpg');
+    expect(slot.querySelector('.pick-alt-badge')!.textContent).toBe('异相');
+  });
+
+  it('徽标 / 切换挂在卡图内层（.pick-art-inner）', () => {
+    renderBuildSetup(root, () => {});
+    anomalySwitch().click();
+    ab(root, 'batton', 'A').click();
+    const inner = candSlotBySrc(root, 'A', '009')!.querySelector('.pick-art-inner');
+    expect(inner).not.toBeNull();
+    expect(inner!.querySelector('.pick-alt-switch')).not.toBeNull();
   });
 });

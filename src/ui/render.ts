@@ -10,10 +10,11 @@ import type {
   SkillDef,
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
+import { isAltArtifact } from '../core/content/artifacts';
 import { getLegalActions, quanzhiRemainderHasGroup } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
-import { hasActiveSkill } from '../core/engine/skill-state';
+import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
 import { SKILL_SELECTION, hasSword, type SelectStep } from './skillSelection';
@@ -286,7 +287,8 @@ function activeSideSpent(ctx: Ctx, a: Artifact): boolean {
   const side = a.activeMarkerSide;
   if (!side) return false;
   // 该神器已无生效能力（持续失效、必杀用尽）→「已激活」徽标同样转灰
-  if (a.continuousLost) return true;
+  // A07 异相·历王之血之印：本回合临时持续失效 → 徽标同样转灰
+  if (a.continuousLost || a.continuousLostThisTurn) return true;
   const skills = ARTIFACT_TEXT[a.id]?.skills;
   const t =
     skills?.find((s) => s.side === side && s.type.includes('激活')) ??
@@ -315,25 +317,31 @@ function zhihaiForcedFrame(ctx: Ctx, a: Artifact, s: { type: string }): boolean 
   return ctx.state.players[pd.player].artifacts.includes(a);
 }
 
+/** 该神器属于哪名玩家（双方可能持有同名神器，故记录键必须带玩家前缀） */
+function ownerIdOfArtifact(state: GameState, a: Artifact): PlayerId | undefined {
+  return (['A', 'B'] as PlayerId[]).find((id) => state.players[id].artifacts.includes(a));
+}
+
 function skillPartState(
   ctx: Ctx,
   a: Artifact,
   s: { side: SkillDef['side']; type: string },
 ): 'on' | 'off' | 'disabled' | 'spent' {
   const key = findSkillKey(a, s.side, s.type);
+  const owner = ownerIdOfArtifact(ctx.state, a);
   const markerOk = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
   // 必杀「强制发动」进行中：该行临时显示为绿色（发动的一瞬间）
   if (zhihaiForcedFrame(ctx, a, s)) return 'on';
-  if (key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key)) return 'disabled';
-  // 「在接下来的游戏中失去持续式效果」（018 必杀用后）：该持续技能行转深灰
-  if (a.continuousLost && s.type.includes('持续')) return 'disabled';
+  if (key != null && s.type.includes('必杀') && owner != null && ctx.state.ultimatesUsed.includes(skillUseKey(owner, key))) return 'disabled';
+  // 「在接下来的游戏中失去持续式效果」（018 必杀用后）／A07「历王之血之印」本回合临时持续失效：该持续技能行转深灰
+  if ((a.continuousLost || a.continuousLostThisTurn) && s.type.includes('持续')) return 'disabled';
   if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
   if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
   // 「激活」类：只有被“切入该侧”的当回合、且本回合未用过时才可用；否则为“已用完”（灰底 + 保留绿色左边线）
   if (s.type.includes('激活') && markerOk) {
     const armedNow =
       a.armedTurn === ctx.state.turnIndex && a.armedSide === (s.side === 'only' ? 'left' : s.side);
-    const used = key != null && ctx.state.skillsUsedThisTurn.includes(key);
+    const used = key != null && owner != null && ctx.state.skillsUsedThisTurn.includes(skillUseKey(owner, key));
     if (!armedNow || used) return 'spent';
   }
   return markerOk ? 'on' : 'off';
@@ -654,6 +662,16 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   });
   art.appendChild(artImg);
   attachDetailTrigger(art, ctx, a.id);
+  if (isAltArtifact(a.id)) {
+    const alt = el('span', 'card-alt-badge');
+    alt.textContent = '异相';
+    art.appendChild(alt);
+  }
+  if (a.special) {
+    const sp = el('span', 'card-special-badge');
+    sp.textContent = '特典';
+    art.appendChild(sp);
+  }
   card.appendChild(art);
   // 027 寒光·必杀：置于神器上的骰（不在任何区域，故不带攻/防/冥前缀，用中性骰片）
   // 位置：**卡图正下方**（技能区之前）；标签用玩家色；骰片只显示点数
@@ -715,7 +733,7 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
         if (key) part.dataset.key = key;
 
         const isUsedUltimate =
-          key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(key);
+          key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(skillUseKey(player.id, key));
         if (isUsedUltimate) part.classList.add('skill-part--used');
         const isForcedNow = zhihaiForcedFrame(ctx, a, s);
 
@@ -913,13 +931,17 @@ function phaseHint(ctx: Ctx): HintPart[] {
  */
 function globalHint(ctx: Ctx): HintPart[] {
   const { state } = ctx;
-  if ((state.rerollPunish.A || state.rerollPunish.B) && state.phase !== 'gameOver') {
+  if (state.phase === 'gameOver') return [];
+  const out: HintPart[] = [];
+  if (state.rerollPunish.A || state.rerollPunish.B) {
     const owner: PlayerId = state.rerollPunish.A ? 'A' : 'B';
-    return [
-      { text: `玩家${owner}「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害`, color: owner },
-    ];
+    out.push({ text: `玩家${owner}「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害`, color: owner });
   }
-  return [];
+  // A07 异相·历王之血之印：本回合双方所有持续式效果失效（全回合、双方可见）
+  if ((['A', 'B'] as PlayerId[]).some((id) => state.players[id].artifacts.some((a) => a.continuousLostThisTurn))) {
+    out.push({ text: `${out.length ? '　｜　' : ''}「历王之血之印」生效中——本回合双方所有持续式效果失效` });
+  }
+  return out;
 }
 
 function phaseHintInner(ctx: Ctx): HintPart[] {
@@ -972,7 +994,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: '兽魂', color: pd.owner },
       { text: '：' },
       { text: `玩家${pd.owner}`, color: pd.owner },
-      { text: ` 将受到 ${pd.attack.value} 点攻击伤害，且「兽魂」计数 ≥1；你可以取消该伤害（令其计数 −1）。` },
+      { text: ` 将受到 ${pd.attack.value} 点攻击伤害，且「兽魂」计数 ≥${pd.minCount}；你可以取消该伤害（令其计数 −1）。` },
     ];
   }
   if (pd && pd.kind === 'weimu') {
@@ -993,6 +1015,12 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
   }
   if (pd && pd.kind === 'caiyuliu') {
     return [{ text: '裁雨流', color: pd.player }, { text: '：选择该骰去向。' }];
+  }
+  if (pd && pd.kind === 'c01Caiyuliu') {
+    return [
+      { text: '极之境·裁雨流', color: pd.player },
+      { text: '：你用攻击骰造成了伤害，可将其重新投掷并按新点数移回你的对应区域。' },
+    ];
   }
   if (pd && pd.kind === 'fengmang') {
     return [
@@ -1018,6 +1046,12 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: '：本回合补充≤3，可造成 3 点真实伤害并回复 2 点生命。' },
     ];
   }
+  if (pd && pd.kind === 'aidao') {
+    return [
+      { text: '哀悼', color: pd.player },
+      { text: '：本回合补充≤3，可造成 2 点真实伤害并弃置对方的 1 个防御骰。' },
+    ];
+  }
   if (pd && pd.kind === 'dunwuHalve') {
     return [
       { text: '灵能屏障', color: pd.player },
@@ -1037,9 +1071,10 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     ];
   }
   if (state.pending && state.pending.kind === 'dianxing') {
+    const vals = (state.pending.values ?? [1, 2, 3]).join('、');
     return [
       { text: '电刑', color: state.pending.player },
-      { text: '：你使用了攻击骰，可消耗 2 个冥想骰（依次以 1、2、3 点各进行一次攻击）。' },
+      { text: `：你使用了攻击骰，可消耗 2 个冥想骰（依次以 ${vals} 点各进行一次攻击）。` },
     ];
   }
   if (state.pending && state.pending.kind === 'leibao') {
@@ -1077,6 +1112,15 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     const parts: HintPart[] = [];
     if (pa.sourceValue !== undefined) {
       parts.push({ text: `被 ${pa.sourceValue} 点攻击骰攻击，本次 ${pa.value} 伤害` });
+    } else if (pa.sourceSkill) {
+      // 技能发起的攻击：写明"由该技能引起"，并区分「持有者自己发起 / 他人因该效果发起」
+      parts.push({ text: `玩家${pa.attacker}`, color: pa.attacker });
+      parts.push({
+        text:
+          pa.sourceSkillOwner === pa.attacker
+            ? `「${pa.sourceSkill}」发起攻击，本次 ${pa.value} 伤害（无攻击骰）`
+            : ` 因对方「${pa.sourceSkill}」效果而发起攻击，本次 ${pa.value} 伤害（无攻击骰）`,
+      });
     } else {
       parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰）` });
     }
@@ -1339,6 +1383,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     }
     case 'caiyuliu':
       return a.to === 'defense' ? '「裁雨流」移到防御骰区' : a.to === 'meditation' ? '「裁雨流」移到冥想骰区' : '不发动「裁雨流」';
+    case 'c01Caiyuliu':
+      return a.accept ? '发动「极之境·裁雨流」（重掷该攻击骰）' : '不发动「极之境·裁雨流」';
     case 'guwangCharge':
       return '不变更';
     case 'chuxingPick':
@@ -1365,6 +1411,9 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     }
     case 'shenhongKill':
       return a.accept ? '发动「杀意」（3 真伤 + 回2）' : '不发动「杀意」';
+    case 'aidao':
+      // 带 defenseDieId 的变体已由 actionDieSegments 走骰片（"弃置对方 防X"）；裸 accept 只在对方无防御骰时出现
+      return a.accept ? '发动「哀悼」（对方无防御骰）' : '不发动「哀悼」';
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dianxing':
@@ -1489,6 +1538,13 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
       return { parts: ['发动「灵能屏障」伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
+    }
+    case 'aidao': {
+      // A02 深红（异相）·哀悼：弃置的是**对方区域内**的防御骰 → owner = 持有者之对手
+      if (!a.accept || !a.defenseDieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'aidao' ? opponent(pd.player) : state.activePlayer;
+      return { parts: ['发动「哀悼」（弃置对方 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
     }
     case 'weijuPay': {
       // 023 畏惧：对方被迫消耗的那颗骰 → 1 颗用内联骰片
@@ -2135,16 +2191,18 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
       box.appendChild(die);
     }
   }
-  // 034 金刚·破障（持续）：神器上存放的骰当作能力骰「使用/消耗」→ 仅限走 paySlots 的支付步（allowArtifact）
+  // 034/A03 破障（持续）：神器上存放的骰当作能力骰「使用/消耗」→ 仅限走 paySlots 的支付步（allowArtifact）
+  // 只附**与本步类型相符**的存放骰（类型按第二列分布判定），避免出现"类型不符"的假可选项。
   if (step.allowArtifact === true && step.owner === 'self' && hasActiveSkill(owner, 'jingang.pozhang.continuous')) {
-    for (const a of owner.artifacts) {
-      for (const h of a.heldDice ?? []) {
-        const hd = { id: h.id, value: h.value, kind: 'meditation' as const };
+    for (const k of AREA_ORDER) {
+      if (!step.areas.includes(k)) continue;
+      for (const h of heldDiceOfKind(ctx.state, ownerId, k)) {
+        const hd = { id: h.id, value: h.value, kind: k };
         const chip = el('span', 'pay-die pay-die--held');
         chip.dataset.id = h.id;
         chip.dataset.value = String(h.value);
         chip.textContent = String(h.value);
-        chip.title = `「${a.name}」上存放的骰（${h.value} 点；按分布判定类型）`;
+        chip.title = `「金刚·破障」：神器上存放的骰（${h.value} 点，视为${KIND_NAMES[k]}骰）`;
         if (sel.currentSel.has(h.id)) chip.classList.add('selected');
         if (!step.filter || step.filter(hd)) {
           chip.classList.add('clickable');
@@ -2752,7 +2810,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
 
   const head = el('div', 'detail-head');
   const title = el('div', 'detail-title');
-  title.textContent = `${art.name}${art.weapon ? `（${art.weapon}）` : ''}`;
+  title.textContent = `${art.name}${art.weapon ? `（${art.weapon}）` : ''}${art.special ? '　〔特典〕' : ''}`;
   head.appendChild(title);
   const close = document.createElement('button');
   close.type = 'button';

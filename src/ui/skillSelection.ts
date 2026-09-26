@@ -1,5 +1,6 @@
 import type { DiceKind, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
+import { abilityDicePool } from '../core/engine/effects';
 import { effectiveWill } from '../core/engine/derive';
 
 export type SelectStep =
@@ -52,8 +53,12 @@ const SLOTS_LABEL = '支付代价（可用「真实之剑」置换能力骰）';
 const repeatKind = (kind: DiceKind, n: number): DiceKind[] => Array.from({ length: n }, () => kind);
 
 const KIND_CN: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+/** 可支付能力骰数（区域真骰 + 034/A03 存放骰）按类型——代价向导的可行范围据此计算 */
 const kindCount = (state: GameState, player: PlayerId, kind: DiceKind): number =>
-  state.players[player].areas[kind].length;
+  abilityDicePool(state, player).filter((d) => d.kind === kind).length;
+/** 可支付能力骰总数（区域真骰 + 存放骰） */
+const payTotalDice = (state: GameState, player: PlayerId): number => abilityDicePool(state, player).length;
+/** 区域真骰总数（仅用于「结束阶段超出意志上限」等与存放骰无关的场合） */
 const totalDice = (state: GameState, player: PlayerId): number =>
   KINDS.reduce((n, k) => n + state.players[player].areas[k].length, 0);
 /** 把一串 id 每 2 个配成一对（用于「置换」骰位） */
@@ -77,14 +82,14 @@ interface CostSpec {
 
 /** 最多可支付的骰位数：2N ≤（总骰数 + 该类型真骰数），且不超过上限 */
 function maxSlotsFor(state: GameState, player: PlayerId, spec: CostSpec): number {
-  const bound = Math.floor((totalDice(state, player) + kindCount(state, player, spec.kind)) / 2);
+  const bound = Math.floor((payTotalDice(state, player) + kindCount(state, player, spec.kind)) / 2);
   return Math.max(0, Math.min(spec.maxSlots, bound));
 }
 
 /** 给定骰位数 N，可行的置换数区间 [minM, maxM]（连续） */
 function mRangeFor(state: GameState, player: PlayerId, spec: CostSpec, N: number): [number, number] {
   const minM = Math.max(0, N - kindCount(state, player, spec.kind));
-  const maxM = Math.min(N, totalDice(state, player) - N);
+  const maxM = Math.min(N, payTotalDice(state, player) - N);
   return [minM, Math.max(minM, maxM)];
 }
 
@@ -198,6 +203,17 @@ const jingangLoadSelection: SkillSelection = {
   buildParams: ({ chosenDice }) => ({ pips: (chosenDice[0] ?? []).map(Number) }),
 };
 
+/** A03 金刚·异相激活（修罗的破障 / 修罗的菩提同效）：两步各选 1 个点数（可相同）→ 2 个任意点数存放 */
+const jingang2LoadSelection: SkillSelection = {
+  steps: () => [
+    { kind: 'pips' as const, label: '选择第 1 颗存放骰的点数（1–6）', min: 1, max: 1 },
+    { kind: 'pips' as const, label: '选择第 2 颗存放骰的点数（1–6，可与第 1 颗相同）', min: 1, max: 1 },
+  ],
+  buildParams: ({ chosenDice }) => ({
+    pips: [...(chosenDice[0] ?? []), ...(chosenDice[1] ?? [])].map(Number),
+  }),
+};
+
 export const SKILL_SELECTION: Record<string, SkillSelection> = {
   'yuqie.breakthrough': {
     steps: ({ state, player, chosenDice, slots }) => {
@@ -222,6 +238,25 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ chosenDice, slots }) => ({
       costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[0]),
       opponentDefenseDieIds: slots.length ? (chosenDice[0] ?? []) : (chosenDice[1] ?? []),
+    }),
+  },
+  // C01 特典·突破（启动）：消耗任意数量冥想骰（C01 第一列 → 无置换/存放骰）→ 弃对方等量防御骰
+  'c01.breakthrough': {
+    steps: ({ state, player, numbers }) => {
+      const med = state.players[player].areas.meditation.length;
+      const oppDef = state.players[oppOf(player)].areas.defense.length;
+      const maxN = Math.max(1, med);
+      const N = Math.min(numbers[0] ?? maxN, maxN);
+      const need = Math.min(N, oppDef);
+      return [
+        { kind: 'number', label: '「突破」：消耗几颗冥想骰（任意数量）？', min: 1, max: maxN, fmt: (n) => `${n} 颗` },
+        { kind: 'dice', label: `选择消耗的冥想骰（${N} 颗）`, owner: 'self', areas: ['meditation'], min: N, max: N },
+        { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
+      ];
+    },
+    buildParams: ({ chosenDice }) => ({
+      costSlots: realSlots(chosenDice[0]),
+      opponentDefenseDieIds: chosenDice[1] ?? [],
     }),
   },
   'youlong.tengwan': {
@@ -289,6 +324,18 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       const { costSlots, groups } = costPart(state, player, SPEC_WANSHA, numbers, chosenDice);
       return { costSlots, opponentDefenseDieIds: chosenDice[groups] ?? [] };
     },
+  },
+  // A07 异相·历王之血之印：弃置对方防御骰至与你攻击骰数相等（发起者选）
+  'wansha.alt.ultimate': {
+    steps: ({ state, player }) => {
+      const myAtk = state.players[player].areas.attack.length;
+      const required = Math.max(0, state.players[oppOf(player)].areas.defense.length - myAtk);
+      if (required <= 0) return [];
+      return [
+        { kind: 'dice', label: `选择弃置对方的防御骰（${required} 颗，至与你攻击骰数 ${myAtk} 相等）`, owner: 'opponent', areas: ['defense'], min: required, max: required },
+      ];
+    },
+    buildParams: ({ chosenDice }) => ({ opponentDefenseDieIds: chosenDice[0] ?? [] }),
   },
   'mingjing.ultimate': {
     steps: ({ state, player, chosenDice }) => {
@@ -1145,6 +1192,9 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
   // 034 金刚·激活（破障 / 不动菩提同效）：选 3 个互不相同的点数存放到神器上
   'jingang.pozhang': jingangLoadSelection,
   'jingang.puti': jingangLoadSelection,
+  // A03 金刚·异相激活（修罗的破障 / 修罗的菩提同效）：2 个任意点数（可相同）存放到神器上
+  'jingang.alt.pozhang': jingang2LoadSelection,
+  'jingang.alt.puti': jingang2LoadSelection,
   // 036 无相·万象俱灭（充能，必执行）：弃任意玩家 1 个能力骰 → 该玩家回 3 血
   'wuxiang.charge': {
     steps: ({ options }) => {

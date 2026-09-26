@@ -1,7 +1,7 @@
 ﻿import { describe, it, expect } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame } from '../src/core/engine/game';
-import { doAttack, resolveBlock, dealTrueDamage, finalizeAttackResolution } from '../src/core/engine/combat';
+import { doAttack, resolveBlock, dealTrueDamage, finalizeAttackResolution, pumpAttackQueue } from '../src/core/engine/combat';
 import { totalDice } from '../src/core/engine/derive';
 
 describe('combat', () => {
@@ -19,6 +19,34 @@ describe('combat', () => {
       sourceValue: die.value,
     });
     expect(totalDice(g.players.A)).toBe(before - 1);
+  });
+
+  it('virtualQueue: 技能发起的多次攻击按序逐次结算，攻击者可不同（A01 不败之王）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A' });
+    g.phase = 'main';
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    g.players.B.areas = { attack: [], defense: [], meditation: [] };
+    g.virtualQueue = [
+      { attacker: 'A', value: 5, label: '不败之王', owner: 'A' },
+      { attacker: 'B', value: 3, label: '不败之王', owner: 'A' },
+      { attacker: 'B', value: 3, label: '不败之王', owner: 'A' },
+    ];
+    pumpAttackQueue(g);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'A', value: 5, physical: false });
+    const bLife0 = g.players.B.life;
+    resolveBlock(g); // B 不抵挡 → 受 5 点
+    expect(g.players.B.life).toBe(bLife0 - 5);
+    // 第二段：对方 3 点攻击
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', value: 3, physical: false });
+    const aLife0 = g.players.A.life;
+    resolveBlock(g);
+    expect(g.players.A.life).toBe(aLife0 - 3);
+    // 第三段
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', value: 3 });
+    resolveBlock(g);
+    expect(g.players.A.life).toBe(aLife0 - 6);
+    expect(g.virtualQueue).toBeNull();
+    expect(g.pendingAttack).toBeNull();
   });
 
   it('blocking prevents damage and consumes the defense die', () => {

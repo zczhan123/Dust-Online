@@ -223,4 +223,27 @@ describe('034 破障：存放骰作为「使用」支付与触发「消耗」的
     applyAction(g, { t: 'fengmang', accept: true, attackDieId: 'ha', meditationDieId: 'hm' });
     expect(art(g, 'A', '034').heldDice).toHaveLength(0);
   });
+
+  it('存放骰 id 带玩家前缀：双方各持同型神器（034）并激活 → id 不撞串、互不影响', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '002', '003'], heroB: ['034', '002', '003'] });
+    skipInitialReroll(g);
+    toMain(g);
+    const activate = (who: PlayerId): void => {
+      g.activePlayer = who;
+      g.skillsUsedThisTurn = [];
+      const a = art(g, who, '034');
+      a.activeMarkerSide = 'left';
+      a.armedSide = 'left';
+      a.armedTurn = g.turnIndex;
+      g.pending = { kind: 'activationResolve', player: who, artifactId: '034', side: 'left' };
+      applyAction(g, { t: 'skill', artifactId: '034', side: 'left', params: { pips: [1, 2, 3] } });
+    };
+    activate('A');
+    activate('B');
+    const idsA = art(g, 'A', '034').heldDice!.map((d) => d.id);
+    const idsB = art(g, 'B', '034').heldDice!.map((d) => d.id);
+    expect(idsA.every((id) => id.startsWith('A-034-'))).toBe(true);
+    expect(idsB.every((id) => id.startsWith('B-034-'))).toBe(true);
+    expect(idsA.some((id) => idsB.includes(id))).toBe(false);
+  });
 });

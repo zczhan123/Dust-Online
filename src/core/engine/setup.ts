@@ -81,11 +81,13 @@ export function setupGame(opts: SetupOptions): GameState {
     skillConsumedThisAction: 0,
     dunwuPulseUsedThisTurn: false,
     attackQueue: null,
+    virtualQueue: null,
     extraReroll: null,
     pendingQueue: [],
     chenaiUsed: { A: false, B: false },
     freeNoCostRise: 0,
     attacksThisTurn: { A: 0, B: 0 },
+    hunhunGained: { A: 0, B: 0 },
     rerollPunish: { A: false, B: false },
     tianfa: { A: null, B: null },
   };

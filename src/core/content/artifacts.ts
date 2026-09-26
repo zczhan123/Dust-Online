@@ -363,7 +363,70 @@ export const ARTIFACTS: Record<string, ArtifactBase> = {
       { side: 'right', kind: 'trigger', key: 'jingang.puti.trigger' },
     ],
   },
+  // ── 异相神器（A01=009 孤王 / A02=010 深红 / A03=034 金刚；映射见 ALT_OF/BASE_OF）──
+  'A01': { id: 'A01', name: '孤王', weapon: '王冠', column: 3, life: 50, chargeReq: 2, skills: [
+    { side: 'only', kind: 'charge', key: 'guwang.alt.charge' },
+    { side: 'only', kind: 'ultimate', key: 'guwang.ultimate' },
+  ] },
+  'A02': { id: 'A02', name: '深红', weapon: '刺剑', column: 1, speed: 3, will: 9, skills: [
+    // 真实之剑（持续·左）：与 010 同 key，复用 010 的置换实现（canSwordConvert / paySlots）
+    { side: 'left', kind: 'continuous', key: 'shenhong.sword' },
+    // 哀悼（触发·右）：补充阶段实际补充 ≤3 时，造成 2 点真实伤害并弃置对方 1 个防御骰
+    { side: 'right', kind: 'trigger', key: 'shenhong.alt.aidao' },
+  ] },
+  'A03': { id: 'A03', name: '金刚', weapon: '神杖', column: 1, speed: 4, will: 7, skills: [
+    // 修罗的破障（激活）：清空神器上存放骰 → 取 2 个任意点数骰放神器上（可相同、不入区域）
+    { side: 'left', kind: 'activation', key: 'jingang.alt.pozhang' },
+    // 修罗的破障（持续）：与 034 同 key，复用破障存放骰「使用/消耗」实现
+    { side: 'left', kind: 'continuous', key: 'jingang.pozhang.continuous' },
+    // 修罗的菩提（激活）：同上清空并取 2 个任意点数骰
+    { side: 'right', kind: 'activation', key: 'jingang.alt.puti' },
+    // 修罗的菩提（触发）：与 034 同 key，复用不动菩提取消效果实现
+    { side: 'right', kind: 'trigger', key: 'jingang.puti.trigger' },
+  ] },
+  // A04 = 020 兽魂 的异相：取消伤害阈值 1→2、且改由**持有者**决定；攻击伤害/速度 +计数（同基础）
+  'A04': { id: 'A04', name: '兽魂', weapon: '爪', column: 2, distribution: { defense: [1, 6], attack: [2, 3], meditation: [4, 5] }, countCap: 2, skills: [
+    { side: 'left', kind: 'activation', key: 'shouhun.alt.xiong' },
+    { side: 'left', kind: 'continuous', key: 'shouhun.alt.xiong.continuous' },
+    { side: 'right', kind: 'activation', key: 'shouhun.alt.lang' },
+    { side: 'right', kind: 'continuous', key: 'shouhun.alt.lang.continuous' },
+  ] },
+  // A05 = 028 天罚 的异相：去掉"点数视为6"，改为攻击伤害 +3；抵挡限制/2 次结束同基础
+  'A05': { id: 'A05', name: '天罚', weapon: '大剑', column: 1, speed: 4, will: 7, skills: [
+    // 深空之火（激活）：本回合攻击不可用防御骰抵挡（只能用冥想骰）+ 攻击伤害 +3；2 次伤害后结束主要阶段
+    { side: 'left', kind: 'activation', key: 'tianfa.alt.shenkong' },
+    // 陨落（激活·异相）：同上，只能用攻击骰抵挡
+    { side: 'right', kind: 'activation', key: 'tianfa.alt.yunluo' },
+  ] },
+  // A06 = 016 虚臾 的异相：两项持续（勾魂 / 幽魂不散）；速度 4、无基础"速度+2"
+  'A06': { id: 'A06', name: '虚臾', weapon: '镰刀', column: 1, speed: 4, will: 8, skills: [
+    // 勾魂（持续）：用"点数不在本神器上"的攻击骰造成伤害后，将该骰永久置于本神器上
+    { side: 'left', kind: 'continuous', key: 'xuyu.alt.gouhun' },
+    // 幽魂不散（持续）：防御/冥想骰被使用或弃置后，获得 X 点攻击骰（X=神器上攻击骰数；每回合上限 2）
+    { side: 'right', kind: 'continuous', key: 'xuyu.alt.youhun' },
+  ] },
+  // A07 = 006 完杀 的异相：充能给防御骰(需求2)；必杀＝对方防御数≥我方攻击数→弃差额；本回合双方持续失效
+  'A07': { id: 'A07', name: '完杀', weapon: '戒指', column: 3, life: 50, chargeReq: 2, skills: [
+    { side: 'only', kind: 'charge', key: 'wansha.alt.charge' },
+    { side: 'only', kind: 'ultimate', key: 'wansha.alt.ultimate' },
+  ] },
+  // A08 = 013 鸣雷 的异相：电刑（消耗2冥想→以 1/2/6 点依次攻击）+ 雷暴（触发同基础）；持续＝速度+2
+  'A08': { id: 'A08', name: '鸣雷', weapon: '长枪', column: 1, speed: 2, will: 8, skills: [
+    { side: 'left', kind: 'trigger', key: 'minglei.alt.dianxing' },
+    { side: 'right', kind: 'trigger', key: 'minglei.leibao.trigger' },
+    { side: 'right', kind: 'continuous', key: 'minglei.alt.leibao.continuous' },
+  ] },
+  // C01 = 001 雨切 的特典（替换版；不能在正式比赛中使用）：突破（任意数量冥想→弃对方等量防御）+ 极之境·裁雨流（重掷落区）
+  'C01': { id: 'C01', name: '雨切', weapon: '武士刀', column: 1, speed: 4, will: 7, special: true, skills: [
+    { side: 'left', kind: 'activate', key: 'c01.breakthrough' },
+    { side: 'right', kind: 'trigger', key: 'c01.caiyuliu' },
+  ] },
 };
+
+/** 异相/特典神器 ↔ 原版神器 映射（供选择界面「切换」与后续引擎识别）。 */
+export const ALT_OF: Record<string, string> = { '009': 'A01', '010': 'A02', '034': 'A03', '020': 'A04', '028': 'A05', '016': 'A06', '006': 'A07', '013': 'A08', '001': 'C01' };
+export const BASE_OF: Record<string, string> = { A01: '009', A02: '010', A03: '034', A04: '020', A05: '028', A06: '016', A07: '006', A08: '013', C01: '001' };
+export const isAltArtifact = (id: string): boolean => id in BASE_OF;
 
 export function makeArtifact(id: string): Artifact {
   const base = ARTIFACTS[id];

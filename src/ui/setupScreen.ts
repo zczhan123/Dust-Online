@@ -1,5 +1,6 @@
 import type { PlayerId } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
+import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact } from '../core/content/artifacts';
 import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 
@@ -59,6 +60,27 @@ function button(className: string, text: string): HTMLButtonElement {
   b.className = className;
   b.textContent = text;
   return b;
+}
+
+/** 异相徽标（卡槽左上角，纯显示）。 */
+function addAltBadge(slot: HTMLElement): void {
+  const b = el('span', 'pick-alt-badge');
+  b.textContent = '异相';
+  slot.appendChild(b);
+}
+/** 特典徽标（C01 等；不能在正式比赛中使用）。 */
+function addSpecialBadge(slot: HTMLElement): void {
+  const b = el('span', 'pick-special-badge');
+  b.textContent = '特典';
+  b.title = '特典神器：不能在正式比赛中使用';
+  slot.appendChild(b);
+}
+/** 「切换」按钮（卡槽右上角）＝ 原版 ↔ 异相。 */
+function addAltSwitch(slot: HTMLElement, onToggle: () => void): void {
+  const t = el('span', 'pick-alt-switch');
+  t.textContent = '切换';
+  t.addEventListener('click', (e) => { e.stopPropagation(); onToggle(); });
+  slot.appendChild(t);
 }
 
 /** 图鉴查询外链（新标签打开） */
@@ -378,6 +400,8 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   const slots: Record<Side, (string | null)[]> = { A: [null, null, null], B: [null, null, null] }; // 构筑：按列固定格
   const confirmed: Record<Side, boolean> = { A: false, B: false };
   let first: 'A' | 'B' | 'random' = 'random';
+  let anomaly = false; // 「使用异相神器」开关
+  const candAlt: Record<Side, boolean[]> = { A: [false, false, false], B: [false, false, false] };
   let anim: { side: Side; ids: string[] } | null = null;
   let ANIM: { side: Side; ids: string[] } | null = null;
 
@@ -399,8 +423,12 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
   const heroIds = (idx: number): [string, string, string] => HEROES[HERO_KEYS[idx]];
   const heroLabel = (idx: number): string => HERO_LABELS[HERO_KEYS[idx]];
-  const heroIdxOfId = (id: string): number => HERO_KEYS.findIndex((k) => (HEROES[k] as string[]).includes(id));
-  const colOf = (id: string): number => (HEROES[HERO_KEYS[heroIdxOfId(id)]] as string[]).indexOf(id);
+  // 异相 id 先解析回原版，再按其所在列返回（0–2）
+  const colOf = (id: string): number => {
+    const b = BASE_OF[id] ?? id;
+    const i = HERO_KEYS.findIndex((k) => (HEROES[k] as string[]).includes(b));
+    return (HEROES[HERO_KEYS[i]] as string[]).indexOf(b);
+  };
   const ownerIdx = (side: Side): number | null => {
     for (const k of Object.keys(owner)) if (owner[Number(k)] === side) return Number(k);
     return null;
@@ -456,13 +484,22 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     const l2 = el('span', 'pick-lab');
     l2.textContent = '附加模组';
     g2.appendChild(l2);
-    const extras = mode === 'yuxuan' ? ['使用传奇英雄面板', '使用战术牌'] : ['使用异相神器', '使用战术牌'];
-    for (const label of extras) {
+    if (mode === 'yuxuan') {
       const w = el('span', 'pick-sw is-disabled');
       w.appendChild(el('span', 'pick-dot'));
-      const lab = el('span', 'pick-swlab');
-      lab.textContent = label;
-      w.appendChild(lab);
+      const lab = el('span', 'pick-swlab'); lab.textContent = '使用传奇英雄面板'; w.appendChild(lab);
+      g2.appendChild(w);
+    } else {
+      const w = el('span', 'pick-sw' + (anomaly ? ' on' : ''));
+      w.appendChild(el('span', 'pick-dot'));
+      const lab = el('span', 'pick-swlab'); lab.textContent = '使用异相神器'; w.appendChild(lab);
+      w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      g2.appendChild(w);
+    }
+    {
+      const w = el('span', 'pick-sw is-disabled');
+      w.appendChild(el('span', 'pick-dot'));
+      const lab = el('span', 'pick-swlab'); lab.textContent = '使用战术牌'; w.appendChild(lab);
       g2.appendChild(w);
     }
     top.appendChild(g2);
@@ -476,17 +513,22 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   }
 
   // ── 卡槽 ──
-  function cardSlot(id: string, opts: { side?: Side; ink?: boolean; clickable?: boolean; locked?: boolean; picked?: boolean; onClick?: () => void; onDblClick?: () => void } = {}): HTMLElement {
+  function cardSlot(id: string, opts: { side?: Side; ink?: boolean; clickable?: boolean; locked?: boolean; picked?: boolean; onClick?: () => void; onDblClick?: () => void; altSwitch?: (() => void) | null } = {}): HTMLElement {
     const s = el('div', 'pick-slot');
     if (opts.ink) s.classList.add('ink');
     if (ANIM && opts.side === ANIM.side && ANIM.ids.includes(id)) s.classList.add('pop');
     const art = el('div', 'pick-art');
+    const inner = el('div', 'pick-art-inner');
     const img = document.createElement('img');
     img.src = cardUrl(id);
     img.alt = '';
-    art.appendChild(img);
+    inner.appendChild(img);
+    art.appendChild(inner);
     s.appendChild(art);
     s.dataset.cardId = id;
+    if (isAltArtifact(id)) addAltBadge(inner);
+      if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
+    if (opts.altSwitch) addAltSwitch(inner, opts.altSwitch);
     if (opts.clickable && !opts.locked) {
       s.classList.add('clickable');
       if (opts.picked) s.classList.add('picked');
@@ -594,10 +636,14 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     if (ci == null) {
       for (let i = 0; i < 3; i++) cards.appendChild(emptySlot(i));
     } else {
-      for (const id of heroIds(ci)) {
+      const ids = heroIds(ci);
+      for (let i = 0; i < 3; i++) {
+        const baseId = ids[i];
+        const alt = anomaly && candAlt[side][i] && !!ALT_OF[baseId];
+        const id = alt ? ALT_OF[baseId] : baseId;
         if (takenAnywhere(id)) { cards.appendChild(takenSlot()); continue; }
         const locked = confirmed[side];
-        cards.appendChild(cardSlot(id, {
+        const slot = cardSlot(id, {
           side,
           ink: true,
           clickable: true,
@@ -612,7 +658,11 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
             pick[side] = id;
             confirmPickYi(side);
           },
-        }));
+          altSwitch: anomaly && !locked && ALT_OF[baseId]
+            ? () => { candAlt[side][i] = !candAlt[side][i]; pick[side] = null; anim = null; render(); }
+            : null,
+        });
+        cards.appendChild(slot);
       }
     }
     col.appendChild(cards);
@@ -659,6 +709,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
           if (cand[side] === i) b.classList.add('is-cur');
           b.addEventListener('click', () => {
             cand[side] = cand[side] === i ? null : i;
+            candAlt[side] = [false, false, false];
             pick[side] = null;
             anim = null;
             render();
@@ -701,6 +752,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       slots[side] = next;
       confirmed[side] = true;
       pick[side] = null;
+      candAlt[side] = [false, false, false];
       anim = { side, ids: next.filter(Boolean) as string[] };
     }
     render();
@@ -815,7 +867,8 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
 
   let phase: 'prep' | 'draft' = 'prep';
   let firstPlayer: Side = 'A';
-  let pieces: Array<{ col: number; id: string }> = [];
+  let anomaly = false; // 「使用异相神器」开关
+  let pieces: Array<{ col: number; id: string; baseId: string }> = [];
   let removed: boolean[] = [];
   let taken: Record<Side, (string | null)[]> = { A: [null, null, null], B: [null, null, null] };
   let step = 1;
@@ -863,7 +916,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
         const j = Math.floor(Math.random() * (i + 1));
         [sh[i], sh[j]] = [sh[j], sh[i]];
       }
-      for (const id of sh.slice(0, 3)) pieces.push({ col: c, id });
+      for (const id of sh.slice(0, 3)) pieces.push({ col: c, id, baseId: id });
     }
     removed = pieces.map(() => false);
     taken = { A: [null, null, null], B: [null, null, null] };
@@ -939,11 +992,13 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     l2.textContent = '附加模组';
     g2.appendChild(l2);
     for (const label of ['使用异相神器', '使用战术牌']) {
-      const w = el('span', 'pick-sw is-disabled');
+      const enabled = label === '使用异相神器';
+      const w = el('span', 'pick-sw' + (enabled ? (anomaly ? ' on' : '') : ' is-disabled'));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab');
       lab.textContent = label;
       w.appendChild(lab);
+      if (enabled) w.addEventListener('click', () => { anomaly = !anomaly; render(); });
       g2.appendChild(w);
     }
     top.appendChild(g2);
@@ -1005,10 +1060,14 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
 
   function artWithImg(id: string): HTMLElement {
     const art = el('div', 'pick-art');
+    const inner = el('div', 'pick-art-inner');
     const img = document.createElement('img');
     img.src = cardUrl(id);
     img.alt = '';
-    art.appendChild(img);
+    inner.appendChild(img);
+    art.appendChild(inner);
+    if (isAltArtifact(id)) addAltBadge(inner);
+      if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
     return art;
   }
   function confirmSlot(id: string): HTMLElement {
@@ -1041,8 +1100,17 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
       art.textContent = '已被选取';
       s.appendChild(art);
     } else {
-      s.appendChild(artWithImg(p.id));
+      const art = artWithImg(p.id);
+      s.appendChild(art);
+      const inner = art.querySelector('.pick-art-inner') as HTMLElement;
       s.dataset.cardId = p.id;
+      if (anomaly && ALT_OF[p.baseId]) {
+        addAltSwitch(inner, () => {
+          p.id = p.id === p.baseId ? (ALT_OF[p.baseId] ?? p.baseId) : p.baseId;
+          animIds = null;
+          render();
+        });
+      }
       if (isLegal(i)) {
         s.classList.add('legal');
         s.tabIndex = 0;
@@ -1153,6 +1221,8 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
   let legendIdx = 0;
   let pickHeroIdx = 0;
   let autoResolve: 'favor' | 'against' = 'favor';
+  let anomaly = false; // 「使用异相神器」开关
+  const candAlt = [false, false, false];
   const slots: (string | null)[] = [null, null, null]; // 挑战者，按列
 
   const surface = el('div', 'pick-surface');
@@ -1175,12 +1245,16 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     h.appendChild(w); h.appendChild(s);
     return h;
   }
-  function cardImg(id: string, inspect = true): HTMLElement {
+  function cardImg(id: string, inspect = true, altSwitch?: () => void): HTMLElement {
     const s = el('div', 'pick-slot');
     if (inspect) s.dataset.cardId = id;
     const art = el('div', 'pick-art');
+    const inner = el('div', 'pick-art-inner');
     const im = document.createElement('img'); im.src = cardUrl(id); im.alt = '';
-    art.appendChild(im); s.appendChild(art);
+    inner.appendChild(im); art.appendChild(inner); s.appendChild(art);
+    if (isAltArtifact(id)) addAltBadge(inner);
+      if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
+    if (altSwitch) addAltSwitch(inner, altSwitch);
     return s;
   }
   function emptySlot(c: number): HTMLElement {
@@ -1200,10 +1274,13 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     const g2 = el('span', 'pick-grp');
     const l2 = el('span', 'pick-lab'); l2.textContent = '附加模组'; g2.appendChild(l2);
     for (const label of ['使用异相神器', '使用战术牌']) {
-      const w = el('span', 'pick-sw is-disabled');
+      const enabled = label === '使用异相神器';
+      const w = el('span', 'pick-sw' + (enabled ? (anomaly ? ' on' : '') : ' is-disabled'));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab'); lab.textContent = label;
-      w.appendChild(lab); g2.appendChild(w);
+      w.appendChild(lab);
+      if (enabled) w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      g2.appendChild(w);
     }
     top.appendChild(g2);
     const start = button('pick-start', '开始挑战');
@@ -1246,9 +1323,16 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     const col = el('div', 'pick-col A cand' + (confirmed ? ' locked' : ''));
     col.appendChild(colHead('挑战者 候选', HERO_LABELS[HERO_KEYS[pickHeroIdx]]));
     const cards = el('div', 'pick-cards');
-    HEROES[HERO_KEYS[pickHeroIdx]].forEach((id, i) => {
+    const ids = HEROES[HERO_KEYS[pickHeroIdx]];
+    ids.forEach((baseId, i) => {
+      const alt = anomaly && candAlt[i] && !!ALT_OF[baseId];
+      const id = alt ? ALT_OF[baseId] : baseId;
       if (slots.includes(id)) { cards.appendChild(takenSlot()); return; }
-      const s = cardImg(id);
+      const s = cardImg(
+        id,
+        true,
+        anomaly && !confirmed && ALT_OF[baseId] ? () => { candAlt[i] = !candAlt[i]; render(); } : undefined,
+      );
       s.classList.add('ink');
       if (!confirmed) {
         s.classList.add('clickable');
@@ -1270,7 +1354,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
       const acts = el('div', 'pick-acts');
       const a = button('pick-ab A', '挑'); if (pickHeroIdx === i) a.classList.add('is-cur');
       a.dataset.hero = key; a.dataset.act = 'pick';
-      a.addEventListener('click', () => { pickHeroIdx = i; render(); });
+      a.addEventListener('click', () => { pickHeroIdx = i; candAlt[0] = candAlt[1] = candAlt[2] = false; render(); });
       const b = button('pick-ab L', '传'); if (legendIdx === i) b.classList.add('is-cur');
       b.dataset.hero = key; b.dataset.act = 'legend';
       b.addEventListener('click', () => { legendIdx = i; render(); });

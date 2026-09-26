@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
 import { effectiveSpeed, totalDice } from '../src/core/engine/derive';
-import { attackDamageBuff } from '../src/core/engine/combat';
+import { attackDamageBuff, pumpAttackQueue } from '../src/core/engine/combat';
 import type { DiceKind, GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 019/020/021（荒野行者 尼萨），B 持 004/005/006（永暗之刃 影） */
@@ -304,7 +304,7 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
     expect(g.players.A.areas.attack.filter((d) => d.value === 3).length).toBe(2);
     expect(totalDice(g.players.A)).toBe(2);
     // 刷新启动次数（本回合可再次启动）+ 标记移到另一侧
-    expect(g.skillsUsedThisTurn.includes('chenai.fang')).toBe(false);
+    expect(g.skillsUsedThisTurn.includes('A:chenai.fang')).toBe(false);
     expect(card.activeMarkerSide).toBe('left');
   });
 
@@ -371,5 +371,48 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a-atk2'] }] });
     applyAction(g, { t: 'block' });
     expect(g.pending?.kind ?? null).not.toBe('chenaiFreeRise');
+  });
+});
+
+describe('兽魂：多段攻击中「取消伤害」后后续段必须继续（回归 2026-09-25）', () => {
+  it('020（阈值1）：取消第一段后第二段照常发起', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '020', 'left'); // 熊之心（持续生效）
+    art(g, 'A', '020').count = 2;
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    // 模拟 013 电刑：B 连续两段攻击（5 点、3 点）
+    g.attackQueue = { player: 'B', values: [5, 3] };
+    pumpAttackQueue(g);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', value: 5 });
+
+    applyAction(g, { t: 'block' }); // A 不抵挡 → 兽魂触发
+    expect(g.pending).toMatchObject({ kind: 'shouhunCancel', owner: 'A' });
+
+    applyAction(g, { t: 'shouhunCancel', cancel: true }); // 取消 → 队列必须继续
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', value: 3 });
+    expect(g.attackQueue).toBeNull();
+  });
+
+  it('A04（阈值2）：取消第一段（2→1）后第二段照常发起；计数 < 阈值 → 第二段不再提示、直接受伤', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', 'A04', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    activate(g, 'A', 'A04', 'left');
+    art(g, 'A', 'A04').count = 2;
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    g.attackQueue = { player: 'B', values: [5, 3] };
+    pumpAttackQueue(g);
+
+    applyAction(g, { t: 'block' });
+    expect(g.pending).toMatchObject({ kind: 'shouhunCancel', player: 'A', owner: 'A', minCount: 2 });
+    applyAction(g, { t: 'shouhunCancel', cancel: true });
+    expect(art(g, 'A', 'A04').count).toBe(1);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', value: 3 }); // 第二段继续
+
+    const life = g.players.A.life;
+    applyAction(g, { t: 'block' }); // 第二段：计数1 < 2 → 不再提示
+    expect(g.pending?.kind ?? null).not.toBe('shouhunCancel');
+    expect(g.players.A.life).toBe(life - 3);
   });
 });

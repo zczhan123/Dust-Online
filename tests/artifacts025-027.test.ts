@@ -412,14 +412,14 @@ describe('027 寒光（凛冽之音）', () => {
 
     applyAction(g, { t: 'skill', artifactId: '027', side: 'only' });
     expect(card.heldDice?.map((d) => d.value)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(g.ultimatesUsed).toContain('hanguang.ultimate');
+    expect(g.ultimatesUsed).toContain('A:hanguang.ultimate');
     expect(canUseHanguang(g, 'A')).toBe(true);
 
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
     expect(g.pending?.kind).toBe('hanguangPick');
-    applyAction(g, { t: 'hanguangPick', pick: 'move', dieId: '027-held-3' });
+    applyAction(g, { t: 'hanguangPick', pick: 'move', dieId: 'A-027-held-3' });
     // 3 点按 026 分布落入攻击区；用于攻击的 a1 已被消耗
-    expect(g.players.A.areas.attack).toEqual([{ id: '027-held-3', value: 3, kind: 'attack' }]);
+    expect(g.players.A.areas.attack).toEqual([{ id: 'A-027-held-3', value: 3, kind: 'attack' }]);
     expect(card.heldDice?.map((d) => d.value)).toEqual([1, 2, 4, 5, 6]);
     expect(g.pendingAttack?.value).toBe(2);
     applyAction(g, { t: 'block', costSlots: [{ dieIds: ['bd'] }] });
@@ -440,9 +440,9 @@ describe('027 寒光（凛冽之音）', () => {
     applyAction(g, { t: 'skill', artifactId: '027', side: 'only' });
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
     expect(g.pending?.kind).toBe('hanguangPick');
-    applyAction(g, { t: 'hanguangPick', pick: 'discard', dieId: '027-held-3', targetDieId: 'bd3' });
+    applyAction(g, { t: 'hanguangPick', pick: 'discard', dieId: 'A-027-held-3', targetDieId: 'bd3' });
     expect(g.players.B.areas.defense.map((d) => d.id)).toEqual([]);
-    expect(card.heldDice?.some((d) => d.id === '027-held-3')).toBe(false);
+    expect(card.heldDice?.some((d) => d.id === 'A-027-held-3')).toBe(false);
     expect(g.pendingAttack).not.toBeNull();
     // 对方已无防御骰 → 无法抵挡
     expect(getLegalActions(g).some((a) => a.t === 'block' && a.costSlots)).toBe(false);
@@ -468,7 +468,7 @@ describe('027 寒光（凛冽之音）', () => {
     expect(g.pending?.kind).toBe('hanguangPick');
     const heldBefore = card.heldDice!.map((d) => d.id);
     expect(() =>
-      applyAction(g, { t: 'hanguangPick', pick: 'discard', dieId: '027-held-3', targetDieId: 'bd5' }),
+      applyAction(g, { t: 'hanguangPick', pick: 'discard', dieId: 'A-027-held-3', targetDieId: 'bd5' }),
     ).toThrow();
     expect(card.heldDice!.map((d) => d.id)).toEqual(heldBefore);
     expect(g.players.B.areas.defense.map((d) => d.id)).toEqual(['bd5']);
@@ -555,7 +555,7 @@ describe('027 寒光·必杀：真实路径（充能 → 按钮 → 发动）', 
     // 发动必杀 → 取 1–6 点各 1 颗置于本神器上
     applyAction(g, { t: 'skill', artifactId: '027', side: 'only' });
     expect(card.heldDice?.map((d) => d.value)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(g.ultimatesUsed).toContain('hanguang.ultimate');
+    expect(g.ultimatesUsed).toContain('A:hanguang.ultimate');
   });
 });
 

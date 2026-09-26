@@ -39,6 +39,12 @@ function skillAttributeBonuses(p: PlayerState): { speed: number; will: number } 
   if (hasActiveSkill(p, 'shouhun.lang.continuous')) {
     speed = Math.max(speed, artifactByKey(p, 'shouhun.lang.continuous')?.count ?? 0);
   }
+  // A04 异相·灵界狼魂（持续）：你的速度 + 计数
+  if (hasActiveSkill(p, 'shouhun.alt.lang.continuous')) {
+    speed = Math.max(speed, artifactByKey(p, 'shouhun.alt.lang.continuous')?.count ?? 0);
+  }
+  // A08 异相·将至的雷暴（持续）：你的速度 +2
+  if (hasActiveSkill(p, 'minglei.alt.leibao.continuous')) speed = Math.max(speed, 2);
   // 021 决意·野火燎原（持续·计数 3+）：你的速度 +1
   if (hasActiveSkill(p, 'jueyi.wildfire.continuous')) {
     if ((artifactByKey(p, 'jueyi.wildfire.continuous')?.count ?? 0) >= 3) speed = Math.max(speed, 1);

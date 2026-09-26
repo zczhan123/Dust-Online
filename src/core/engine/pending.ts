@@ -1,5 +1,5 @@
 import type { GameState, Pending, PlayerId } from '../model/types';
-import { hasActiveSkill } from './skill-state';
+import { hasActiveSkill, skillUseKey } from './skill-state';
 import { gainRandomAbilityDice, withRngState } from './effects';
 import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
@@ -21,10 +21,10 @@ function checkZhihaiForced(g: GameState): boolean {
     if (!card) continue;
     if (card.continuousLost) continue;
     if (!hasActiveSkill(p, 'zhihai.bloom')) continue;
-    if (g.ultimatesUsed.includes('zhihai.bloom.ultimate')) continue;
+    if (g.ultimatesUsed.includes(skillUseKey(id, 'zhihai.bloom.ultimate'))) continue;
     if (card.count < 5) continue;
     const x = card.count;
-    g.ultimatesUsed.push('zhihai.bloom.ultimate');
+    g.ultimatesUsed.push(skillUseKey(id, 'zhihai.bloom.ultimate'));
     card.continuousLost = true;
     withRngState(g, (rng) => {
       const gained = gainRandomAbilityDice(g, id, x, rng);

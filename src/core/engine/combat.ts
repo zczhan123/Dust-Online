@@ -1,7 +1,7 @@
 import type { Artifact, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
 import { hasActiveSkill, skillActive } from './skill-state';
 import { pumpPending, queuePending } from './pending';
-import { paySlots, heal, type SlotFill } from './effects';
+import { paySlots, heal, canPayCosts, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -10,12 +10,6 @@ export function artifactWithSkill(p: PlayerState, key: string): Artifact | undef
 }
 
 /** 010「真实之剑」置换可用且拥有 ≥2 颗任意能力骰 → 「消耗 1 颗」的触发即使没有对应类型骰也可发动 */
-function canSwordConvert(p: PlayerState): boolean {
-  if (!hasActiveSkill(p, 'shenhong.sword')) return false;
-  const total = p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length;
-  return total >= 2;
-}
-
 /** 攻击伤害加成的来源（同属性取最大；label 供文案显示） */
 export function attackDamageBonus(
   g: GameState,
@@ -38,6 +32,10 @@ export function attackDamageBonus(
   // 020 兽魂·熊之心（持续）：攻击伤害 + 计数
   if (hasActiveSkill(p, 'shouhun.xiong.continuous')) {
     consider(artifactWithSkill(p, 'shouhun.xiong.continuous')?.count ?? 0, '熊之心');
+  }
+  // A04 异相·灵界熊魂（持续）：攻击伤害 + 计数（同属性取最大）
+  if (hasActiveSkill(p, 'shouhun.alt.xiong.continuous')) {
+    consider(artifactWithSkill(p, 'shouhun.alt.xiong.continuous')?.count ?? 0, '灵界熊魂');
   }
   // 021 决意·野火燎原（持续·计数 1+）：攻击伤害 +1
   if (hasActiveSkill(p, 'jueyi.wildfire.continuous')) {
@@ -142,9 +140,9 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
   const effDie = eff[0];
-  // 028 天罚（激活·本回合）：攻击点数「始终视为固定值」（FAQ 28.1.1）；同时记录对方只能用哪类骰抵挡
+  // 028 天罚（激活·本回合）：攻击点数「始终视为固定值」（FAQ 28.1.1）；A05 异相无固定值（value 未设）→ 用骰点
   const tianfa = g.tianfa[player];
-  const attackPoint = tianfa ? tianfa.value : effDie.value;
+  const attackPoint = tianfa && tianfa.value !== undefined ? tianfa.value : effDie.value;
   const base = attackDamageBonus(g, player);
   const bonus = Math.max(base.value, mods?.minBonus ?? 0);
   const bonusLabel = mods?.minBonus !== undefined && mods.minBonus > base.value ? mods.bonusLabel : base.label;
@@ -199,14 +197,19 @@ export function commitAttack(g: GameState, pa: PendingAttack): void {
   if (
     g.pending === null &&
     hasActiveSkill(g.players[defender], 'dunwu.barrier.trigger') &&
-    (g.players[defender].areas.meditation.length >= 1 || canSwordConvert(g.players[defender]))
+    canPayCosts(g, defender, { meditation: 1 }, { held: true })
   ) {
     g.pending = { kind: 'dunwuHalve', player: defender };
   }
 }
 
-/** 技能发起的“虚拟”攻击（非实体攻击骰） */
-export function virtualAttack(g: GameState, player: PlayerId, baseValue: number): void {
+/** 技能发起的“虚拟”攻击（非实体攻击骰）。`source` = 来源技能名 + 效果拥有者（供提示栏显示） */
+export function virtualAttack(
+  g: GameState,
+  player: PlayerId,
+  baseValue: number,
+  source?: { skill: string; owner: PlayerId },
+): void {
   const base = attackDamageBonus(g, player);
   g.pendingAttack = {
     attacker: player,
@@ -216,6 +219,7 @@ export function virtualAttack(g: GameState, player: PlayerId, baseValue: number)
     baseValue,
     bonusValue: base.value,
     bonusLabel: base.label,
+    ...(source ? { sourceSkill: source.skill, sourceSkillOwner: source.owner } : {}),
   };
   applyNextTurnHalving(g, player, g.pendingAttack);
 }
@@ -261,11 +265,12 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
     return;
   }
 
-  // 未抵挡：020 兽魂（由攻击方决定「取消伤害 / 正常造成伤害」，时机在抵挡决定之后）
-  const sh = shouhunCard(g, defenderId);
+  // 未抵挡：020 兽魂（由攻击方决定）／A04 异相（阈值 2、由**持有者**决定）——时机在抵挡决定之后
+  const sh = shouhunInfo(g, defenderId);
   if (sh && g.pending === null) {
     g.pendingAttack = null;
-    queuePending(g, { kind: 'shouhunCancel', player: pa.attacker, owner: defenderId, attack: pa });
+    const decider: PlayerId = sh.decider === 'owner' ? defenderId : pa.attacker;
+    queuePending(g, { kind: 'shouhunCancel', player: decider, owner: defenderId, attack: pa, minCount: sh.minCount });
     pumpPending(g);
     return;
   }
@@ -336,12 +341,35 @@ function count5HalfDamage(g: GameState, pa: PendingAttack): { damage: number; ha
   return { damage: half, halfApplied: true };
 }
 
-/** 020 兽魂：该玩家是否有「兽魂」持续处于激活状态且计数 ≥1（用于「攻击方可取消伤害」） */
-function shouhunCard(g: GameState, player: PlayerId): Artifact | null {
-  const card = artifactWithSkill(g.players[player], 'shouhun.xiong.continuous');
-  if (!card || card.count < 1) return null;
-  const anyActive = card.skills.some((s) => s.kind === 'continuous' && skillActive(card, s));
-  return anyActive ? card : null;
+/** 「兽魂」持续式 key（原版 020 + 异相 A04）：用于取消伤害的判定与计数复位 */
+export const SHOUHUN_CONT_KEYS = [
+  'shouhun.xiong.continuous',
+  'shouhun.lang.continuous',
+  'shouhun.alt.xiong.continuous',
+  'shouhun.alt.lang.continuous',
+] as const;
+
+interface ShouhunInfo {
+  card: Artifact;
+  minCount: number;
+  /** 谁决定是否取消：原版=攻击方（对方可选取消）；异相 A04=持有者本人 */
+  decider: 'attacker' | 'owner';
+}
+
+/** 020 兽魂 / A04 异相：该玩家是否有「兽魂·持续」激活且计数达阈值（用于「取消伤害」判定） */
+function shouhunInfo(g: GameState, player: PlayerId): ShouhunInfo | null {
+  const p = g.players[player];
+  for (const key of SHOUHUN_CONT_KEYS) {
+    const card = artifactWithSkill(p, key);
+    if (!card) continue;
+    const s = card.skills.find((x) => x.key === key);
+    if (!s || !skillActive(card, s)) continue;
+    const alt = key.startsWith('shouhun.alt.');
+    const minCount = alt ? 2 : 1;
+    if (card.count < minCount) continue;
+    return { card, minCount, decider: alt ? 'owner' : 'attacker' };
+  }
+  return null;
 }
 
 /**
@@ -376,11 +404,27 @@ export function afterAttackResolved(
   }
   // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
   if (res.damageDealt > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
+  // A06 异相·「勾魂」（持续）：你用"点数不存在于本神器之上"的攻击骰造成伤害后，将该攻击骰置于本神器上（永久）
+  if (res.damageDealt > 0 && pa.physical && pa.sourceValue !== undefined) {
+    const gou = artifactWithSkill(atk, 'xuyu.alt.gouhun');
+    const gsk = gou?.skills.find((s) => s.key === 'xuyu.alt.gouhun');
+    if (gou && gsk && skillActive(gou, gsk)) {
+      const held = gou.heldDice ?? (gou.heldDice = []);
+      if (!held.some((h) => h.value === pa.sourceValue)) {
+        held.push({ id: `${pa.attacker}-${gou.id}-held-${pa.sourceValue}`, value: pa.sourceValue as number });
+        logLine(g, `${pname(pa.attacker)} 「勾魂」：将本次攻击骰（${pa.sourceValue} 点）置于「${gou.name}」上`);
+      }
+    }
+  }
   // 001 裁雨流：当你使用攻击骰造成伤害后（每回合最多 3 次）
   if (res.damageDealt > 0 && pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined) {
     if (hasActiveSkill(atk, 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
       queuePending(g, { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue });
     }
+  }
+  // C01 特典·极之境·裁雨流（触发）：使用攻击骰造成伤害后，可重掷该骰并按新点数落区（无次数上限）
+  if (res.damageDealt > 0 && pa.physical && pa.sourceValue !== undefined && hasActiveSkill(atk, 'c01.caiyuliu')) {
+    queuePending(g, { kind: 'c01Caiyuliu', player: pa.attacker });
   }
   // 019 尘哀·尘起：你在自己的回合中通过攻击造成伤害后（每回合最多 1 次）
   if (
@@ -408,11 +452,17 @@ export function afterAttackResolved(
     if (hasTarget) queuePending(g, { kind: 'hengguan', player: pa.attacker, value: cmp });
   }
   // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
-  if (g.pending === null && g.pendingQueue.length === 0 && !g.attackQueue) {
+  if (g.pending === null && g.pendingQueue.length === 0 && !g.attackQueue && !g.virtualQueue) {
     const med = atk.areas.meditation.length;
     const usedAttackDie = pa.physical && pa.sourceDieId !== undefined;
-    if (usedAttackDie && hasActiveSkill(atk, 'minglei.dianxing') && med >= 2) {
-      queuePending(g, { kind: 'dianxing', player: pa.attacker });
+    // 013 电刑=1/2/3；A08 异相·将至的电刑=1/2/6（逻辑同、点数不同）
+    const dianxingValues = hasActiveSkill(atk, 'minglei.alt.dianxing')
+      ? [1, 2, 6]
+      : hasActiveSkill(atk, 'minglei.dianxing')
+        ? [1, 2, 3]
+        : null;
+    if (usedAttackDie && dianxingValues && med >= 2) {
+      queuePending(g, { kind: 'dianxing', player: pa.attacker, values: dianxingValues });
     } else if (res.blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
       queuePending(g, { kind: 'leibao', player: pa.attacker });
     }
@@ -422,12 +472,24 @@ export function afterAttackResolved(
 /** 若存在多段攻击队列且当前无待决策/待抵挡，则发起下一段虚拟攻击 */
 export function pumpAttackQueue(g: GameState): void {
   pumpPending(g); // 先弹出排队中的待决策/018 强制必杀，保证「攻击与攻击之间可中断」
+  if (g.pendingAttack || g.pending || g.phase === 'gameOver') return;
+  // 013 电刑：同一攻击者的多段攻击（1/2/3）
   const q = g.attackQueue;
-  if (!q || g.pendingAttack || g.pending || g.phase === 'gameOver') return;
-  const value = q.values.shift()!;
-  if (q.values.length === 0) g.attackQueue = null;
-  logLine(g, `${pname(q.player)} 「电刑」第 ${value} 点攻击（依次结算）`);
-  virtualAttack(g, q.player, value);
+  if (q) {
+    const value = q.values.shift()!;
+    if (q.values.length === 0) g.attackQueue = null;
+    logLine(g, `${pname(q.player)} 「电刑」第 ${value} 点攻击（依次结算）`);
+    virtualAttack(g, q.player, value, { skill: '电刑', owner: q.player });
+    return;
+  }
+  // A01 不败之王：技能发起的多次攻击，**攻击者可不同**（你先 5 点 → 对方 3 点 ×2）
+  const vq = g.virtualQueue;
+  if (vq && vq.length > 0) {
+    const next = vq.shift()!;
+    if (vq.length === 0) g.virtualQueue = null;
+    logLine(g, `${pname(next.attacker)} 「${next.label}」：以 ${next.value} 点发起攻击（依次结算）`);
+    virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner });
+  }
 }
 
 /** 017 幽冥·冥界行走（持续）：你的攻击造成伤害后，按「攻击的有效点数」结算 */
@@ -458,7 +520,7 @@ export function dealTrueDamage(g: GameState, target: PlayerId, amount: number, s
     g.pending === null &&
     g.phase !== 'gameOver' &&
     hasActiveSkill(p, 'guwang.trigger') &&
-    (p.areas.defense.length >= 1 || canSwordConvert(p))
+    canPayCosts(g, target, { defense: 1 }, { held: true })
   ) {
     g.pending = { kind: 'guwangCancel', player: target, amount };
     return; // 伤害延后到决策解决时结算

@@ -109,7 +109,7 @@ describe('015 残响（持续 + 必杀）', () => {
     toMain(g);
     applyAction(g, { t: 'skill', artifactId: '015', side: 'only' });
     expect(art(g, '015').count).toBe(2);
-    expect(g.ultimatesUsed).toContain('canxiang.juejing.ultimate');
+    expect(g.ultimatesUsed).toContain('A:canxiang.juejing.ultimate');
 
     const g2 = zorayGame();
     charge(g2, '015');

@@ -339,7 +339,7 @@ describe('必杀', () => {
     expect(g.players.B.life).toBe(lifeBefore - 9);
     expect(g.players.A.areas.defense.length).toBe(3); // 获得 3 防御骰
     expect(g.players.A.areas.attack.length).toBe(0);
-    expect(g.ultimatesUsed).toContain('mingjing.ultimate');
+    expect(g.ultimatesUsed).toContain('A:mingjing.ultimate');
     expect(() => applyAction(g, { t: 'skill', artifactId: '003', side: 'only' })).toThrow();
   });
 
@@ -359,7 +359,7 @@ describe('必杀', () => {
     applyAction(g, { t: 'skill', artifactId: '006', side: 'only', params: { costSlots: [{ dieIds: ['k1'] }] } });
     expect(g.players.A.areas.defense.length).toBe(2); // 3 discarded
     expect(g.players.B.areas.attack.length).toBe(3); // gained 3
-    expect(g.ultimatesUsed).toContain('wansha.ultimate');
+    expect(g.ultimatesUsed).toContain('B:wansha.ultimate');
   });
 
   it('零时枭首: gains nothing when opponent has no defense dice left', () => {
@@ -750,7 +750,7 @@ describe('009 孤王', () => {
       expect(d.value).toBeGreaterThanOrEqual(1);
       expect(d.value).toBeLessThanOrEqual(6);
     }
-    expect(g.ultimatesUsed).toContain('guwang.ultimate');
+    expect(g.ultimatesUsed).toContain('A:guwang.ultimate');
     expect(g.phase).not.toBe('main');
     expect(g.activePlayer).toBe('B');
   });
@@ -1274,7 +1274,7 @@ describe('012 魔女', () => {
       { id: 'm2', value: 5, kind: 'defense' },
     ]);
     expect(g.players.A.areas.attack).toEqual([{ id: 'a1', value: 4, kind: 'attack' }]);
-    expect(g.ultimatesUsed).toContain('monv.ultimate');
+    expect(g.ultimatesUsed).toContain('A:monv.ultimate');
   });
 
   it('必杀 梦醒时分: can move meditation dice to the attack area', () => {
@@ -1390,7 +1390,7 @@ describe('012 魔女', () => {
       side: 'only',
       params: { to: 'defense', meditationDieIds: ['m1'] },
     });
-    expect(g.ultimatesUsed).toContain('monv.ultimate');
+    expect(g.ultimatesUsed).toContain('A:monv.ultimate');
     g.skillsUsedThisTurn = [];
     expect(() =>
       applyAction(g, {

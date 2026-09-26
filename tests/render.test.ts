@@ -622,7 +622,7 @@ describe('renderGame (read-only snapshot)', () => {
     card.armedSide = 'left';
     card.armedTurn = state.turnIndex;
     card.count = 5;
-    state.ultimatesUsed.push('zhihai.bloom.ultimate');
+    state.ultimatesUsed.push('A:zhihai.bloom.ultimate');
     state.pending = { kind: 'zhihaiReroll', player: 'A', x: 5, forced: true };
     renderGame(state, root, hooksFor());
     const hint = root.querySelector('.hint-phase')!.textContent ?? '';
@@ -904,6 +904,7 @@ describe('renderGame (read-only snapshot)', () => {
       player: 'A',
       owner: 'B',
       attack: { attacker: 'A', value: 3, unblockable: false, physical: true },
+      minCount: 1,
     };
     const { onAction } = mount(state, root);
     const labels = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).map((b) => b.textContent);
@@ -1492,7 +1493,7 @@ describe('renderGame (interaction)', () => {
     const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.chargeLayer = wansha.chargeReq ?? 4;
     wansha.activeMarkerSide = 'left';
-    state.ultimatesUsed.push('wansha.ultimate');
+    state.ultimatesUsed.push('A:wansha.ultimate');
     renderGame(state, root, hooksFor());
     const ult = root.querySelector<HTMLElement>(
       '.player--self .card[data-artifact="006"] .skill-part[data-key="wansha.ultimate"]',
@@ -1666,7 +1667,7 @@ describe('renderGame (interaction)', () => {
 
   it('marks a used ultimate with a 已使用 badge and disables it', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
-    state.ultimatesUsed.push('mingjing.ultimate');
+    state.ultimatesUsed.push('A:mingjing.ultimate');
     state.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
     const used = root.querySelectorAll<HTMLElement>('.player--self .skill-part--used');
@@ -3011,6 +3012,31 @@ describe('026/027 归属与提示（用户反馈回归）', () => {
     expect(hooks.ui.pendingConfirm!.label).toBe('重掷 2 颗（「凛冽之音」：将受 2 点真实伤害）');
   });
 
+  it('A07 历王之血之印：生效期提示栏常驻 + 双方持续技能行/激活徽标转灰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', 'A07'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    // 模拟 A07 必杀已生效：双方所有神器本回合持续失效
+    for (const id of ['A', 'B'] as const) {
+      for (const a of state.players[id].artifacts) a.continuousLostThisTurn = true;
+    }
+    state.players.A.artifacts.find((a) => a.id === '002')!.activeMarkerSide = 'left'; // 龙游万象·左持续
+    state.players.B.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right'; // 锋芒·右（持续/触发）
+    renderGame(state, root, hooksFor());
+
+    expect(root.querySelector('.hint-global')!.textContent).toContain('「历王之血之印」生效中——本回合双方所有持续式效果失效');
+    // 持续技能行转灰（深灰 disabled）
+    expect(
+      root.querySelector('.player--self .card[data-artifact="002"] .skill-part[data-side="left"]')!.classList.contains('skill-part--disabled'),
+    ).toBe(true);
+    expect(
+      root.querySelector('.player--enemy .card[data-artifact="004"] .skill-part[data-side="right"]')!.classList.contains('skill-part--disabled'),
+    ).toBe(true);
+    // 「已激活」徽标转灰
+    expect(root.querySelector('.player--self .card[data-artifact="002"] .badge-active')!.classList.contains('badge-active--spent')).toBe(true);
+  });
+
   it('024 必杀按钮文案写明「发动必杀」而不是「启动技能」（避免与充能混淆）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
@@ -3613,6 +3639,38 @@ describe('034 金刚：存放骰的合法出现范围（使用/消耗 vs 弃置�
     // 区域内的真骰仍在（可正常弃置）
     expect(root.querySelector('.selector .pay-die[data-id="a1"]')).not.toBeNull();
     expect(root.querySelector('.selector .pay-die[data-id="m1"]')).not.toBeNull();
+  });
+
+  it('支付步的存放骰「按该步类型过滤」：冥想骰步只出现视为冥想的存放骰', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['034', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.pending = null;
+    state.pendingAttack = null;
+    const a34 = state.players.A.artifacts.find((x) => x.id === '034')!;
+    a34.activeMarkerSide = 'left';
+    a34.heldDice = [
+      { id: 'hMed2', value: 2 }, // 002 分布：冥 = 2/5
+      { id: 'hAtk3', value: 3 }, // 002 分布：攻 = 3/4
+    ];
+    state.players.A.areas = { attack: [], defense: [], meditation: [{ id: 'm2', value: 2, kind: 'meditation' }] };
+    const { ui, hooks } = mount(state, root);
+    // 龙腾万丈（无 010）→ 单个 dice 步（areas=冥想、allowArtifact）
+    ui.selection = {
+      key: 'youlong.tengwan',
+      artifactId: '002',
+      side: 'right',
+      stepIndex: 0,
+      chosenDice: [],
+      options: [],
+      currentSel: new Set<string>(),
+      numbers: [],
+      slots: [],
+      slotModes: [],
+    };
+    hooks.requestRender();
+    expect(root.querySelector('.selector .pay-die--held[data-id="hMed2"]')).not.toBeNull();
+    expect(root.querySelector('.selector .pay-die--held[data-id="hAtk3"]')).toBeNull();
   });
 
   it('027 待决策期间，其它神器（034）卡面上的存放骰不可点，只有 027 的可点', () => {

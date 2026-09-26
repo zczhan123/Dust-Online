@@ -1,9 +1,9 @@
 import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
-import { skillActive, hasActiveSkill } from './skill-state';
-import { checkLifeEnd, dealTrueDamage, virtualAttack } from './combat';
-import { abilityDieInfo, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, paySlots, setDieValue, transferDice, type SlotFill, type SlotSpec } from './effects';
+import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
+import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
+import { abilityDieInfo, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
 import { queuePending } from './pending';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
@@ -73,14 +73,16 @@ export interface SkillHandler {
   run(ctx: SkillCtx): void;
 }
 
-/** 从玩家的某区域移除指定骰（校验归属），返还供应堆 */
-export function consumeDice(p: PlayerState, kind: DiceKind, ids: string[]): void {
+/** 从玩家的某区域移除指定骰（校验归属），返还供应堆。
+ *  kind 为防御/冥想时触发 A06 异相·「幽魂不散」（技能效果"弃置"）。 */
+export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[]): void {
   const area = p.areas[kind];
   for (const id of ids) {
     const idx = area.findIndex((d) => d.id === id);
     if (idx < 0) throw new Error(`not a ${kind} die: ${id}`);
     area.splice(idx, 1);
   }
+  if (kind === 'defense' || kind === 'meditation') xuyuYouhunTrigger(g, p.id, ids.length);
 }
 
 /**
@@ -96,24 +98,43 @@ export function applyTurnStartEffects(g: GameState, player: PlayerId): void {
   }
 }
 
-/** 034 金刚·激活（破障 / 不动菩提同效）：清空神器上的骰 → 放入 3 个点数互不相同的骰（不入区域） */
+/** 034 金刚·激活（破障 / 不动菩提同效）：清空神器上的骰 → 放入 `count` 个骰（不入区域）
+ *  - 034 原版：3 个**互不相同**的点数
+ *  - A03 异相：2 个**任意**点数（可相同，由玩家决定，FAQ 39.1.3） */
 function loadJingangDice(
   g: GameState,
   player: PlayerId,
   artifact: Artifact,
   params: Record<string, unknown>,
+  count = 3,
+  distinct = true,
 ): void {
   const pips = (params.pips as number[] | undefined) ?? [];
   const ok =
-    pips.length === 3 &&
-    new Set(pips).size === 3 &&
+    pips.length === count &&
+    (!distinct || new Set(pips).size === count) &&
     pips.every((v) => Number.isInteger(v) && v >= 1 && v <= 6);
-  if (!ok) throw new Error('「金刚」需选择 3 个互不相同的点数（1–6）');
-  artifact.heldDice = pips.map((v) => ({ id: `${artifact.id}-j${v}-${g.turnIndex}`, value: v }));
+  if (!ok) {
+    throw new Error(
+      distinct
+        ? `「金刚」需选择 ${count} 个互不相同的点数（1–6）`
+        : `「金刚」需选择 ${count} 个点数（1–6，可重复）`,
+    );
+  }
+  // id 带玩家前缀：避免双方各持同型神器（如都拿 034/A03）时存放骰 id 跨玩家撞串
+  artifact.heldDice = pips.map((v) => ({ id: `${player}-${artifact.id}-j${v}-${g.turnIndex}`, value: v }));
   logLine(
     g,
-    `${pname(player)} 「${artifact.name}」激活：移除原有存放骰，放入 3 个点数互不相同的骰（${pips.join('/')}）`,
+    `${pname(player)} 「${artifact.name}」激活：移除原有存放骰，放入 ${count} 个${
+      distinct ? '点数互不相同' : '任意点数'
+    }的骰（${pips.join('/')}）`,
   );
+}
+
+/** 020 兽魂 / A04 异相·「激活」：将本神器的计数重设为 2（shared） */
+function resetShouhunCount(g: GameState, player: PlayerId, artifact: Artifact, name: string): void {
+  artifact.count = 2;
+  logLine(g, `${pname(player)} 「${name}」激活：本神器计数重设为 ${artifact.count}`);
 }
 
 export const SKILL_HANDLERS: Record<string, SkillHandler> = {
@@ -230,7 +251,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const def = defIds
         .map((id) => oppDef.find((d) => d.id === id))
         .filter((d): d is Die => d !== undefined);
-      consumeDice(g.players[opponent], 'defense', defIds);
+      consumeDice(g, g.players[opponent], 'defense', defIds);
       if (count === 3) g.unblockableThisTurn = true;
       logLine(
         g,
@@ -239,6 +260,33 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         )} 的 ${defIds.length} 颗防御骰（${vals(def)}）${
           count === 3 ? '，本回合攻击不可抵挡' : ''
         }`,
+      );
+    },
+  },
+  // C01 特典·突破（启动）：消耗**任意数量**冥想骰 → 弃置对方等量防御骰（发起者选；无"不可抵挡"）
+  'c01.breakthrough': {
+    run({ g, player, params, reportConsumed }) {
+      const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
+      if (fills.length < 1) throw new Error('「突破」至少消耗 1 颗冥想骰');
+      const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
+      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const count = effective.length;
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const oppDef = g.players[opponent].areas.defense;
+      const required = Math.min(count, oppDef.length);
+      const chosen = ((params.opponentDefenseDieIds as string[] | undefined) ?? [])
+        .filter((id) => oppDef.some((d) => d.id === id))
+        .slice(0, required);
+      for (const d of oppDef) {
+        if (chosen.length >= required) break;
+        if (!chosen.includes(d.id)) chosen.push(d.id);
+      }
+      if (chosen.length !== required) throw new Error(`「突破」需弃置恰好 ${required} 颗对方防御骰`);
+      const def = chosen.map((id) => oppDef.find((d) => d.id === id)).filter((d): d is Die => d !== undefined);
+      consumeDice(g, g.players[opponent], 'defense', chosen);
+      logLine(
+        g,
+        `${pname(player)} 发动「突破」：消耗 ${count} 颗冥想骰（${vals(effective)}），弃置 ${pname(opponent)} 的 ${chosen.length} 颗防御骰（${vals(def)}）`,
       );
     },
   },
@@ -269,7 +317,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const dist = p.artifacts.find((a) => a.column === 2)!.distribution!;
       const newKind = areaOf(newValue, dist);
       p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });
-      virtualAttack(g, player, x);
+      virtualAttack(g, player, x, { skill: '影袭', owner: player });
       logLine(
         g,
         `${pname(player)} 发动「影袭」：将 1 颗能力骰由 ${old} 点降为 ${newValue} 点（X=${x}），并视为以 ${x} 点发起攻击`,
@@ -292,7 +340,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         const provided = (chosen[k] ?? []).filter((id) => o.areas[k].some((d) => d.id === id)).slice(0, want);
         const remaining = o.areas[k].filter((d) => !provided.includes(d.id)).map((d) => d.id);
         while (provided.length < want) provided.push(remaining.shift()!);
-        if (provided.length) consumeDice(o, k, provided);
+        if (provided.length) consumeDice(g, o, k, provided);
         oppDiscarded += provided.length;
       }
       const x = total + oppDiscarded;
@@ -330,7 +378,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           if (!wanted.includes(d.id)) wanted.push(d.id);
         }
       }
-      consumeDice(o, 'defense', wanted);
+      consumeDice(g, o, 'defense', wanted);
       const gained = o.areas.defense.length > 0;
       if (gained) {
         for (let i = 0; i < x; i++) p.areas.attack.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'attack'));
@@ -340,6 +388,46 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         `${pname(player)} 发动必杀「零时枭首」：消耗 1 颗攻击骰（${x}点），弃置 ${pname(
           opponent,
         )} 的 ${wanted.length} 颗防御骰${gained ? `，并获得 ${x} 颗攻击骰` : ''}`,
+      );
+    },
+  },
+  // A07 异相·完杀·充能：获得 1 个点数等于当前充能层数的**防御骰**
+  'wansha.alt.charge': {
+    run({ g, player, artifact }) {
+      g.players[player].areas.defense.push(createDie(newDieId(`${player}-`), artifact.chargeLayer, 'defense'));
+      logLine(g, `${pname(player)} 「历王之血之印」充能效果：获得 1 颗 ${artifact.chargeLayer} 点防御骰`);
+    },
+  },
+  // A07 异相·完杀·必杀：对方防御骰数 ≥ 你攻击骰数时，弃对方防御骰至与你攻击骰数相等（发起者选，FAQ 43.1.1）；本回合双方持续失效
+  'wansha.alt.ultimate': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const o = g.players[opponent];
+      const myAtk = p.areas.attack.length;
+      const oppDef = o.areas.defense;
+      // 门槛：对方防御骰数 ≥ 你攻击骰数才能启动（与 getLegalActions 的枚举条件一致）
+      if (oppDef.length < myAtk) {
+        throw new Error('「历王之血之印」只能在对方防御骰数 ≥ 你攻击骰数时发动');
+      }
+      const required = Math.max(0, oppDef.length - myAtk);
+      const wanted = ((params.opponentDefenseDieIds as string[]) ?? [])
+        .filter((id) => oppDef.some((d) => d.id === id))
+        .slice(0, required);
+      if (wanted.length < required) {
+        for (const d of oppDef) {
+          if (wanted.length >= required) break;
+          if (!wanted.includes(d.id)) wanted.push(d.id);
+        }
+      }
+      if (wanted.length !== required) throw new Error(`「历王之血之印」需弃置恰好 ${required} 颗对方防御骰`);
+      consumeDice(g, o, 'defense', wanted);
+      for (const id of ['A', 'B'] as PlayerId[]) {
+        for (const a of g.players[id].artifacts) a.continuousLostThisTurn = true;
+      }
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「历王之血之印」：弃置 ${pname(opponent)} 的 ${wanted.length} 颗防御骰（至与你攻击骰数 ${myAtk} 相等）；直到本回合结束前，双方所有持续式效果失效`,
       );
     },
   },
@@ -353,6 +441,22 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       } else {
         logLine(g, `${pname(player)} 「高塔铁幕」充能效果：对方没有攻击骰，无法变更点数`);
       }
+    },
+  },
+  // A01 不败之王·充能：**强制执行**——你视为以 5 点攻击 1 次，随后对方视为以 3 点攻击你 2 次（逐次完整结算）
+  'guwang.alt.charge': {
+    run({ g, player }) {
+      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      g.virtualQueue = [
+        { attacker: player, value: 5, label: '不败之王', owner: player },
+        { attacker: opponent, value: 3, label: '不败之王', owner: player },
+        { attacker: opponent, value: 3, label: '不败之王', owner: player },
+      ];
+      logLine(
+        g,
+        `${pname(player)} 「不败之王」充能效果（强制）：视为先以 5 点攻击对方，随后对方视为以 3 点攻击你 2 次（依次结算）`,
+      );
+      pumpAttackQueue(g);
     },
   },
   // 009 高塔铁幕·必杀：弃置自己全部能力骰 → 获得随机防御骰直至能力骰总数达到意志上限 → 立即结束主要阶段
@@ -395,7 +499,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       for (const k of ['attack', 'defense', 'meditation'] as const) {
         const id = discard[k];
         if (id && g.players[opp].areas[k].some((d) => d.id === id)) {
-          consumeDice(g.players[opp], k, [id]);
+          consumeDice(g, g.players[opp], k, [id]);
           discarded++;
         }
       }
@@ -425,7 +529,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const oppIds = ((params.opponentDiscardIds as string[]) ?? [])
         .filter((id) => g.players[opp].areas[kind].some((d) => d.id === id))
         .slice(0, 4);
-      if (oppIds.length) consumeDice(g.players[opp], kind, oppIds);
+      if (oppIds.length) consumeDice(g, g.players[opp], kind, oppIds);
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg, player);
       logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kind}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰，造成 ${dmg} 点真实伤害`);
@@ -445,7 +549,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const defIds = (params.defenseDieIds as string[]) ?? [];
       if (new Set(defIds).size !== defIds.length) throw new Error('duplicate die id');
       const validDef = defIds.filter((id) => p.areas.defense.some((d) => d.id === id)).slice(0, 2);
-      consumeDice(p, 'defense', validDef);
+      consumeDice(g, p, 'defense', validDef);
       const missing = 2 - validDef.length;
       if (missing > 0) dealTrueDamage(g, player, missing * 2, player);
       for (let i = 0; i < 4; i++) p.areas.defense.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'defense' });
@@ -592,17 +696,19 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 020 兽魂·熊之心（激活）：将本神器的计数重设为 2
   'shouhun.xiong': {
-    run({ g, player, artifact }) {
-      artifact.count = 2;
-      logLine(g, `${pname(player)} 「熊之心」激活：本神器计数重设为 ${artifact.count}`);
-    },
+    run: (ctx) => resetShouhunCount(ctx.g, ctx.player, ctx.artifact, '熊之心'),
   },
   // 020 兽魂·狼之血（激活）：将本神器的计数重设为 2
   'shouhun.lang': {
-    run({ g, player, artifact }) {
-      artifact.count = 2;
-      logLine(g, `${pname(player)} 「狼之血」激活：本神器计数重设为 ${artifact.count}`);
-    },
+    run: (ctx) => resetShouhunCount(ctx.g, ctx.player, ctx.artifact, '狼之血'),
+  },
+  // A04 异相·灵界熊魂（激活）：将本神器的计数重设为 2
+  'shouhun.alt.xiong': {
+    run: (ctx) => resetShouhunCount(ctx.g, ctx.player, ctx.artifact, '灵界熊魂'),
+  },
+  // A04 异相·灵界狼魂（激活）：将本神器的计数重设为 2
+  'shouhun.alt.lang': {
+    run: (ctx) => resetShouhunCount(ctx.g, ctx.player, ctx.artifact, '灵界狼魂'),
   },
   // 019 尘哀·蛮王之牙（启动）：消耗 X 个种类各不相同的能力骰 → 选 X 项（①②可重复）→ 刷新启动次数 + 标记移到另一侧
   'chenai.fang': {
@@ -632,7 +738,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         if (pk === 'discard') {
           const target = g.players[opp].areas.defense[0];
           if (target) {
-            consumeDice(g.players[opp], 'defense', [target.id]);
+            consumeDice(g, g.players[opp], 'defense', [target.id]);
             discarded += 1;
           }
         } else {
@@ -651,7 +757,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         }`,
       );
       // 刷新本技能的启动次数（每回合可再次启动）+ 标记移到另一侧
-      g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== 'chenai.fang');
+      g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== skillUseKey(player, 'chenai.fang'));
       artifact.activeMarkerSide = artifact.activeMarkerSide === 'left' ? 'right' : 'left';
       artifact.armedSide = artifact.activeMarkerSide;
       artifact.armedTurn = g.turnIndex;
@@ -828,7 +934,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'hanguang.ultimate': {
     run: (ctx) => {
       const { g, player, artifact } = ctx;
-      artifact.heldDice = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `${artifact.id}-held-${v}`, value: v }));
+      // id 带玩家前缀：避免双方各持同型神器（如都拿 027）时存放骰 id 跨玩家撞串
+      artifact.heldDice = [1, 2, 3, 4, 5, 6].map((v) => ({ id: `${player}-${artifact.id}-held-${v}`, value: v }));
       logLine(
         g,
         `${pname(player)} 发动「凛冽之音」：从供应堆取 1–6 点骰各 1 颗置于「${artifact.name}」上（回合结束时移除）`,
@@ -866,6 +973,29 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       logLine(
         g,
         `${pname(player)} 「陨落」激活：直到本回合结束前，你的攻击不可用防御骰抵挡（只能用攻击骰），且攻击点数始终视为 6`,
+      );
+    },
+  },
+  // ── A05 异相·天罚 ──────────────────────────────────────────
+  /** 深空之火（激活）：本回合攻击不可用防御骰抵挡（只能用冥想骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
+  'tianfa.alt.shenkong': {
+    run({ g, player }) {
+      g.tianfa[player] = { blockKind: 'meditation', damageCount: 0 };
+      g.players[player].buffs.push({ attr: 'attackDamage', add: 3, duration: 'thisTurn', source: '深空之火' });
+      logLine(
+        g,
+        `${pname(player)} 「深空之火」激活：直到本回合结束前，你的攻击不可用防御骰抵挡（只能用冥想骰）、攻击伤害 +3；本回合攻击造成 2 次伤害后立即结束主要阶段`,
+      );
+    },
+  },
+  /** 陨落（激活·异相）：本回合攻击不可用防御骰抵挡（只能用攻击骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
+  'tianfa.alt.yunluo': {
+    run({ g, player }) {
+      g.tianfa[player] = { blockKind: 'attack', damageCount: 0 };
+      g.players[player].buffs.push({ attr: 'attackDamage', add: 3, duration: 'thisTurn', source: '陨落' });
+      logLine(
+        g,
+        `${pname(player)} 「陨落」激活：直到本回合结束前，你的攻击不可用防御骰抵挡（只能用攻击骰）、攻击伤害 +3；本回合攻击造成 2 次伤害后立即结束主要阶段`,
       );
     },
   },
@@ -945,7 +1075,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       for (const id of ids) {
         const found = findDieOf(g, oppId, id);
         if (!found) throw new Error(`not ${oppId} ability die: ${id}`);
-        consumeDice(opp, found.kind, [id]);
+        consumeDice(g, opp, found.kind, [id]);
       }
       logLine(g, `${pname(player)} 发动「清算」：弃置 ${pname(oppId)} ${d} 颗能力骰（X=${X}）`);
       const shortfall = X - d;
@@ -1063,7 +1193,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       if (!dieId) throw new Error('「万象俱灭」需选择 1 颗能力骰');
       const found = findDieOf(g, owner, dieId);
       if (!found) throw new Error(`not ${owner}'s ability die: ${dieId}`);
-      consumeDice(g.players[owner], found.kind, [dieId]);
+      consumeDice(g, g.players[owner], found.kind, [dieId]);
       const healed = heal(g, owner, 3);
       logLine(
         g,
@@ -1110,6 +1240,17 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'jingang.puti': {
     run({ g, player, artifact, params }) {
       loadJingangDice(g, player, artifact, params);
+    },
+  },
+  // A03 金刚·异相（修罗的破障 / 修罗的菩提 激活）：2 个任意点数（可相同）存放，不入区域
+  'jingang.alt.pozhang': {
+    run({ g, player, artifact, params }) {
+      loadJingangDice(g, player, artifact, params, 2, false);
+    },
+  },
+  'jingang.alt.puti': {
+    run({ g, player, artifact, params }) {
+      loadJingangDice(g, player, artifact, params, 2, false);
     },
   },
   'jingang.pozhang.continuous': {

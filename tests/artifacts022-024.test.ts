@@ -356,7 +356,7 @@ describe('024 狂舞（凶弹业舞）', () => {
     card.chargeLayer = 4;
     card.activeMarkerSide = 'left';
     applyAction(g, { t: 'skill', artifactId: '024', side: 'only', params: { direction: 'cw', groups: [[], [], [], [], [], []] } });
-    expect(g.ultimatesUsed).toContain('kuangwu.ultimate');
+    expect(g.ultimatesUsed).toContain('A:kuangwu.ultimate');
     expect(getLegalActions(g).some((a) => a.t === 'skill' && a.artifactId === '024')).toBe(false);
   });
 });
