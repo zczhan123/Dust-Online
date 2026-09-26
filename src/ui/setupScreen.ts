@@ -1,6 +1,7 @@
 import type { PlayerId } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact } from '../core/content/artifacts';
+import { LEGEND_OF_HERO, legendImageUrl } from '../core/content/legends';
 import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 
@@ -127,7 +128,7 @@ function ensureInkFilter(): void {
 function createCardInspector(
   root: HTMLElement,
   signal: AbortSignal,
-): { modal: HTMLElement; consumeLp: () => boolean } {
+): { modal: HTMLElement; consumeLp: () => boolean; open: (id: string, x: number | null, y: number | null, soft: boolean) => void } {
   const modal = el('div', 'pick-modal');
   const box = el('div', 'pick-modal-box');
   modal.appendChild(box);
@@ -187,11 +188,12 @@ function createCardInspector(
   }
   function open(id: string, x: number | null, y: number | null, soft: boolean): void {
     box.innerHTML = '';
+    const isLegend = /^L\d{2}$/.test(id);
     const img = document.createElement('img');
-    img.src = cardUrl(id);
+    img.src = isLegend ? legendImageUrl(id) : cardUrl(id);
     img.alt = '';
     box.appendChild(img);
-    const data = ARTIFACT_TEXT[id];
+    const data = isLegend ? undefined : ARTIFACT_TEXT[id];
     if (data) {
       for (const sk of data.skills) {
         const row = el('div', 'pick-sk');
@@ -257,7 +259,7 @@ function createCardInspector(
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
   }, { signal });
-  return { modal, consumeLp };
+  return { modal, consumeLp, open };
 }
 
 /** 首页（同页多级）：第一层＝模式菜单；第二层＝「左右互搏」的 3 个玩法 */
@@ -401,6 +403,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   const confirmed: Record<Side, boolean> = { A: false, B: false };
   let first: 'A' | 'B' | 'random' = 'random';
   let anomaly = false; // 「使用异相神器」开关
+  let legendOn = false; // 「使用传奇英雄面板」开关（仅预选模式）
   const candAlt: Record<Side, boolean[]> = { A: [false, false, false], B: [false, false, false] };
   let anim: { side: Side; ids: string[] } | null = null;
   let ANIM: { side: Side; ids: string[] } | null = null;
@@ -485,9 +488,10 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     l2.textContent = '附加模组';
     g2.appendChild(l2);
     if (mode === 'yuxuan') {
-      const w = el('span', 'pick-sw is-disabled');
+      const w = el('span', 'pick-sw' + (legendOn ? ' on' : ''));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab'); lab.textContent = '使用传奇英雄面板'; w.appendChild(lab);
+      w.addEventListener('click', () => { legendOn = !legendOn; render(); });
       g2.appendChild(w);
     } else {
       const w = el('span', 'pick-sw' + (anomaly ? ' on' : ''));
@@ -561,7 +565,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     s.appendChild(t);
     return s;
   }
-  function colHead(who: string, sub: string): HTMLElement {
+  function colHead(who: string, sub: string, rightEl?: HTMLElement): HTMLElement {
     const h = el('div', 'pick-chead');
     const w = el('span', 'who');
     w.textContent = who;
@@ -569,6 +573,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     s.textContent = sub;
     h.appendChild(w);
     h.appendChild(s);
+    if (rightEl) h.appendChild(rightEl);
     return h;
   }
   function seal(): HTMLElement {
@@ -598,11 +603,41 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     return f;
   }
 
+  // 传奇英雄面板入口（确认列头右对齐）：迷你黑框头像（标准 787:740 比例缩到 26px）+ 标签
+  function buildLegendChip(heroIdx: number): HTMLElement {
+    const legendId = LEGEND_OF_HERO[HERO_KEYS[heroIdx]];
+    const chip = el('span', 'pick-legend-chip');
+    chip.dataset.cardId = legendId; // 复用详情浮窗：右键/长按也走同一入口
+    const av = el('span', 'pick-legend-av');
+    const img = document.createElement('img');
+    img.src = legendImageUrl(legendId);
+    img.alt = '';
+    img.draggable = false;
+    av.appendChild(img);
+    const lab = el('span', 'pick-legend-lab');
+    lab.textContent = '传奇英雄技能';
+    chip.appendChild(av);
+    chip.appendChild(lab);
+    const pop = (x: number, y: number): void => { inspector.open(legendId, x, y, false); };
+    chip.addEventListener('click', (e) => { e.preventDefault(); pop(e.clientX, e.clientY); });
+    let t: number | null = null;
+    chip.addEventListener('pointerdown', () => {
+      t = window.setTimeout(() => { t = null; const r = chip.getBoundingClientRect(); pop(r.left + r.width / 2, r.top); }, 500);
+    });
+    const clear = (): void => { if (t != null) { window.clearTimeout(t); t = null; } };
+    chip.addEventListener('pointerup', clear);
+    chip.addEventListener('pointerleave', clear);
+    chip.addEventListener('pointercancel', clear);
+    return chip;
+  }
+
   // ── 确认列 ──
   function confirmColJia(side: Side): HTMLElement {
     const ids = jiaIds(side);
     const col = el('div', 'pick-col confirm ' + side + (confirmed[side] ? ' confirmed' : ''));
-    col.appendChild(colHead('玩家' + side, jiaLabel(side)));
+    const idx = ownerIdx(side);
+    const chip = mode === 'yuxuan' && legendOn && idx != null ? buildLegendChip(idx) : undefined;
+    col.appendChild(colHead('玩家' + side, jiaLabel(side), chip));
     const cards = el('div', 'pick-cards');
     for (let i = 0; i < 3; i++) cards.appendChild(ids[i] ? cardSlot(ids[i], { side }) : emptySlot(i));
     col.appendChild(cards);

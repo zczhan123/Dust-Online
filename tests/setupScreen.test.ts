@@ -70,16 +70,33 @@ describe('renderHeroSetup（预选模式 · 3 栏）', () => {
     expect(q(root, '.pick-ttl')!.textContent).toBe('预选模式');
     expect(q(root, '.pick-back')!.textContent).toBe('返回');
     expect(q(root, '.pick-start')!.textContent).toBe('开始游戏');
-    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual([
-      '使用传奇英雄面板',
-      '使用战术牌',
-    ]);
+    // 「使用传奇英雄面板」开关在预选**可用**（不再是禁用占位）；仅「战术牌」仍为禁用占位
+    const swLab = (t: string): HTMLElement =>
+      qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === t)!.parentElement!;
+    expect(swLab('使用传奇英雄面板').classList.contains('is-disabled')).toBe(false);
+    expect(swLab('使用战术牌').classList.contains('is-disabled')).toBe(true);
+    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual(['使用战术牌']);
     expect(q(root, '.pick-tbtn[data-first="random"]')!.classList.contains('on')).toBe(true);
     expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
       '第一列',
       '第二列',
       '第三列',
     ]);
+  });
+
+  it('传奇英雄面板：开关打开且已选英雄 → 确认列头出现迷你头像入口；点击打开面板浮窗', () => {
+    renderHeroSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    expect(root.querySelector('.pick-col.confirm.A .pick-legend-chip')).toBeNull();
+    qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用传奇英雄面板')!.parentElement!.click();
+    const chip = root.querySelector<HTMLElement>('.pick-col.confirm.A .pick-legend-chip')!;
+    expect(chip).not.toBeNull();
+    expect(chip.querySelector('img')!.getAttribute('src')).toBe('./legend/L01.jpg');
+    expect(chip.querySelector('.pick-legend-lab')!.textContent).toBe('传奇英雄技能');
+    chip.click();
+    const modal = root.querySelector<HTMLElement>('.pick-modal')!;
+    expect(modal.classList.contains('on')).toBe(true);
+    expect(modal.querySelector('img')!.getAttribute('src')).toBe('./legend/L01.jpg');
   });
 
   it('点 A 选定英雄 → 确认列出现其 3 张卡；确定盖章；取消清空', () => {

@@ -1393,6 +1393,20 @@ button.pay-die {
 #app.setup-page .pick-col.names .pick-chead .who { color: inherit; }
 #app.setup-page .pick-chead .sub { font-size: var(--fs-4); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 传奇英雄面板入口（确认列头右侧 chip）：迷你黑框头像 + 标签；整行顶部对齐、标签垂直居中 */
+#app.setup-page .pick-chead .who { flex: 0 0 auto; }
+#app.setup-page .pick-chead .sub { flex: 0 1 auto; min-width: 0; }
+#app.setup-page .pick-legend-chip { position: relative; margin-left: auto; margin-bottom: 6px; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0; cursor: pointer; user-select: none; flex: 0 0 auto; transition: transform .12s var(--pick-ease), filter .12s var(--pick-ease); }
+#app.setup-page .pick-legend-chip:hover { transform: translateY(-1px); filter: brightness(1.12); }
+/* 入口下方一道墨刷横痕（无外框；复用 #dust-ink 滤镜，宽=头像+标签整体宽、随 chip 右对齐） */
+#app.setup-page .pick-legend-chip::after { content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px;
+  background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
+#app.setup-page .pick-legend-av { position: relative; height: 36px; width: calc(36px * 787 / 756); background: #000; overflow: hidden;
+  display: flex; align-items: flex-start; justify-content: center; flex: 0 0 auto; }
+#app.setup-page .pick-legend-av img { width: 100%; height: auto; display: block; }
+#app.setup-page .pick-legend-lab { font-weight: 700; letter-spacing: .5px; color: var(--pc, var(--t1)); white-space: nowrap; font-size: var(--fs-3); }
+
 /* 卡槽 */
 #app.setup-page .pick-cards { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(3, 1fr); gap: 7px; }
 #app.setup-page .pick-slot { position: relative; min-height: 0; display: flex; }
