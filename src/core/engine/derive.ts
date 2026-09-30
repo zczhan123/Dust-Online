@@ -70,6 +70,8 @@ export function effectiveSpeed(p: PlayerState): number {
 }
 
 export function effectiveWill(p: PlayerState): number {
+  // L11 传奇面板·强加之罪（持续）：**你的意志始终为 6**（覆盖基础/补正/加成，且与其它 effect 无关）
+  if (hasActiveSkill(p, 'aiwa.qiangjiazhiuzui')) return 6;
   const bonus = skillAttributeBonuses(p).will;
   return baseWill(p) + Math.max(maxBuff(p, 'will'), bonus);
 }

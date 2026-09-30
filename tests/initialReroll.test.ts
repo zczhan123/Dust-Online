@@ -26,6 +26,21 @@ describe('initial reroll (setup step 3)', () => {
     expect(g.phase).toBe('dustRise');
   });
 
+  it('first turn after initial reroll counts as T1 (T0 is reserved for the reroll step)', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' });
+    applyAction(g, { t: 'advance' }); // B skip
+    applyAction(g, { t: 'advance' }); // A skip -> B's first turn
+    expect(g.turnIndex).toBe(1);
+  });
+
+  it('logs the first turn start as T1 in the dustRise phase (not a stale phase label)', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'B' });
+    applyAction(g, { t: 'advance' }); // B skip
+    applyAction(g, { t: 'advance' }); // A skip -> B's first turn
+    const entry = g.log.find((l) => l.text.endsWith('的回合开始'));
+    expect(entry).toEqual({ turn: 1, phase: 'dustRise', text: '玩家B 的回合开始' });
+  });
+
   it('re-places rerolled dice by distribution', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     const ids = g.players.A.areas.attack.map((d) => d.id);

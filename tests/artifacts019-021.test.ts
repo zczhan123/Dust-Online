@@ -362,7 +362,7 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
     expect(card.activeMarkerSide).toBe('right');
     expect(g.freeNoCostRise).toBe(0);
     expect(g.players.A.areas.meditation.length).toBe(medBefore);
-    expect(g.dustRiseNormalUsed).toBe(false);
+    expect(g.dustRiseNormalCount).toBe(0);
     // 启动次数已刷新 → 本回合可再次启动蛮王之牙（FAQ 19.2.1：最多两次）
     const again = getLegalActions(g).some((a) => a.t === 'skill' && a.artifactId === '019' && a.side === 'right');
     expect(again).toBe(true);

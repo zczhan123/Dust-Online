@@ -18,7 +18,7 @@ describe('game actions and turn flow', () => {
     expect(g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide).toBe('left');
     expect(g.players.A.areas.meditation.length).toBe(before - 1);
     expect(g.dustRiseActed).toBe(true);
-    expect(g.dustRiseNormalUsed).toBe(true);
+    expect(g.dustRiseNormalCount).toBe(1);
   });
 
   it('dust rise consumes the SPECIFIC meditation die chosen', () => {
@@ -112,6 +112,22 @@ describe('game actions and turn flow', () => {
     expect(g.activePlayer).toBe('A');
     expect(g.phase).toBe('reroll');
     expect(totalDice(g.players.A)).toBeGreaterThanOrEqual(aBefore);
+  });
+
+  it('turn counter increments per player turn; turn-start logs carry the new phase', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(g);
+    applyAction(g, { t: 'advance' }); // A: dustRise -> main
+    applyAction(g, { t: 'advance' }); // A 回合结束 -> B 的首个回合 (T2)
+    applyAction(g, { t: 'advance' }); // B: dustRise -> main
+    applyAction(g, { t: 'advance' }); // B 回合结束 -> A 的第二个回合 (T3)
+    expect(g.turnIndex).toBe(3);
+    const starts = g.log.filter((l) => l.text.endsWith('的回合开始'));
+    expect(starts.map((l) => [l.turn, l.phase])).toEqual([
+      [1, 'dustRise'], // 首回合（跳过补充/重掷，从尘起开始）
+      [2, 'dustRise'], // 对方的首个回合
+      [3, 'reroll'], // 之后的回合从重掷阶段开始
+    ]);
   });
 
   it('reroll rejects foreign, duplicate, or too-many ids', () => {

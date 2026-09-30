@@ -3,9 +3,10 @@ import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
-import { abilityDieInfo, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
+import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
-import { queuePending } from './pending';
+import { pumpPending, queuePending } from './pending';
+import { resetToBattleStart } from './reset';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
@@ -74,15 +75,51 @@ export interface SkillHandler {
 }
 
 /** 从玩家的某区域移除指定骰（校验归属），返还供应堆。
- *  kind 为防御/冥想时触发 A06 异相·「幽魂不散」（技能效果"弃置"）。 */
+ *  kind 为防御/冥想时触发 A06 异相·「幽魂不散」（技能效果"弃置"）。
+ *  「雨落狂流」口径 (B)：**不看是谁执行的弃置**——只要该玩家的骰被弃置且不符合其分布即计数。 */
 export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[]): void {
   const area = p.areas[kind];
+  const removed: { kind: DiceKind; value: number }[] = [];
   for (const id of ids) {
     const idx = area.findIndex((d) => d.id === id);
     if (idx < 0) throw new Error(`not a ${kind} die: ${id}`);
+    removed.push({ kind, value: area[idx].value });
     area.splice(idx, 1);
   }
+  noteYuluoDiceConsumed(g, p.id, removed);
   if (kind === 'defense' || kind === 'meditation') xuyuYouhunTrigger(g, p.id, ids.length);
+}
+
+/**
+ * **批量弃置（多类型）**：一次技能效果（或一次动作）同时弃置攻/防/冥骰时用。
+ * 与逐类型调用 `consumeDice` 的区别：**「雨落狂流」只 +1**
+ * ——卡面为"弃置**任意数量**不符合骰点分布的能力骰后，计数 +1"，与骰数、类型数都无关
+ * （曾因按类型各调一次 `consumeDice`，导致 003 斩神切 / 009 高塔铁幕 / 007 战争横扫 一次效果 +2~+3）。
+ * `xuyuYouhunTrigger`（A06 幽魂不散）仍按类型/数量分别触发。
+ */
+export function consumeDiceByKind(
+  g: GameState,
+  p: PlayerState,
+  byKind: Partial<Record<DiceKind, string[]>>,
+): void {
+  const removed: { kind: DiceKind; value: number }[] = [];
+  const counts: Partial<Record<DiceKind, number>> = {};
+  for (const kind of ['attack', 'defense', 'meditation'] as DiceKind[]) {
+    const ids = byKind[kind] ?? [];
+    if (ids.length === 0) continue;
+    const area = p.areas[kind];
+    for (const id of ids) {
+      const idx = area.findIndex((d) => d.id === id);
+      if (idx < 0) throw new Error(`not a ${kind} die: ${id}`);
+      removed.push({ kind, value: area[idx].value });
+      area.splice(idx, 1);
+    }
+    counts[kind] = ids.length;
+  }
+  if (removed.length === 0) return;
+  noteYuluoDiceConsumed(g, p.id, removed); // ← 一次效果只一次
+  if (counts.defense) xuyuYouhunTrigger(g, p.id, counts.defense);
+  if (counts.meditation) xuyuYouhunTrigger(g, p.id, counts.meditation);
 }
 
 /**
@@ -134,11 +171,131 @@ function loadJingangDice(
 /** 020 兽魂 / A04 异相·「激活」：将本神器的计数重设为 2（shared） */
 function resetShouhunCount(g: GameState, player: PlayerId, artifact: Artifact, name: string): void {
   artifact.count = 2;
-  logLine(g, `${pname(player)} 「${name}」激活：本神器计数重设为 ${artifact.count}`);
+  logLine(g, `${pname(player)} 「${name}」：激活 → 将本神器的计数重设为 ${artifact.count}`);
+  // L07 传奇面板·始祖兽魂（触发）：**当你激活「兽魂」时**，可选**额外消耗 1 个冥想骰**，改为把计数重设为 3
+  if (
+    hasActiveSkill(g.players[player], 'nisa.shizushouhun') &&
+    canPayCosts(g, player, { meditation: 1 }, { held: true })
+  ) {
+    queuePending(g, { kind: 'shizushouhun', player, artifactId: artifact.id });
+  }
+}
+
+/** L03 拔城（触发）：启动「主宰」技能后，若"对方**实际弃置**的能力骰数 < 你**消耗**的能力骰数" → 由持有者决定是否发动 */
+function bachengHook(g: GameState, player: PlayerId, consumed: number, oppDiscarded: number): void {
+  const p = g.players[player];
+  if (!hasActiveSkill(p, 'batton.bacheng')) return;
+  if (oppDiscarded >= consumed) return;
+  queuePending(g, { kind: 'bacheng', player });
 }
 
 export const SKILL_HANDLERS: Record<string, SkillHandler> = {
+  // ── 传奇英雄面板技能（开局即可用、无需激活；`side` 恒为 'only'）──
+  // L02 潸然的葬敌花（必杀·尘落前置 1）：双方各自获得 3 个随机点数的能力骰
+  'ying.zangdihua': {
+    run({ g, player, rng }) {
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const mine = gainRandomAbilityDice(g, player, 3, rng);
+      const theirs = gainRandomAbilityDice(g, opp, 3, rng);
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「潸然的葬敌花」：双方各自获得 3 个随机点数的能力骰（${pname(
+          player,
+        )} ${mine.map((d) => d.value).join('/')}；${pname(opp)} ${theirs.map((d) => d.value).join('/')}）`,
+      );
+    },
+  },
   // 淬炼：消耗 1 攻击骰 → 本神器计数 +1（上限 3）
+  // L06 无光领域（启动）：受到 4 点真实伤害 → 选①攻击点数+1（最大6）/②-1（最小1），持续到下次启动
+  'xiu.wuguanglingyu': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const choice: 'up' | 'down' = params.choice === 'down' ? 'down' : 'up';
+      logLine(g, `${pname(player)} 启动「无光领域」：受到 4 点真实伤害`);
+      dealTrueDamage(g, player, 4, player);
+      if ((g.phase as string) === 'gameOver') return;
+      p.wuguang = choice;
+      logLine(
+        g,
+        `「无光领域」：直到下次启动前，你的攻击点数视为${choice === 'up' ? '上升 1（最大 6）' : '下降 1（最小 1）'}`,
+      );
+    },
+  },
+  // L05 绝地惊雷（必杀·尘落前置 3）：受到 = |双方生命差| 的真实伤害（自伤）→ 获得 1 个 6 点攻击骰
+  'zoray.juedi': {
+    run({ g, player }) {
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const diff = Math.abs(g.players[player].life - g.players[opp].life);
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「绝地惊雷」：受到 ${diff} 点真实伤害（＝双方生命差），获得 1 个 6 点攻击骰`,
+      );
+      if (diff > 0) dealTrueDamage(g, player, diff, player); // 自伤：source=自己（009 铁幕不触发）
+      if ((g.phase as string) === 'gameOver') return;
+      g.players[player].areas.attack.push({ id: newDieId(`${player}-`), value: 6, kind: 'attack' });
+    },
+  },
+  // L04 我将在下个梦境与你再度相逢（必杀·尘落前置 0）：继承生命/尘落/技能计数，重置其余状态并重开一局，失去本技能
+  'tata.mengjing': {
+    run({ g, player, params }) {
+      const first: PlayerId = params.first === 'B' ? 'B' : 'A';
+      const lifeA = g.players.A.life;
+      const lifeB = g.players.B.life;
+      const dustfall = g.dustfall;
+      // 失去本技能
+      const lg = g.players[player].legend;
+      if (lg) lg.skills = lg.skills.filter((s) => s.key !== 'tata.mengjing');
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「我将在下个梦境与你再度相逢」：继承双方生命（${pname('A')} ${lifeA} / ${pname(
+          'B',
+        )} ${lifeB}）与尘落（${dustfall}）及各技能计数，重置其余状态、重开一局；先手＝${pname(first)}；并失去本技能`,
+      );
+      resetToBattleStart(g, first);
+    },
+  },
+  // L07「不屈咆哮」（必杀·尘落前置 2）：弃置对方数量＝你的「决意」**当前计数**的能力骰（多类型→**一次效果**），
+  // 然后把「决意」的计数重设为 1。能弃则必须弃（对方不足则尽可能）。
+  'nisa.buqupaoxiao': {
+    run({ g, player, params }) {
+      const p = g.players[player];
+      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const o = g.players[opp];
+      const jueyi = p.artifacts.find((a) => a.skills.some((s) => s.key === 'jueyi.wildfire'));
+      const n = jueyi?.count ?? 0;
+      if (!jueyi || n < 1) throw new Error('「决意」计数为 0：不屈咆哮不可发动');
+      const total = o.areas.attack.length + o.areas.defense.length + o.areas.meditation.length;
+      const need = Math.min(n, total); // 能弃则必须弃；不足则尽可能
+      const ids = (params.dieIds as string[] | undefined) ?? [];
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      if (ids.length !== need) throw new Error(`需弃置 ${need} 颗对方能力骰`);
+      const byKind: Partial<Record<DiceKind, string[]>> = {};
+      for (const id of ids) {
+        const found = findDieOf(g, opp, id);
+        if (!found) throw new Error(`not an opponent ability die: ${id}`);
+        (byKind[found.kind] ??= []).push(id);
+      }
+      consumeDiceByKind(g, o, byKind); // 多类型一次效果 → 对方「雨落狂流」只 +1
+      jueyi.count = 1;
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「不屈咆哮」：弃置 ${pname(opp)} 的 ${need} 颗能力骰（＝「决意」计数 ${n}${
+          total < n ? '，对方能力骰不足故全弃' : ''
+        }），并将「决意」的计数重设为 1`,
+      );
+    },
+  },
+  // L09「遍野残杀」（必杀·尘落前置 2）：你的所有神器的左右两侧技能全部视为处于激活状态；你的回合结束时你立即死亡
+  'lifeng.bianyecansha': {
+    run({ g, player }) {
+      const p = g.players[player];
+      for (const a of p.artifacts) a.allSidesActiveThisTurn = true;
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「遍野残杀」：本回合其所有神器的**左右两侧技能全部视为处于激活状态**；其回合结束时将立即死亡`,
+      );
+    },
+  },
   'buxiang.cuilian': {
     run({ player, artifact, params, g, reportConsumed }) {
       const effective = paySlots(
@@ -332,21 +489,32 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const o = g.players[opponent];
       const own = { attack: p.areas.attack.length, defense: p.areas.defense.length, meditation: p.areas.meditation.length };
       const total = own.attack + own.defense + own.meditation;
-      p.areas.attack = []; p.areas.defense = []; p.areas.meditation = [];
+      // 弃置自己全部能力骰（一次效果 → 走 consumeDiceByKind：口径 (B) 下「雨落狂流」只 +1，与类型数无关）
+      consumeDiceByKind(g, p, {
+        attack: p.areas.attack.map((d) => d.id),
+        defense: p.areas.defense.map((d) => d.id),
+        meditation: p.areas.meditation.map((d) => d.id),
+      });
       const chosen = (params.opponentDiceByKind as Record<string, string[]>) ?? {};
+      // L01 断苇一斩：改为"弃置对方**全部**能力骰"
+      const discardAll = params.opponentDiscardAll === true;
       let oppDiscarded = 0;
+      const oppByKind: Partial<Record<DiceKind, string[]>> = {};
       for (const k of ['attack', 'defense', 'meditation'] as const) {
-        const want = Math.min(own[k], o.areas[k].length);
+        const want = discardAll ? o.areas[k].length : Math.min(own[k], o.areas[k].length);
         const provided = (chosen[k] ?? []).filter((id) => o.areas[k].some((d) => d.id === id)).slice(0, want);
         const remaining = o.areas[k].filter((d) => !provided.includes(d.id)).map((d) => d.id);
         while (provided.length < want) provided.push(remaining.shift()!);
-        if (provided.length) consumeDice(g, o, k, provided);
-        oppDiscarded += provided.length;
+        if (provided.length) {
+          oppByKind[k] = provided;
+          oppDiscarded += provided.length;
+        }
       }
+      consumeDiceByKind(g, o, oppByKind); // 一次效果 → 对方 L01 只 +1
       const x = total + oppDiscarded;
       logLine(
         g,
-        `${pname(player)} 发动必杀「斩神切」：弃置自己全部 ${total} 颗能力骰，${pname(
+        `${pname(player)} 发动必杀「斩神切」${discardAll ? '（「断苇一斩」：改为弃置对方全部能力骰）' : ''}：弃置自己全部 ${total} 颗能力骰，${pname(
           opponent,
         )} 弃置 ${oppDiscarded} 颗，造成 ${x} 点真实伤害，获得 3 颗防御骰`,
       );
@@ -436,7 +604,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     run({ g, player }) {
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       if (g.players[opponent].areas.attack.length > 0) {
-        g.pending = { kind: 'guwangCharge', player };
+        // 排队式（等价于直接挂起，但已有待决策时不会覆盖）
+        queuePending(g, { kind: 'guwangCharge', player });
+        pumpPending(g);
         logLine(g, `${pname(player)} 「高塔铁幕」充能效果：可选择将 ${pname(opponent)} 的 1 个攻击骰点数变更为 1`);
       } else {
         logLine(g, `${pname(player)} 「高塔铁幕」充能效果：对方没有攻击骰，无法变更点数`);
@@ -447,6 +617,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'guwang.alt.charge': {
     run({ g, player }) {
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      // §19⑨ 多段攻击源：A01 不败之王（virtualQueue）
       g.virtualQueue = [
         { attacker: player, value: 5, label: '不败之王', owner: player },
         { attacker: opponent, value: 3, label: '不败之王', owner: player },
@@ -464,9 +635,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     run({ g, player, rng, endMainPhase }) {
       const p = g.players[player];
       const discarded = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
-      p.areas.attack = [];
-      p.areas.defense = [];
-      p.areas.meditation = [];
+      // 弃置自己全部能力骰（一次效果 → 走 consumeDiceByKind：口径 (B) 下「雨落狂流」只 +1）
+      consumeDiceByKind(g, p, {
+        attack: p.areas.attack.map((d) => d.id),
+        defense: p.areas.defense.map((d) => d.id),
+        meditation: p.areas.meditation.map((d) => d.id),
+      });
       const cap = effectiveWill(p);
       const gained: Die[] = [];
       while (totalDice(p) < cap) {
@@ -496,19 +670,22 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       let sum = 0;
       for (const e of effective) sum += e.value;
       let discarded = 0;
+      const oppByKind: Partial<Record<DiceKind, string[]>> = {};
       for (const k of ['attack', 'defense', 'meditation'] as const) {
         const id = discard[k];
         if (id && g.players[opp].areas[k].some((d) => d.id === id)) {
-          consumeDice(g, g.players[opp], k, [id]);
+          (oppByKind[k] ??= []).push(id);
           discarded++;
         }
       }
+      consumeDiceByKind(g, g.players[opp], oppByKind); // 一次效果 → 对方 L01 只 +1
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg, player);
       logLine(
         g,
         `${pname(player)} 发动「战争横扫」：消耗 攻/防/冥 各 1（点数和 ${sum}），弃置对方 ${discarded} 颗能力骰，造成 ${dmg} 点真实伤害`,
       );
+      bachengHook(g, player, effective.length, discarded);
     },
   },
   // 007 震荡斩击：消耗 4 颗同类型 → 弃对方 4 颗同类型 → floor(点数和/2) 真实伤害
@@ -533,6 +710,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg, player);
       logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kind}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰，造成 ${dmg} 点真实伤害`);
+      bachengHook(g, player, effective.length, oppIds.length);
     },
   },
   // 008 王家之拳：消耗 2 冥想 → 弃置自己的 2 防御；不足 2 个时每少弃 1 个受 2 真实伤害 → 获得 4 随机防御骰；本回合攻击伤害 +1
@@ -796,7 +974,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         const ok = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
         if (!ok) throw new Error('消耗 2 个或更多能力骰时，其点数必须顺点');
       }
-      // 「消耗 1–6 个能力骰」→ 统一走 paySlots（支持 010 置换 / 034 破障 / 触发 026 威压）；
+      // 「消耗 1–6 个能力骰」→ 统一走 paySlots（支持 010 置换 / 034 破障）；
       // reportConsumed 由 paySlots 按格数上报（FAQ 22.1.1：消耗 6 颗 → 6 点真伤）
       paySlots(
         g,
@@ -813,6 +991,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         g,
         `${pname(player)} 发动「填弹」：消耗 ${dice.length} 颗能力骰（${valueText}点），「死契」计数 ${before} → ${artifact.count}/${cap}`,
       );
+      // L08 传奇面板·蛇蝎之泪（持续）：本回合中通过「填弹」**实际叠加**的计数累计 → 取其**平方**作为真实伤害（自伤）
+      const gained = artifact.count - before;
+      const p = g.players[player];
+      p.tiandanGainedThisTurn += gained;
+      if (hasActiveSkill(p, 'xiva.shexiezhilei')) {
+        const x = p.tiandanGainedThisTurn * p.tiandanGainedThisTurn;
+        logLine(
+          g,
+          `${pname(player)} 「蛇蝎之泪」：本回合「填弹」已叠加 ${p.tiandanGainedThisTurn} 点 → 受到 ${x} 点真实伤害`,
+        );
+        dealTrueDamage(g, player, x, player); // 自伤：source=自己
+      }
     },
   },
   // 023 蛇蝎·畏惧（启动）：我方先消耗 1 骰 → 对方必须消耗 1 骰（由对方选择）→ 比大小（1 视为大于 6）
@@ -827,7 +1017,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const oppDice = [...g.players[opp].areas.attack, ...g.players[opp].areas.defense, ...g.players[opp].areas.meditation];
       if (oppDice.length < 1) throw new Error('对方没有能力骰，无法发动「畏惧」');
       const kindCn = info.kind === 'attack' ? '攻击' : info.kind === 'defense' ? '防御' : '冥想';
-      // 「消耗 1 个任意能力骰」→ 走 paySlots（支持 010 置换 / 034 破障 / 触发 026 威压）
+      // 「消耗 1 个任意能力骰」→ 走 paySlots（支持 010 置换 / 034 破障）
       const weijuSpec: SlotSpec[] = ids.length === 2 ? [{ kind: 'meditation' }] : [{ kind: info.kind }];
       const eff = paySlots(g, player, weijuSpec, [{ dieIds: ids }], undefined, 'skill');
       const mine = eff[0].value;
@@ -1119,9 +1309,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     run({ g, player }) {
       const oppId: PlayerId = player === 'A' ? 'B' : 'A';
       const opp = g.players[oppId];
+      let oppDrop = 0; // 抹零造成的**实际下降量**（L11 邪灵序曲要按"生命下降"计数）
       if (opp.life % 10 !== 0) {
         const before = opp.life;
         opp.life = Math.floor(opp.life / 10) * 10;
+        oppDrop = before - opp.life;
         logLine(g, `${pname(oppId)} 的生命值下降（抹零）${before} → ${opp.life}`);
       }
       const me = g.players[player];
@@ -1131,6 +1323,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         logLine(g, `${pname(player)} 的生命值回复（抹零）${before} → ${me.life}`);
       }
       checkLifeEnd(g);
+      // L05 复仇之灵：033 抹零是非伤害改值，但**生命十位数变化同样触发**
+      checkLifeTens(g, oppId);
+      checkLifeTens(g, player);
+      // L11 邪灵序曲：抹零属于**非伤害的"生命下降"** → 依然计数（自己那条是"回复"、不计）
+      if (oppDrop > 0) noteLifeDrop(g, oppId, oppDrop);
     },
   },
   /** 死亡亦逝（持续）：实际结算在「回合结束」事件点（game.ts advancePhase） */
@@ -1261,6 +1458,41 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'jingang.puti.trigger': {
     run: (ctx) => {
       logLine(ctx.g, `${pname(ctx.player)} 「不动菩提」：在对方使用防御/攻击骰后结算`);
+    },
+  },
+  // ── L12 传奇面板·渡世行僧 弥云 ──────────────────────────────
+  /** 知我心者立地成佛（必杀·尘落前置 3）：双方 6 区中"有骰且仅有 1 种点数"的区域共 N 个 →
+   *  对对方造成 **6×N 一次真伤** → 之后弃置这些区域中的全部能力骰。打死对方则不再处理弃置。 */
+  'miyun.lidichengfo': {
+    run({ g, player }) {
+      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+      // 快照符合条件的区域（有骰 && 点数种类恰 1 种；空区域不算）
+      const regions: { who: PlayerId; kind: DiceKind; ids: string[] }[] = [];
+      for (const who of ['A', 'B'] as PlayerId[]) {
+        for (const k of KINDS) {
+          const arr = g.players[who].areas[k];
+          if (arr.length === 0) continue;
+          if (new Set(arr.map((d) => d.value)).size !== 1) continue;
+          regions.push({ who, kind: k, ids: arr.map((d) => d.id) });
+        }
+      }
+      const n = regions.length;
+      logLine(
+        g,
+        `${pname(player)} 发动必杀「知我心者立地成佛」：双方共有 ${n} 个"有且只有 1 种点数"的区域 → 造成 ${6 * n} 点真实伤害`,
+      );
+      if (n > 0) dealTrueDamage(g, oppId, 6 * n, player); // 6×N 作为**一次**真实伤害
+      if ((g.phase as string) === 'gameOver') return; // 打死对方 → 之后不再处理弃置
+      // 之后：弃置这些区域中的能力骰（双方；按"每个玩家一次效果"批量弃，保证 L01 雨落狂流只 +1）
+      const byPlayer: Record<PlayerId, Partial<Record<DiceKind, string[]>>> = { A: {}, B: {} };
+      for (const r of regions) {
+        const live = r.ids.filter((id) => g.players[r.who].areas[r.kind].some((d) => d.id === id));
+        if (live.length) (byPlayer[r.who][r.kind] ??= []).push(...live);
+      }
+      for (const who of ['A', 'B'] as PlayerId[]) {
+        if (Object.keys(byPlayer[who]).length > 0) consumeDiceByKind(g, g.players[who], byPlayer[who]);
+      }
+      if (n > 0) logLine(g, `「立地成佛」：弃置这 ${n} 个区域中的全部能力骰`);
     },
   },
 };

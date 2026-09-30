@@ -1,4 +1,4 @@
-import type { DiceKind, GameState, PlayerId } from '../core/model/types';
+import type { DiceKind, Die, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { abilityDicePool } from '../core/engine/effects';
 import { effectiveWill } from '../core/engine/derive';
@@ -946,6 +946,155 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       },
     ],
     buildParams: () => ({}),
+  },
+  // L06 传奇面板·圆舞（待决策）：选 1 颗能力骰 → 选目标区域（另一个）
+  '@yuanwu': {
+    steps: () => [
+      { kind: 'dice' as const, label: '选择要移动的 1 个能力骰', owner: 'self' as const, areas: KINDS, min: 1, max: 1 },
+      {
+        kind: 'option' as const,
+        label: '移动到哪个区域',
+        options: [
+          { value: 'attack', label: '攻击骰区' },
+          { value: 'defense', label: '防御骰区' },
+          { value: 'meditation', label: '冥想骰区' },
+        ],
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // L06 传奇面板·无光领域（启动）：选择 ①攻击点数+1（最大6）/ ②-1（最小1）
+  'xiu.wuguanglingyu': {
+    steps: () => [
+      {
+        kind: 'option' as const,
+        label: '选择无光领域的效果',
+        options: [
+          { value: 'up', label: '攻击点数视为上升 1（最大 6）' },
+          { value: 'down', label: '攻击点数视为下降 1（最小 1）' },
+        ],
+      },
+    ],
+    buildParams: ({ options }) => ({ choice: options[0] ?? 'up' }),
+  },
+  // L07 传奇面板·不屈咆哮（必杀）：弃置对方数量＝你的「决意」当前计数的能力骰（跨类型一次选；不足则全弃）
+  'nisa.buqupaoxiao': {
+    steps: ({ state, player }) => {
+      const p = state.players[player];
+      const o = state.players[oppOf(player)];
+      const jy = p.artifacts.find((a) => a.skills.some((s) => s.key === 'jueyi.wildfire'));
+      const n = jy?.count ?? 0;
+      const total = KINDS.reduce((sum, k) => sum + o.areas[k].length, 0);
+      const need = Math.min(n, total);
+      if (need <= 0) return []; // 对方无能力骰 → 无需选骰，直接结算（弃 0 颗）
+      return [
+        {
+          kind: 'dice' as const,
+          label: `选择弃置对方 ${need} 颗能力骰（跨类型）`,
+          owner: 'opponent' as const,
+          areas: KINDS,
+          min: need,
+          max: need,
+        },
+      ];
+    },
+    buildParams: ({ chosenDice }) => ({ dieIds: chosenDice[0] ?? [] }),
+  },
+  // L05 传奇面板·无法饶恕（待决策）：选对方 1 个"点数＝该攻击点数"的防御骰弃置
+  '@wufaraoshu': {
+    steps: ({ state }) => {
+      const pd = state.pending;
+      const value = pd && pd.kind === 'wufaraoshu' ? pd.value : 0;
+      return [
+        {
+          kind: 'dice' as const,
+          label: `选择要弃置的对方 ${value} 点防御骰（1 颗）`,
+          owner: 'opponent' as const,
+          areas: ['defense'] as DiceKind[],
+          min: 1,
+          max: 1,
+          filter: (d: { value: number }) => d.value === value,
+        },
+      ];
+    },
+    buildParams: () => ({}),
+  },
+  // L07 传奇面板·始祖兽魂（待决策）：可额外消耗 1 个冥想骰（改为把「兽魂」计数重设为 3）
+  '@shizushouhun': {
+    steps: () => [
+      {
+        kind: 'dice' as const,
+        label: '选择要额外消耗的 1 个冥想骰',
+        owner: 'self' as const,
+        areas: ['meditation'] as DiceKind[],
+        min: 1,
+        max: 1,
+        allowArtifact: true,
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // L10 传奇面板·涤罪大剑术（待决策）：选对方 2 颗**种类不相同**的能力骰弃置
+  '@dizuidaijianshu': {
+    steps: () => [
+      {
+        kind: 'dice' as const,
+        label: '选择要弃置的对方 2 颗能力骰（种类必须不相同）',
+        owner: 'opponent' as const,
+        areas: KINDS,
+        min: 2,
+        max: 2,
+        validate: (dice: Die[]) => {
+          if (dice.length < 2) return { ok: true, hint: `已选 ${dice.length} 颗（需 2 颗且种类不相同）` };
+          const ok = new Set(dice.map((d) => d.kind)).size === dice.length;
+          return ok ? { ok: true, hint: '种类不相同 ✓' } : { ok: false, hint: '2 颗骰的种类必须不相同 ✗' };
+        },
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // L01 传奇面板·雨落狂流（待决策 ①）：选对方 1 个能力骰弃置
+  '@kongYuluo': {
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择要弃置的对方能力骰（1 颗）',
+        owner: 'opponent',
+        areas: KINDS,
+        min: 1,
+        max: 1,
+      },
+    ],
+    buildParams: () => ({}),
+  },
+  // L01 传奇面板·雨落狂流（待决策 ②）：选择随机能力骰的落区
+  '@kongYuluoGain': {
+    steps: () => [
+      {
+        kind: 'option',
+        label: '选择落区',
+        options: [
+          { value: 'attack', label: '攻击骰区' },
+          { value: 'defense', label: '防御骰区' },
+          { value: 'meditation', label: '冥想骰区' },
+        ],
+      },
+    ],
+    buildParams: ({ options }) => ({ kind: options[0] }),
+  },
+  // L04 传奇面板·我将在下个梦境与你再度相逢（必杀）：先选"先手玩家"，再重开一局
+  'tata.mengjing': {
+    steps: () => [
+      {
+        kind: 'option',
+        label: '选择先手玩家',
+        options: [
+          { value: 'A', label: '玩家A' },
+          { value: 'B', label: '玩家B' },
+        ],
+      },
+    ],
+    buildParams: ({ options }) => ({ first: options[0] ?? 'A' }),
   },
   // 018 至黑·漆黑绽放（待决策）：可重掷最多 X 颗能力骰（含刚获得的骰）
   '@zhihaiReroll': {

@@ -270,6 +270,7 @@ describe('A02 深红（异相）·UI', () => {
     },
     settingsOpen: false,
     logOpen: false,
+    logPop: false,
     detail: null,
     error: null,
   });

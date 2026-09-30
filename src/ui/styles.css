@@ -30,6 +30,11 @@ body {
   width: 100%;
   box-sizing: border-box;
   align-items: flex-start;
+  /* 传奇英雄面板宽度：≈ 原左侧栏宽（移除左栏后腾出的宽度正好容纳它） */
+  --legend-w: 300px;
+}
+@media (max-width: 1200px) {
+  .app { --legend-w: 240px; }
 }
 .sidebar {
   flex: 0 0 300px;
@@ -441,7 +446,8 @@ button.pay-die {
   gap: 6px 10px;
 }
 .selector-head {
-  flex: 1 1 100%; /* 独占第一行 */
+  /* 横向流式（默认）：标题/进度/数字/选项**不独占整行**，与骰片、取消·确认尽可能同行；放不下才自动换行 */
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -826,9 +832,30 @@ button.pay-die {
   color: #6b7280;
   opacity: 0.7;
 }
-/* 置于神器上的骰（027 寒光）：不在任何区域 → 中性色，不带玩家色/攻防冥前缀 */
+/* 置于神器上的骰（027 寒光 / 034·A03 破障 / A06 勾魂）：不在任何区域 → 中性色，不带玩家色/攻防冥前缀 */
 .pay-die--held {
   background: #64748b;
+}
+/* 存放骰显示在**卡片标题行末尾**（.card-head 内）：去掉标签，骰片尺寸适配标题行高（尽可能大）。
+   标题行自然行高 ≈ 20px（舒适）/ 18px（紧凑）；能力骰区骰子为 26×26 → 以此为止上限，不撑高标题行。 */
+.card-held--head {
+  align-self: center;
+  flex: 0 0 auto;
+  padding: 0;
+  gap: 3px;
+}
+.card-held--head .pay-die--held {
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 12px;
+}
+.density-compact .card-held--head .pay-die--held {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
 }
 /* 025 奇袭：把能力骰「视为攻击骰」→ 与真攻击骰（玩家色）明显区分（琥珀色） */
 .pay-die.pay-die--treated {
@@ -1009,8 +1036,11 @@ button.pay-die {
 /* ===== 中央操作区：提示栏 + 操作栏合并 ===== */
 .actionzone {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  /* 横向流式：内部面板"够位就同行"（如 操作列表 + 取消/确认条）；放不下才换行。提示栏见下方仍独占一行 */
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   background: #fffdf8;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1147,12 +1177,16 @@ button.pay-die {
   padding: 0;
   box-shadow: none;
 }
-/* 硬约束：内部任何面板都不可能比外框更宽（杜绝内框溢出） */
+/* 内部面板：内容自适应宽度（"够位就同行"），但**任何面板都不可能比外框更宽**（杜绝内框溢出） */
 .actionzone > * {
-  width: 100%;
+  flex: 0 1 auto;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+}
+/* 提示栏（含攻击提示）仍**独占一行** */
+.actionzone > .hint {
+  flex: 1 1 100%;
 }
 .confirm-row { flex-wrap: wrap; }
 .actionlist,
@@ -1403,7 +1437,7 @@ button.pay-die {
 #app.setup-page .pick-legend-chip::after { content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px;
   background: #0a0a0b; filter: url(#dust-ink); transform: translateZ(0); pointer-events: none; }
 #app.setup-page .pick-legend-av { position: relative; height: 36px; width: calc(36px * 787 / 756); background: #000; overflow: hidden;
-  display: flex; align-items: flex-start; justify-content: center; flex: 0 0 auto; }
+  display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 #app.setup-page .pick-legend-av img { width: 100%; height: auto; display: block; }
 #app.setup-page .pick-legend-lab { font-weight: 700; letter-spacing: .5px; color: var(--pc, var(--t1)); white-space: nowrap; font-size: var(--fs-3); }
 
@@ -1461,9 +1495,16 @@ button.pay-die {
 /* 详情浮窗：透明背景；点击处附近弹出（窄屏回退居中）；从点击点放大；关闭直接消失 */
 #app.setup-page .pick-modal { position: fixed; inset: 0; z-index: 60; display: none; }
 #app.setup-page .pick-modal.on { display: block; }
-#app.setup-page .pick-modal-box { position: fixed; box-sizing: border-box; width: min(720px, 92vw); max-height: 90vh; overflow-x: hidden; overflow-y: auto; background: #141416; border: 1px solid #3a3a40; border-radius: var(--r-md); padding: 14px 16px; color: var(--t1); box-shadow: 0 20px 60px rgba(0,0,0,.6); animation: pick-open .22s var(--pick-pop); }
+#app.setup-page .pick-modal-box { position: fixed; box-sizing: border-box; width: min(720px, 92vw); max-height: 90vh; overflow-x: hidden; overflow-y: auto; background: #141416; border: 1px solid #3a3a40; border-radius: var(--r-md); padding: 14px 16px; color: var(--t1); box-shadow: 0 20px 60px rgba(0,0,0,.6); animation: pick-open .22s var(--pick-pop);
+  /* 神器弹框图片的渲染高度（弹框内容宽 − 边框/内边距，再按卡图 900:305）——供传奇头像对其取高 */
+  --pick-art-img-h: calc((min(720px, 92vw) - 34px) * 305 / 900); }
 #app.setup-page .pick-modal-box.soft { animation: pick-fade .12s ease-out; }
 #app.setup-page .pick-modal-box img { box-sizing: border-box; width: 100%; max-width: 100%; border: 2px solid #000; border-radius: 4px; background: #fff; display: block; }
+/* 传奇英雄面板弹窗：弹框更小、头像＝黑底板限宽居中（上下两条黑边）——弹窗目的主要是看技能 */
+#app.setup-page .pick-modal-box.legend { width: min(560px, 92vw); }
+#app.setup-page .pick-modal-av { background: #000; height: var(--pick-art-img-h); width: calc(var(--pick-art-img-h) * 787 / 756); max-width: 100%; margin: 0 auto; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; border-radius: var(--r-sm); }
+#app.setup-page .pick-modal-av img { width: 100%; height: auto; border: 0; border-radius: 0; background: transparent; }
 #app.setup-page .pick-sk { border-top: 1px solid #2a2a30; padding: 9px 2px; }
 #app.setup-page .pick-sk:first-of-type { border-top: none; }
 #app.setup-page .pick-sk-t { font-weight: 700; font-size: 15px; color: #f3f0e8; }
@@ -1566,4 +1607,39 @@ button.pay-die {
 .card-art { position: relative; }
 .card-alt-badge { position: absolute; left: 4px; top: 4px; z-index: 4; padding: 0 6px; border-radius: 3px; background: #111014; color: #f5f4f0; border: 1px solid #f5f4f0; font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
 .card-special-badge { position: absolute; left: 4px; top: 24px; z-index: 4; padding: 0 6px; border-radius: 3px; background: #6d4c1a; color: #f7eccf; border: 1px solid #f5f4f0; font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
+
+/* ── 传奇英雄面板（预选·带传奇） ── */
+/* 四列网格：传奇占第 1 列并纵跨两行；神器行/骰区行各占第 2–4 列。
+   列宽由同一网格决定 → 3 骰区与 3 神器必然逐列对齐（不再需要"留空格"元素）。 */
+.player--legend { display: grid; grid-template-columns: var(--legend-w) 1fr 1fr 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 6px; align-items: stretch; }
+.player--legend .card-legend { grid-column: 1; grid-row: 1 / span 2; min-width: 0; }
+.player--legend .cards,
+.player--legend .areas { grid-column: 2 / 5; }
+.player--legend .areas { gap: 10px; margin: 0; }
+.player--legend.player--self .areas { grid-row: 1; }
+.player--legend.player--self .cards { grid-row: 2; }
+.player--legend.player--enemy .cards { grid-row: 1; }
+.player--legend.player--enemy .areas { grid-row: 2; }
+/* 镜像神器摆放（敌方）：传奇翻到第 4 列，神器/骰区占第 1–3 列 */
+.player--legend-right { grid-template-columns: 1fr 1fr 1fr var(--legend-w); }
+.player--legend-right .card-legend { grid-column: 4; }
+.player--legend-right .cards,
+.player--legend-right .areas { grid-column: 1 / 4; }
+.density-compact .player--legend { row-gap: 3px; }
+/* 面板图＝黑底板（同选择界面迷你头像规则：底色 #000、显示框 787:756＝满高740+上下各8px、图垂直居中、超出裁掉、无圆角） */
+.card-legend-art { background: #000; aspect-ratio: 787 / 756; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.card-legend-art img { width: 100%; height: auto; display: block; }
+.card-legend-art.card-art--missing { color: #f5f4f0; font-size: 12px; }
+/* 传奇模式中段：最左格 = 设置 + 战报（内置滚动；高度与快捷操作栏一致，保持整屏布局不变） */
+.centerband-log { flex: 0 0 var(--legend-w); min-width: 0; height: var(--actionzone-min-h, 104px); display: flex; flex-direction: column; gap: 6px; }
+.centerband-log-head { display: flex; align-items: center; gap: 8px; }
+.centerband-log .log { flex: 1; max-height: none; overflow-y: auto; }
+
+/* ── 战报放大弹窗（右键战报栏打开） ── */
+.log--zoomable { cursor: context-menu; }
+.logpop-overlay { position: fixed; inset: 0; background: rgba(20, 24, 30, 0.42); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; box-sizing: border-box; }
+.logpop-modal { width: min(920px, 94vw); height: min(80vh, 760px); background: var(--panel, #fbf9f4); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; box-sizing: border-box; }
+.logpop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.logpop-title { font-weight: 700; font-size: 16px; }
+.logpop-modal .log--pop { flex: 1; max-height: none; overflow-y: auto; }
 #app.setup-page .pick-special-badge { position: absolute; left: 6px; top: 32px; z-index: 4; padding: 1px 8px; border-radius: 5px; background: #6d4c1a; color: #f7eccf; border: 1px solid #f5f4f0; font-size: 12px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }

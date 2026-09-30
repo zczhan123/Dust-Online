@@ -1,5 +1,5 @@
 import type { DiceKind, GameState, PlayerId } from '../model/types';
-import { hasActiveSkill } from './skill-state';
+import { hasActiveSkill, skillUseKey } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
 import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
@@ -31,13 +31,36 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
 
   // A 攻击伤害加成（含带来源的本回合 Buff，例如「献祭」②）
   const bonus = attackDamageBonus(g, player);
-  if (bonus.value > 0) {
+  // 「横贯 / 吞虎之狼」这类**整回合生效的第 N 次攻击**加成，另有下方"常驻提醒"条目承载
+  //（用户 2026-09-28 要求：不看已攻击次数、一直提醒）→ 本条**跳过它们**，保证"一个信息只有一个渲染来源"。
+  const STANDING_BONUS_LABELS = new Set(['横贯', '吞虎之狼']);
+  if (bonus.value > 0 && !STANDING_BONUS_LABELS.has(bonus.label ?? '')) {
     const label = bonus.label ?? '攻击加成';
-    // 025 横贯 / 030 寰宇飞升 是"按第几次攻击"生效的加成 → 文案点明第几次
     let text = `攻击伤害 +${bonus.value}`;
-    if (bonus.label === '横贯') text = `本回合第二次攻击将 +${bonus.value} 伤害`;
-    else if (bonus.label === '寰宇飞升') text = `本回合第一次攻击将 +${bonus.value} 伤害`;
+    if (bonus.label === '寰宇飞升') text = `本回合第一次攻击将 +${bonus.value} 伤害`;
+    else if (bonus.label === '迟来的正义') text = `攻击伤害 +${bonus.value}（＝当前尘落，最大 4）`;
     notes.push({ label, text });
+  }
+
+  // A **常驻提醒**（不看本回合已发起几次攻击）：
+  //  - 025 屠虎·横贯（持续）：本回合第 2 次攻击伤害 +2
+  //  - L09 传奇面板·吞虎之狼（持续）：本回合第 3 次攻击伤害 +3
+  if (hasActiveSkill(p, 'tuohu.hengguan')) {
+    notes.push({ label: '横贯', text: '本回合的第 2 次攻击伤害 +2' });
+  }
+  if (hasActiveSkill(p, 'lifeng.tunhuzhilang')) {
+    notes.push({ label: '吞虎之狼', text: '本回合的第 3 次攻击伤害 +3' });
+  }
+
+  // A L06 无光领域（持续状态）：你的攻击点数视为 ±1
+  if (p.wuguang === 'up' || p.wuguang === 'down') {
+    notes.push({
+      label: '无光领域',
+      text:
+        p.wuguang === 'up'
+          ? '你的攻击点数视为上升 1 点（最大 6）'
+          : '你的攻击点数视为下降 1 点（最小 1）',
+    });
   }
 
   // A/D 攻击前的选择：025 屠虎·奇袭（持续·左）：有「点数不在对方任意区域」的能力骰时可用
@@ -48,10 +71,17 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     }
   }
 
+  // A（不可抵挡）：L07 传奇面板·无尽追猎（持续）——攻击骰区恰剩 1 颗时，用它可以打出不可抵挡的攻击
+  if (hasActiveSkill(p, 'nisa.wujinzhulie') && p.areas.attack.length === 1) {
+    notes.push({ label: '无尽追猎', text: '攻击骰区仅剩 1 颗攻击骰 → 用它攻击时不可抵挡' });
+  }
+
   // D 攻击前的选择：022 死契·处刑通牒（计数 ≥1）
   const siji = artifactWithSkill(p, 'siji.chuxing');
   if (hasActiveSkill(p, 'siji.chuxing') && (siji?.count ?? 0) >= 1) {
-    notes.push({ label: '处刑通牒', text: '使用攻击骰前，可令本次伤害 +1 且不可抵挡，或 +5' });
+    // L08 传奇面板·只为赏金而来：实际发动后还可额外启动 1 个「启动式」技能
+    const shangjin = hasActiveSkill(p, 'xiva.zhiweishangjin') ? '（发动后还可额外启动 1 个「启动式」技能）' : '';
+    notes.push({ label: '处刑通牒', text: `使用攻击骰前，可令本次伤害 +1 且不可抵挡，或 +5${shangjin}` });
   }
 
   // D 攻击前的选择：027 寒光·必杀（神器上仍有骰子）
@@ -60,6 +90,28 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
       label: '凛冽之音',
       text: '使用攻击骰前：可将神器上 1 颗骰移入对应区域，或移除它并弃置对方同点数的能力骰',
     });
+  }
+
+  // A/D 攻击前的选择：L02 传奇面板·残影（「影袭」本回合仍可启动）
+  if (hasActiveSkill(p, 'ying.canying') && hasActiveSkill(p, 'yingle.yingxi')) {
+    const used = g.skillsUsedThisTurn.filter((k) => k === skillUseKey(player, 'yingle.yingxi')).length;
+    if (used < 2 && KINDS.some((k) => p.areas[k].some((d) => d.value >= 2))) {
+      notes.push({ label: '残影', text: `「影袭」本回合还可启动 ${2 - used} 次` });
+    }
+  }
+
+  // A/D L04 无上剑术（持续）：使用 5 点攻击骰 → 回复 1 生命；使用 5 点防御骰 → 造成 1 真实伤害
+  if (hasActiveSkill(p, 'tata.wushangjianshu')) {
+    const hasFive = p.areas.attack.some((d) => d.value === 5) || p.areas.defense.some((d) => d.value === 5);
+    const canConvert =
+      hasActiveSkill(p, 'shenhong.sword') &&
+      p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length >= 2;
+    if (hasFive || canConvert) {
+      notes.push({
+        label: '无上剑术',
+        text: '使用 5 点攻击骰 → 回复 1 生命；使用 5 点防御骰 → 造成 1 点真实伤害',
+      });
+    }
   }
 
   // B 被抵挡时：025 屠虎·横贯·触发（对方有可弃置、且点数小于「可用攻击骰」的能力骰）
@@ -79,6 +131,15 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   ) {
     notes.push({ label: '锋芒', text: '攻击被抵挡时，可追加 2 真实伤害' });
   }
+  // B 被抵挡时：L02 传奇面板·暗夜凶神（通过「锋芒」取消对方防御骰后，「不祥」计数可 +1，最高 3 层）
+  if (
+    hasActiveSkill(p, 'ying.anyexiongshen') &&
+    hasActiveSkill(p, 'buxiang.fengmang.trigger') &&
+    (artifactWithSkill(p, 'buxiang.fengmang')?.count ?? 0) < 3 &&
+    canPayCosts(g, player, { attack: 1, meditation: 1 }, { held: true })
+  ) {
+    notes.push({ label: '暗夜凶神', text: '通过「锋芒」取消对方防御骰后，可使「不祥」计数 +1（最高 3 层）' });
+  }
   // B 被抵挡时：013 鸣雷·雷暴·触发（需 1 冥想骰；含置换与 034/A03 存放骰）
   if (hasActiveSkill(p, 'minglei.leibao.trigger') && canPayCosts(g, player, { meditation: 1 }, { held: true })) {
     notes.push({ label: '雷暴', text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区' });
@@ -87,6 +148,17 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   const jueyi = artifactWithSkill(p, 'jueyi.wildfire.continuous');
   if (hasActiveSkill(p, 'jueyi.wildfire.continuous') && (jueyi?.count ?? 0) >= 5) {
     notes.push({ label: '野火燎原', text: '攻击被抵挡时，仍造成一半伤害（向下取整）' });
+  }
+
+  // C 造成伤害后：L05 传奇面板·无法饶恕（对方有"点数＝某可用攻击点数"的防御骰时）
+  if (hasActiveSkill(p, 'zoray.wufaraoshu')) {
+    const oppId = oppOf(player);
+    const hasTarget = p.areas.attack.some((d) =>
+      g.players[oppId].areas.defense.some((x) => x.value === d.value),
+    );
+    if (hasTarget) {
+      notes.push({ label: '无法饶恕', text: '攻击造成伤害后，可弃置对方 1 个与该攻击点数相同的防御骰' });
+    }
   }
 
   // C 造成伤害后（回血 / 伤害类型）：017 幽冥·冥界行走·持续
@@ -115,6 +187,21 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
       notes.push({
         label: tianfa.blockKind === 'meditation' ? '深空之火' : '陨落',
         text: `本回合对方只能用${blockCn}骰抵挡；你造成 2 次伤害后立即结束主要阶段`,
+      });
+    }
+  }
+
+  // C/D 技能后追击：L03 传奇面板·拔城（「主宰」技能启动后，若对方弃置数 < 你消耗数 → 视为以 5 点攻击并切换主宰）
+  if (hasActiveSkill(p, 'batton.bacheng')) {
+    const zhuzai = p.artifacts.find((a) =>
+      a.skills.some((s) => s.key === 'zhuzai.sweep' || s.key === 'zhuzai.smash'),
+    );
+    const side = zhuzai?.activeMarkerSide;
+    const key = side === 'left' ? 'zhuzai.sweep' : side === 'right' ? 'zhuzai.smash' : null;
+    if (key && hasActiveSkill(p, key) && !g.skillsUsedThisTurn.includes(skillUseKey(player, key))) {
+      notes.push({
+        label: '拔城',
+        text: '启动「主宰」技能后，若对方弃置的能力骰少于你消耗的，可视为以 5 点攻击 1 次并切换「主宰」技能',
       });
     }
   }

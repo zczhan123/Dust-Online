@@ -4,6 +4,7 @@ import { createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { effectiveSpeed, effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 import { dealTrueDamage } from './combat';
+import { noteYuluoDiceConsumed } from './effects';
 
 /** 补充阶段：补充 min(速度, 意志 - 现有骰数) 颗随机骰，按分布落区 */
 export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
@@ -81,6 +82,8 @@ export function endPhase(g: GameState, player: PlayerId, dieIds?: string[]): num
   const excess = totalDice(p) - will;
   if (excess <= 0) return 0;
   let discarded = 0;
+  // L01 口径 (B)：结束阶段弃骰也算"你的骰被弃置" → 收集被弃的骰并在最后通知「雨落狂流」
+  const removed: { kind: DiceKind; value: number }[] = [];
   if (dieIds) {
     if (dieIds.length !== excess) throw new Error(`结束阶段需弃置恰好 ${excess} 颗能力骰`);
     if (new Set(dieIds).size !== dieIds.length) throw new Error('duplicate die id');
@@ -93,6 +96,7 @@ export function endPhase(g: GameState, player: PlayerId, dieIds?: string[]): num
       for (const k of kinds) {
         const idx = p.areas[k].findIndex((d) => d.id === id);
         if (idx >= 0) {
+          removed.push({ kind: k, value: p.areas[k][idx].value });
           p.areas[k].splice(idx, 1);
           break;
         }
@@ -103,13 +107,15 @@ export function endPhase(g: GameState, player: PlayerId, dieIds?: string[]): num
     let left = excess;
     for (const kind of ['meditation', 'attack', 'defense'] as const) {
       while (left > 0 && p.areas[kind].length > 0) {
-        p.areas[kind].pop();
+        const d = p.areas[kind].pop()!;
+        removed.push({ kind, value: d.value });
         left -= 1;
       }
       if (left <= 0) break;
     }
     discarded = excess - left;
   }
+  if (removed.length > 0) noteYuluoDiceConsumed(g, player, removed);
   if (discarded > 0) {
     logLine(g, `${pname(player)} 弃置 ${discarded} 颗能力骰（超出意志上限）`, 'end');
   }

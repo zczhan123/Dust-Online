@@ -646,8 +646,8 @@ describe('026 陷阵 × 013 雷暴（额外重掷阶段，待办 §G 修复回�
   });
 });
 
-describe('消耗语义（走 paySlots）→ 触发 026 威压（概念一致性修复回归）', () => {
-  it('022「填弹」（消耗 1–6 能力骰）会触发 026 威压，reason=skill', () => {
+describe('026 威压：只认「使用」（攻击/抵挡/尘起支付），「消耗」不触发（2026-09-28 用户更正）', () => {
+  it('022「填弹」（消耗 1–6 个能力骰，reason=skill）→ **不触发**威压', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '026', '003'], heroB: ['004', '005', '006'] });
     skipInitialReroll(g);
     toMain(g);
@@ -655,13 +655,44 @@ describe('消耗语义（走 paySlots）→ 触发 026 威压（概念一致性�
     fill.activeMarkerSide = 'left';
     fill.armedSide = 'left';
     fill.armedTurn = g.turnIndex;
-    art(g, 'A', '026').activeMarkerSide = 'right'; // 威压（触发）
+    art(g, 'A', '026').activeMarkerSide = 'right'; // 威压（触发·已激活）
     g.players.A.areas.attack = [{ id: 'a2', value: 2, kind: 'attack' }];
     g.players.A.areas.defense = [];
     g.players.A.areas.meditation = [];
-    g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }]; // 供威压改点
+    g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }]; // 场上有可改目标
     applyAction(g, { t: 'skill', artifactId: '022', side: 'left', params: { dieIds: ['a2'] } });
+    expect(g.pending?.kind).not.toBe('weiyaPick'); // 「消耗」不是「使用」→ 不触发
+    expect(g.pending).toBeNull();
+  });
+
+  it('攻击支付（使用 1 个攻击骰，reason=attack）→ 触发威压', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['026', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    const card = art(g, 'A', '026');
+    card.activeMarkerSide = 'right'; // 威压（触发·已激活）
+    g.players.A.areas.attack = [{ id: 'a2', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'bd1', value: 1, kind: 'defense' }]; // 场上还有可改目标
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a2'] }] });
     expect(g.pending?.kind).toBe('weiyaPick');
-    expect(g.pending && g.pending.kind === 'weiyaPick' ? g.pending.reason : null).toBe('skill');
+    expect(g.pending && g.pending.kind === 'weiyaPick' ? g.pending.reason : null).toBe('attack');
+  });
+
+  it('抵挡支付（使用 1 个防御骰，reason=defense）→ 触发威压', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['026', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    const card = art(g, 'A', '026');
+    card.activeMarkerSide = 'right'; // A（防守方）的威压已激活
+    g.players.A.areas.defense = [{ id: 'ad1', value: 3, kind: 'defense' }];
+    g.players.B.areas.attack = [{ id: 'ba1', value: 4, kind: 'attack' }];
+    g.players.B.areas.meditation = [{ id: 'bm1', value: 2, kind: 'meditation' }]; // 场上留目标（威压需有可改的骰）
+    g.activePlayer = 'B';
+    g.phase = 'main';
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['ba1'] }] }); // B 攻击 → 待 A 抵挡
+    expect(g.pendingAttack).not.toBeNull();
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['ad1'] }] }); // A 用防御骰抵挡（A 的「使用」）
+    expect(g.pending?.kind).toBe('weiyaPick');
+    expect(g.pending && g.pending.kind === 'weiyaPick' ? g.pending.reason : null).toBe('defense');
   });
 });

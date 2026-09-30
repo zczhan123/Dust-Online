@@ -1,7 +1,8 @@
 import type { PlayerId } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
+import { LEGEND_TEXT } from '../core/content/legendText';
 import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact } from '../core/content/artifacts';
-import { LEGEND_OF_HERO, legendImageUrl } from '../core/content/legends';
+import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/legends';
 import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 
@@ -41,6 +42,9 @@ export interface SetupOptions {
   heroA: [string, string, string];
   heroB: [string, string, string];
   firstPlayer: PlayerId;
+  /** 预选模式·带传奇：该方传奇英雄面板 id（L01–L12）；未开启传奇时为 undefined */
+  legendA?: string;
+  legendB?: string;
 }
 
 type Side = 'A' | 'B';
@@ -128,6 +132,9 @@ function ensureInkFilter(): void {
 function createCardInspector(
   root: HTMLElement,
   signal: AbortSignal,
+  // legendText：`L0N` 图代表「传奇英雄面板」时（仅预选/构筑），显示 `LEGEND_TEXT` 技能；
+  // 否则（如挑战页的「昔日传奇」）只显示图，避免张冠李戴。
+  opts?: { legendText?: boolean },
 ): { modal: HTMLElement; consumeLp: () => boolean; open: (id: string, x: number | null, y: number | null, soft: boolean) => void } {
   const modal = el('div', 'pick-modal');
   const box = el('div', 'pick-modal-box');
@@ -189,11 +196,20 @@ function createCardInspector(
   function open(id: string, x: number | null, y: number | null, soft: boolean): void {
     box.innerHTML = '';
     const isLegend = /^L\d{2}$/.test(id);
+    const legendText = isLegend && opts?.legendText ? LEGEND_TEXT[id] : undefined;
+    box.classList.toggle('legend', !!legendText);
     const img = document.createElement('img');
     img.src = isLegend ? legendImageUrl(id) : cardUrl(id);
     img.alt = '';
-    box.appendChild(img);
-    const data = isLegend ? undefined : ARTIFACT_TEXT[id];
+    if (legendText) {
+      // 面板头像：黑底板（上下两条黑边；同 chip/战斗框规则），限宽居中，技能列表为主体
+      const av = el('div', 'pick-modal-av');
+      av.appendChild(img);
+      box.appendChild(av);
+    } else {
+      box.appendChild(img);
+    }
+    const data = legendText ?? (isLegend ? undefined : ARTIFACT_TEXT[id]);
     if (data) {
       for (const sk of data.skills) {
         const row = el('div', 'pick-sk');
@@ -417,7 +433,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   version.textContent = APP_VERSION_LABEL;
   surface.appendChild(version);
 
-  const inspector = createCardInspector(root, signal);
+  const inspector = createCardInspector(root, signal, { legendText: true });
   root.appendChild(surface);
   root.appendChild(inspector.modal);
 
@@ -603,7 +619,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     return f;
   }
 
-  // 传奇英雄面板入口（确认列头右对齐）：迷你黑框头像（标准 787:740 比例缩到 26px）+ 标签
+  // 传奇英雄面板入口（确认列头右对齐）：迷你黑框头像（图片满高 787×740；显示框 787:756＝上下各 +8px 黑边，缩到 36px）+ 标签
   function buildLegendChip(heroIdx: number): HTMLElement {
     const legendId = LEGEND_OF_HERO[HERO_KEYS[heroIdx]];
     const chip = el('span', 'pick-legend-chip');
@@ -853,10 +869,13 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       trioB = resolve('B', used);
     }
     const firstPlayer: PlayerId = first === 'random' ? (Math.random() < 0.5 ? 'A' : 'B') : first;
+    const withLegend = mode === 'yuxuan' && legendOn;
     onStart({
       heroA: trioA as [string, string, string],
       heroB: trioB as [string, string, string],
       firstPlayer,
+      legendA: withLegend ? legendOfTrio(trioA) : undefined,
+      legendB: withLegend ? legendOfTrio(trioB) : undefined,
     });
   }
 

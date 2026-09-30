@@ -192,6 +192,7 @@ describe('A01 孤王（异相）·攻击提示（提示栏写明"由该技能引
     },
     settingsOpen: false,
     logOpen: false,
+    logPop: false,
     detail: null,
     error: null,
   });

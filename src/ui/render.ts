@@ -4,6 +4,7 @@ import type {
   DiceKind,
   Die,
   GameState,
+  LegendPanel,
   Phase,
   PlayerId,
   PlayerState,
@@ -11,7 +12,9 @@ import type {
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { isAltArtifact } from '../core/content/artifacts';
-import { getLegalActions, quanzhiRemainderHasGroup } from '../core/engine/game';
+import { legendImageUrl } from '../core/content/legends';
+import { LEGEND_TEXT } from '../core/content/legendText';
+import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
@@ -70,6 +73,13 @@ export interface UiState {
       | 'tiaolingPick'
       | 'endDiscard'
       | 'wanzhangDiscard'
+      | 'kongYuluo'
+      | 'kongYuluoGain'
+      | 'wufaraoshu'
+      | 'yuanwu'
+      | 'shizushouhun'
+      | 'shangjin'
+      | 'dizuidaijianshu'
       | 'guwangCancelConvert'
       | 'dunwuHalveConvert'
       | 'weijuPayConvert';
@@ -85,6 +95,8 @@ export interface UiState {
     free?: boolean;
     /** 「真实之剑」置换：已选中的 2 颗能力骰 */
     convertPick?: string[];
+    /** L05 复仇之灵：本流程为**强制额外尘起**（不耗冥想骰/不占次数） */
+    fuchou?: boolean;
   };
   /** 攻击/抵挡的「真实之剑」置换：单步选择 2 颗能力骰 */
   convertPick: null | {
@@ -118,6 +130,8 @@ export interface UiState {
   settingsOpen: boolean;
   /** 战报抽屉是否打开（战报栏收起时用） */
   logOpen: boolean;
+  /** 战报放大弹窗（右键战报栏打开，全量、大空间） */
+  logPop: boolean;
   /** 技能详情浮窗（只读）：锚定触发卡片的屏幕矩形 */
   detail: null | {
     artifactId: string;
@@ -329,7 +343,9 @@ function skillPartState(
 ): 'on' | 'off' | 'disabled' | 'spent' {
   const key = findSkillKey(a, s.side, s.type);
   const owner = ownerIdOfArtifact(ctx.state, a);
-  const markerOk = a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only');
+  const markerOk =
+    a.allSidesActiveThisTurn === true ||
+    (a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only'));
   // 必杀「强制发动」进行中：该行临时显示为绿色（发动的一瞬间）
   if (zhihaiForcedFrame(ctx, a, s)) return 'on';
   if (key != null && s.type.includes('必杀') && owner != null && ctx.state.ultimatesUsed.includes(skillUseKey(owner, key))) return 'disabled';
@@ -337,6 +353,15 @@ function skillPartState(
   if ((a.continuousLost || a.continuousLostThisTurn) && s.type.includes('持续')) return 'disabled';
   if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
   if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
+  // L08 传奇面板·没有怜悯：024「狂舞」的必杀在尘落 ≥4 时**无需激活/充能**即可启动 → 该行显示为可用
+  if (
+    key === 'kuangwu.ultimate' &&
+    owner != null &&
+    hasActiveSkill(ctx.state.players[owner], 'xiva.meiyoulianmin') &&
+    ctx.state.dustfall >= 4
+  ) {
+    return 'on';
+  }
   // 「激活」类：只有被“切入该侧”的当回合、且本回合未用过时才可用；否则为“已用完”（灰底 + 保留绿色左边线）
   if (s.type.includes('激活') && markerOk) {
     const armedNow =
@@ -375,7 +400,8 @@ function dustEntryLabel(a: Artifact, free = false): string {
 }
 
 function skillName(state: GameState, a: SkillAction): string {
-  const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+  // 「谁在做操作」必须走 actorOf（待决策优先）：非当前玩家的技能动作（如 018 强制必杀）也要能在其自己的卡面上解析到技能名
+  const art = state.players[actorOf(state)].artifacts.find((x) => x.id === a.artifactId);
   const skill = art?.skills.find(
     (s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'),
   );
@@ -423,7 +449,7 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
   if (Array.isArray(params.costSlots) && params.costSlots.length) {
     const fills = params.costSlots as { dieIds?: string[] }[];
     const converted = fills.filter((f) => (f.dieIds ?? []).length > 1).length;
-    const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+    const art = ctx.state.players[actorOf(ctx.state)].artifacts.find((x) => x.id === a.artifactId);
     const sk = art?.skills.find((s) => s.side === a.side && (s.kind === 'activate' || s.kind === 'ultimate'));
     const kindName =
       COST_KIND_LABEL[sk?.key ?? ''] ?? (typeof params.kind === 'string' ? KIND_NAMES[params.kind] : undefined);
@@ -455,7 +481,7 @@ function skillActionLabel(ctx: Ctx, a: SkillAction): string {
   if (typeof params.dieId === 'string') {
     const v = dieValue(ctx.state, params.dieId);
     const at = v !== undefined ? `（${v}点）` : '';
-    const art = ctx.state.players[ctx.state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+    const art = ctx.state.players[actorOf(ctx.state)].artifacts.find((x) => x.id === a.artifactId);
     const sk = art?.skills.find((s) => s.side === a.side);
     parts.push(dieIdLabel(sk?.key, params, at));
   }
@@ -507,10 +533,15 @@ function startPendingSelection(
   ctx.hooks.requestRender();
 }
 
-function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
+function startSkillSelection(
+  ctx: Ctx,
+  action: SkillAction,
+  key: string,
+  pendingKind?: NonNullable<UiState['selection']>['pendingKind'],
+): void {
   const spec = SKILL_SELECTION[key];
   if (spec) {
-    const player = ctx.state.activePlayer;
+    const player = actorOf(ctx.state); // 待决策优先：非当前玩家的技能动作也要按其本人构造选择器
     const steps = spec.steps({ state: ctx.state, player, chosenDice: [], options: [], numbers: [], slots: [] });
     if (steps.length === 0) {
       const params = spec.buildParams({ state: ctx.state, player, chosenDice: [], options: [], numbers: [], slots: [] });
@@ -535,20 +566,22 @@ function startSkillSelection(ctx: Ctx, action: SkillAction, key: string): void {
     numbers: [],
     slots: [],
     slotModes: [],
+    ...(pendingKind ? { pendingKind } : {}),
   };
   ctx.hooks.requestRender();
 }
 
-function openDustFlow(ctx: Ctx, a: Artifact, free = false): void {
+function openDustFlow(ctx: Ctx, a: Artifact, free = false, fuchou = false): void {
   const kind = dustFlowKind(a);
+  const fuchouFlag = fuchou ? { fuchou: true as const } : {};
   if (free) {
     // 019 尘起赠予的免费尘起：切换/充能无需选侧与支付，直接派发；激活仍需选侧
     if (kind !== 'activate') {
       const side = kind === 'switch' ? (a.activeMarkerSide === 'left' ? 'right' : 'left') : undefined;
-      ctx.hooks.onAction({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side } : {}) });
+      ctx.hooks.onAction({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side } : {}), ...fuchouFlag });
       return;
     }
-    ctx.hooks.ui.dustFlow = { artifactId: a.id, kind, step: 'side', free: true };
+    ctx.hooks.ui.dustFlow = { artifactId: a.id, kind, step: 'side', free: true, ...fuchouFlag };
     ctx.hooks.requestRender();
     return;
   }
@@ -603,9 +636,21 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
   return parts;
 }
 
+/** 计数上限的**唯一来源**：L07「始祖兽魂」在场时，「兽魂」(020/A04) 可被加价推到 3
+ *  → 上限显示取 **max(卡面上限, 当前计数)**：只有真的加到 3 才显示 `3/3`，未加价一律 `2/2`。 */
+function countCapOf(art: Artifact, player: PlayerState | null): number | undefined {
+  if (art.countCap === undefined) return undefined;
+  const isShouhun = art.skills.some((s) => s.key.startsWith('shouhun.'));
+  if (isShouhun && player && hasActiveSkill(player, 'nisa.shizushouhun')) {
+    return Math.max(art.countCap, art.count);
+  }
+  return art.countCap;
+}
+
 /** 计数文案的唯一来源（计数与充能是两种属性：计数用独立徽标、会升会降） */
-function countText(art: Artifact): string {
-  return art.countCap !== undefined ? `计数 ${art.count}/${art.countCap}` : `计数 ${art.count}`;
+function countText(art: Artifact, player: PlayerState | null = null): string {
+  const cap = countCapOf(art, player);
+  return cap !== undefined ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`;
 }
 
 /** 以全角空格连接文本/节点片段（药丸类补正/充能紧贴前一个值，不插分隔） */
@@ -643,8 +688,40 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   }
   if (a.count > 0) {
     const count = el('span', 'badge badge-count');
-    count.textContent = countText(a);
+    count.textContent = countText(a, player);
     head.appendChild(count);
+  }
+  // 存放骰（027 寒光·必杀 / 034 破障 / A03 金刚异相 / A06 勾魂）：显示在**卡片标题行末尾**。
+  // 骰片用中性灰（不带攻/防/冥前缀），尺寸适配标题行高（见 styles.css 的 .card-held--head），**不加标签**。
+  if (a.heldDice && a.heldDice.length > 0) {
+    const held = el('div', 'pay-dice card-held card-held--head');
+    // 标题行本身是"点击 / 长按看详情"的触发区：在存放骰区域内拦截事件，避免点骰片时弹出技能详情
+    held.addEventListener('click', (e) => e.stopPropagation());
+    held.addEventListener('pointerdown', (e) => e.stopPropagation());
+    const pendingPick = ctx.state.pending?.kind === 'hanguangPick' ? ctx.state.pending : null;
+    // 仅 027 寒光 本身的存放骰可点（避免混搭时把 034 金刚等其它神器的存放骰误当成可点）
+    const isHanguang = a.skills.some((s) => s.key === 'hanguang.ultimate');
+    const clickable = isHanguang && pendingPick !== null && pendingPick.player === player.id;
+    for (const h of a.heldDice) {
+      const chip = document.createElement(clickable ? 'button' : 'span');
+      chip.className = 'pay-die pay-die--held';
+      chip.dataset.id = h.id;
+      chip.dataset.value = String(h.value);
+      chip.textContent = String(h.value);
+      chip.title = `置于「${a.name}」上的骰（点数 ${h.value}）`;
+      if (clickable) {
+        // 双入口：卡面骰片与面板骰片共享同一选中状态（ui.hanguangPick）
+        (chip as HTMLButtonElement).type = 'button';
+        chip.classList.add('clickable');
+        chip.addEventListener('click', () => {
+          const st = ctx.hooks.ui.hanguangPick;
+          ctx.hooks.ui.hanguangPick = { mode: st?.mode ?? null, dieId: h.id };
+          ctx.hooks.requestRender();
+        });
+      }
+      held.appendChild(chip);
+    }
+    head.appendChild(held);
   }
   card.appendChild(head);
   // 卡片头部同样可点击/长按查看技能详情（省略卡图时这是唯一入口）
@@ -673,38 +750,6 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
     art.appendChild(sp);
   }
   card.appendChild(art);
-  // 027 寒光·必杀：置于神器上的骰（不在任何区域，故不带攻/防/冥前缀，用中性骰片）
-  // 位置：**卡图正下方**（技能区之前）；标签用玩家色；骰片只显示点数
-  if (a.heldDice && a.heldDice.length > 0) {
-    const held = el('div', 'pay-dice card-held');
-    const lab = el('span', `chip-label player-${player.id}`);
-    lab.textContent = `置于「${a.name}」上的骰子`;
-    held.appendChild(lab);
-    const pendingPick = ctx.state.pending?.kind === 'hanguangPick' ? ctx.state.pending : null;
-    // 仅 027 寒光 本身的存放骰可点（避免混搭时把 034 金刚等其它神器的存放骰误当成可点）
-    const isHanguang = a.skills.some((s) => s.key === 'hanguang.ultimate');
-    const clickable = isHanguang && pendingPick !== null && pendingPick.player === player.id;
-    for (const h of a.heldDice) {
-      const chip = document.createElement(clickable ? 'button' : 'span');
-      chip.className = 'pay-die pay-die--held';
-      chip.dataset.id = h.id;
-      chip.dataset.value = String(h.value);
-      chip.textContent = String(h.value);
-      chip.title = `置于「${a.name}」上的骰（点数 ${h.value}）`;
-      if (clickable) {
-        // 双入口：卡面骰片与面板骰片共享同一选中状态（ui.hanguangPick）
-        (chip as HTMLButtonElement).type = 'button';
-        chip.classList.add('clickable');
-        chip.addEventListener('click', () => {
-          const st = ctx.hooks.ui.hanguangPick;
-          ctx.hooks.ui.hanguangPick = { mode: st?.mode ?? null, dieId: h.id };
-          ctx.hooks.requestRender();
-        });
-      }
-      held.appendChild(chip);
-    }
-    card.appendChild(held);
-  }
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
@@ -788,6 +833,135 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   }
 
   return card;
+}
+
+/** 面板技能 key：**按文案条目在 `LEGEND_TEXT[id].skills` 里的下标**对应 `lg.skills` 同下标（两者同序）。
+ *  不能用"按类型（kind）反查"——同一面板可能有**两个同类型**技能（如 L06 圆舞/死即新生都是持续、L08 蛇蝎之泪/没有怜悯都是持续），
+ *  按类型会取到第一个、把第二行的 key 与状态判断都弄错。 */
+function legendFindKey(lg: LegendPanel, s: { type?: string; name?: string }): string | undefined {
+  const text = LEGEND_TEXT[lg.id];
+  const i = text ? text.skills.indexOf(s as (typeof text.skills)[number]) : -1;
+  if (i >= 0) return lg.skills[i]?.key;
+  // 兜底（拿不到文案条目时）：保持旧行为，至少不要报错
+  const kind = s.type ? kindFromType(s.type) : undefined;
+  if (kind) {
+    const def = lg.skills.find((x) => x.kind === kind);
+    if (def) return def.key;
+  }
+  return lg.skills.find((x) => x.side === 'only')?.key;
+}
+
+/** 面板技能行状态：可发动条件与引擎**同一来源**（`legendSkillReady`：尘落前置 + 个别额外前提） */
+function legendSkillState(
+  ctx: Ctx,
+  player: PlayerState,
+  lg: LegendPanel,
+  s: { type: string },
+): 'on' | 'disabled' | 'off' {
+  const key = legendFindKey(lg, s);
+  if ((lg.continuousLost || lg.continuousLostThisTurn) && s.type.includes('持续')) return 'disabled';
+  if (s.type.includes('必杀')) {
+    if (key && ctx.state.ultimatesUsed.includes(skillUseKey(player.id, key))) return 'disabled';
+  }
+  // 「整局一次」类的非必杀面板技能（如 L11「永恒女王」）用过后 → 深灰
+  if (key && ctx.state.legendOnceUsed.includes(skillUseKey(player.id, key))) return 'disabled';
+  // 尘落前置：必杀 / 持续 都可能带（如 L08「没有怜悯」持续但尘落前置 4）→ 未满足时显示灰（不可用）
+  if (key && !legendSkillReady(ctx.state, player.id, key)) return 'off';
+  return 'on';
+}
+
+/**
+ * 传奇英雄面板（预选·带传奇）：外形沿用神器卡（`.card`）。
+ * 技能区与神器卡同款（技能名＋类型徽标；描述跟随「显示技能描述」）。
+ */
+function legendBox(player: PlayerState, ctx: Ctx): HTMLElement {
+  const lg = player.legend!;
+  const box = el('div', 'card card-legend');
+  box.dataset.legend = lg.id;
+
+  const head = el('div', 'card-head');
+  const name = el('span', 'card-name');
+  name.textContent = lg.name;
+  head.appendChild(name);
+  if (lg.count > 0 || lg.countCap !== undefined) {
+    const count = el('span', 'badge badge-count');
+    count.textContent = lg.countCap ? `计数 ${lg.count}/${lg.countCap}` : `计数 ${lg.count}`;
+    head.appendChild(count);
+  }
+  box.appendChild(head);
+
+  // 面板图＝黑底板（同选择界面迷你头像规则：底色 #000、显示框 787:756＝满高740+上下各8px、图垂直居中、超出裁掉、无圆角）
+  const art = el('div', 'card-legend-art');
+  const img = document.createElement('img');
+  img.src = legendImageUrl(lg.id);
+  img.alt = lg.name;
+  img.draggable = false;
+  img.addEventListener('error', () => {
+    art.classList.add('card-art--missing');
+    art.textContent = '（面板图占位）';
+  });
+  art.appendChild(img);
+  box.appendChild(art);
+  // 点卡图 / 长按 → 只读技能详情浮窗
+  attachDetailTrigger(art, ctx, lg.id);
+  attachDetailTrigger(head, ctx, lg.id);
+
+  const text = LEGEND_TEXT[lg.id];
+  if (text && text.skills.length) {
+    const skills = el('div', `skills${ctx.prefs.showSkillText ? '' : ' skills--inline'}`);
+    const groups = new Map<string, typeof text.skills>();
+    for (const s of text.skills) {
+      const g = groups.get(s.name);
+      if (g) g.push(s);
+      else groups.set(s.name, [s]);
+    }
+    for (const [groupName, parts] of groups) {
+      const skillBox = el('div', 'skill');
+      for (const s of parts) {
+        const state = legendSkillState(ctx, player, lg, s);
+        const cls =
+          state === 'on' ? 'skill-part--on' : state === 'disabled' ? 'skill-part--disabled' : 'skill-part--off';
+        const part = el('div', `skill-part ${cls}`);
+        const key = legendFindKey(lg, s);
+        if (key) part.dataset.key = key;
+        const pHead = el('div', 'skill-part-head');
+        const badge = el('span', 'skill-type');
+        badge.textContent = s.type;
+        pHead.appendChild(badge);
+        const nameEl = el('span', 'skill-name');
+        nameEl.textContent = groupName;
+        pHead.appendChild(nameEl);
+        if (ctx.prefs.showSkillText) {
+          const body = el('div', 'skill-text');
+          body.textContent = s.text;
+          pHead.appendChild(body);
+        }
+        part.appendChild(pHead);
+        // 可发动（启动 / 激活 / 必杀，与神器卡一致）：点击 → 发动（面板动作带 legendKey，按 key 精确匹配）
+        const action = ctx.legal.find(
+          (x): x is SkillAction =>
+            x.t === 'skill' &&
+            x.artifactId === lg.id &&
+            (((x.params?.legendKey as string | undefined) ?? key) === key || x.side === s.side),
+        );
+        if (action && isActivatableType(s.type) && state === 'on') {
+          part.classList.add('clickable');
+          part.dataset.act = 'skill';
+          part.title = '点击发动技能';
+          const k2 = key;
+          part.addEventListener('click', () => {
+            if (k2 && SKILL_SELECTION[k2]) startSkillSelection(ctx, action, k2);
+            else ctx.hooks.propose(action, `发动「${groupName}」`);
+          });
+        }
+        skillBox.appendChild(part);
+      }
+      skills.appendChild(skillBox);
+    }
+    box.appendChild(skills);
+  }
+
+  return box;
 }
 
 function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
@@ -897,15 +1071,24 @@ function playerPanel(
 
   const cards = el('div', 'cards');
   // 镜像神器摆放：敌方面板按「列3、列2、列1」显示（左右互搏下随上下角色自动跟随）
-  const artifacts =
-    mirrored && ctx.prefs.mirrorEnemy ? [...player.artifacts].reverse() : player.artifacts;
+  const flip = mirrored && ctx.prefs.mirrorEnemy;
+  const artifacts = flip ? [...player.artifacts].reverse() : player.artifacts;
   for (const a of artifacts) cards.appendChild(artifactCard(a, ctx, player));
 
+  // 骰区顺序恒为「敌方镜像」，与镜像开关无关
   const areas = el('div', 'areas');
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
   for (const k of order) areas.appendChild(areaBox(k, player, ctx));
 
-  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上
+  // 传奇英雄面板（预选·带传奇）：作为面板**直接子节点**、占第 1 列并纵跨两行
+  // （我方顶端＝骰区行顶；敌方＝神器行顶，维持现状）；镜像神器摆放开启时翻到第 4 列
+  if (player.legend) {
+    panel.classList.add('player--legend');
+    if (flip) panel.classList.add('player--legend-right');
+    panel.appendChild(legendBox(player, ctx));
+  }
+
+  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上（行序由 CSS 网格按角色指定）
   const seq: HTMLElement[] = role === 'enemy' ? [cards, areas] : [areas, cards];
   for (const node of seq) panel.appendChild(node);
 
@@ -989,6 +1172,66 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: '：你通过攻击造成了伤害，可以立即进行 1 次无需冥想骰的额外尘起行动；是否发动？' },
     ];
   }
+  if (pd && pd.kind === 'kongYuluo') {
+    return [
+      { text: '雨落狂流', color: pd.player },
+      { text: '：计数达到 3（已重设为 0），请选择 1 项执行——① 弃置对方的 1 个能力骰；② 获得 1 个随机点数的能力骰并移入你的任意区域；或选择不发动。' },
+    ];
+  }
+  if (pd && pd.kind === 'anyexiongshen') {
+    return [
+      { text: '暗夜凶神', color: pd.player },
+      { text: '：你通过「锋芒」取消了对方的防御骰，可以使「不祥」的计数 +1（最高 3 层）；是否发动？' },
+    ];
+  }
+  if (pd && pd.kind === 'bacheng') {
+    return [
+      { text: '拔城', color: pd.player },
+      { text: '：对方弃置的能力骰少于你消耗的，你可以视为以 5 点进行 1 次攻击，并切换「主宰」的技能；是否发动？' },
+    ];
+  }
+  if (pd && pd.kind === 'wufaraoshu') {
+    return [
+      { text: '无法饶恕', color: pd.player },
+      { text: `：你的攻击造成了伤害，可以弃置对方 1 个 ${pd.value} 点防御骰；是否发动？` },
+    ];
+  }
+  if (pd && pd.kind === 'dizuidaijianshu') {
+    return [
+      { text: '涤罪大剑术', color: pd.player },
+      { text: '：你进行了 1 次尘起行动，且第一列与第二列神器的激活标记在同一侧；可以弃置对方 2 个"种类不相同"的能力骰。' },
+    ];
+  }
+  if (pd && pd.kind === 'nudengzuiren') {
+    return [
+      { text: '汝等罪人', color: pd.player },
+      { text: `：你将回复 ${pd.amount} 点生命；可以改为对对方造成等量的真实伤害。` },
+    ];
+  }
+  if (pd && pd.kind === 'shangjin') {
+    return [
+      { text: '只为赏金而来', color: pd.player },
+      { text: '：你发动了「处刑通牒」；可以立即启动你的 1 个已激活的"启动式"技能（不计入每回合 1 次的上限）。' },
+    ];
+  }
+  if (pd && pd.kind === 'shizushouhun') {
+    return [
+      { text: '始祖兽魂', color: pd.player },
+      { text: '：你激活了「兽魂」；可以额外消耗 1 个冥想骰，改为将其计数重设为 3。' },
+    ];
+  }
+  if (pd && pd.kind === 'fuchouRise') {
+    return [
+      { text: '复仇之灵', color: pd.player },
+      { text: '：你的生命十位数发生变化，必须立即进行 1 次无需冥想骰的额外尘起行动（请选择尘起目标）。' },
+    ];
+  }
+  if (pd && pd.kind === 'yuanwu') {
+    return [
+      { text: '圆舞', color: pd.player },
+      { text: '：你受到了自己造成的伤害，必须将 1 个能力骰移动到你的另 1 个区域（先选骰、再选区域）。' },
+    ];
+  }
   if (pd && pd.kind === 'shouhunCancel') {
     return [
       { text: '兽魂', color: pd.owner },
@@ -1050,6 +1293,12 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '哀悼', color: pd.player },
       { text: '：本回合补充≤3，可造成 2 点真实伤害并弃置对方的 1 个防御骰。' },
+    ];
+  }
+  if (pd && pd.kind === 'duanexing') {
+    return [
+      { text: '闻我名者断恶行', color: pd.player },
+      { text: '：你受到伤害，可弃置对方的 1 个攻击骰（每回合 1 次）。' },
     ];
   }
   if (pd && pd.kind === 'dunwuHalve') {
@@ -1298,7 +1547,8 @@ function actionZone(ctx: Ctx): HTMLElement {
 /** 双方生命（两行；顺序与面板一致：上=敌方、下=自己 → 回合切换时上下掉转） */
 function vitalsBar(ctx: Ctx): HTMLElement {
   const { state } = ctx;
-  const selfId: PlayerId = state.activePlayer;
+  // 与玩家面板一致：以「现在轮到谁」（actorOf：待决策玩家优先）为"自己"的视角 → 上下顺序随之一致
+  const selfId: PlayerId = actorOf(state);
   const enemyId: PlayerId = selfId === 'A' ? 'B' : 'A';
   const bar = el('div', 'vitals');
   for (const pid of [enemyId, selfId]) {
@@ -1378,7 +1628,9 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'block':
       return '不抵挡';
     case 'dustRise': {
-      const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
+      const owner: PlayerId =
+        a.fuchou && state.pending?.kind === 'fuchouRise' ? state.pending.player : state.activePlayer;
+      const art = state.players[owner].artifacts.find((x) => x.id === a.artifactId);
       return art ? dustEntryLabel(art) : '尘起';
     }
     case 'caiyuliu':
@@ -1414,6 +1666,8 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'aidao':
       // 带 defenseDieId 的变体已由 actionDieSegments 走骰片（"弃置对方 防X"）；裸 accept 只在对方无防御骰时出现
       return a.accept ? '发动「哀悼」（对方无防御骰）' : '不发动「哀悼」';
+    case 'duanexing':
+      return a.accept ? '发动「闻我名者断恶行」' : '不发动「闻我名者断恶行」';
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dianxing':
@@ -1492,15 +1746,16 @@ function rerollButton(ctx: Ctx): HTMLButtonElement | null {
   return b;
 }
 
-function dustEntryButton(ctx: Ctx, a: Artifact, free = false): HTMLButtonElement {
+function dustEntryButton(ctx: Ctx, a: Artifact, free = false, fuchou = false): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'btn btn-dust';
   b.dataset.act = 'dustRise';
   b.dataset.artifact = a.id;
   if (free) b.dataset.free = '1';
+  if (fuchou) b.dataset.fuchou = '1';
   b.textContent = dustEntryLabel(a, free);
-  b.addEventListener('click', () => openDustFlow(ctx, a, free));
+  b.addEventListener('click', () => openDustFlow(ctx, a, free, fuchou));
   return b;
 }
 
@@ -1545,6 +1800,13 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const pd = state.pending;
       const owner: PlayerId = pd && pd.kind === 'aidao' ? opponent(pd.player) : state.activePlayer;
       return { parts: ['发动「哀悼」（弃置对方 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
+    }
+    case 'duanexing': {
+      // L12 闻我名者断恶行：弃置的是**对方区域内**的攻击骰 → owner = 持有者之对手
+      if (!a.accept || !a.dieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'duanexing' ? opponent(pd.player) : state.activePlayer;
+      return { parts: ['发动「闻我名者断恶行」（弃置对方 ', '）'], dice: [{ id: a.dieId, owner }] };
     }
     case 'weijuPay': {
       // 023 畏惧：对方被迫消耗的那颗骰 → 1 颗用内联骰片
@@ -1791,6 +2053,19 @@ function operationList(ctx: Ctx): HTMLElement {
   let seenGuwangConvert = false;
   let seenDunwuConvert = false;
   let seenWeijuConvert = false;
+  let seenAnyexiongshen = false;
+  let seenBacheng = false;
+  let seenYuluoDecline = false;
+  let seenYuluoGain = false;
+  let seenYuluoDiscard = false;
+  let seenWufaraoshuDecline = false;
+  let seenWufaraoshuDiscard = false;
+  let seenYuanwu = false;
+  let seenShizushouhunDecline = false;
+  let seenShizushouhunPay = false;
+  const seenShangjin = new Set<string>();
+  const seenDizui = new Set<string>();
+  const seenNudeng = new Set<string>();
   const groups = new Map<string, { parts: string[]; items: { a: Action; die: DieSeg }[] }>();
   const plain: Action[] = [];
   for (const a of ctx.legal) {
@@ -1992,6 +2267,162 @@ function operationList(ctx: Ctx): HTMLElement {
       box.appendChild(button('不发动「尘起」', { t: 'chenaiFreeRise', accept: false }, ctx.hooks));
       continue;
     }
+    if (a.t === 'anyexiongshen') {
+      // L02 暗夜凶神（触发）：是否使「不祥」计数 +1（唯一渲染来源）
+      if (seenAnyexiongshen) continue;
+      seenAnyexiongshen = true;
+      box.appendChild(button('发动「暗夜凶神」：「不祥」计数 +1', { t: 'anyexiongshen', accept: true }, ctx.hooks));
+      box.appendChild(button('不发动「暗夜凶神」', { t: 'anyexiongshen', accept: false }, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'bacheng') {
+      // L03 拔城（触发）：是否视为以 5 点攻击并切换「主宰」（唯一渲染来源）
+      if (seenBacheng) continue;
+      seenBacheng = true;
+      box.appendChild(button('发动「拔城」：以 5 点攻击 1 次并切换「主宰」技能', { t: 'bacheng', accept: true }, ctx.hooks));
+      box.appendChild(button('不发动「拔城」', { t: 'bacheng', accept: false }, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'yuanwu') {
+      // L06 圆舞（强制）：入口按钮 → 两步选择器（选骰 → 选目标区域）
+      if (seenYuanwu) continue;
+      seenYuanwu = true;
+      const yb = document.createElement('button');
+      yb.type = 'button';
+      yb.className = 'btn btn-skill';
+      yb.dataset.act = 'yuanwuOpen';
+      yb.textContent = '移动 1 个能力骰到另一区域';
+      yb.addEventListener('click', () => startPendingSelection(ctx, '@yuanwu', 'yuanwu'));
+      box.appendChild(yb);
+      continue;
+    }
+    if (a.t === 'dizuidaijianshu') {
+      // L10 涤罪大剑术（触发）：不发动 / 开选骰面板（对方跨类型、恰好 2 颗且**种类不相同**）
+      if (a.accept === false) {
+        if (seenDizui.has('decline')) continue;
+        seenDizui.add('decline');
+        box.appendChild(button('不发动「涤罪大剑术」', a, ctx.hooks));
+        continue;
+      }
+      if (seenDizui.has('open')) continue;
+      seenDizui.add('open');
+      const db = document.createElement('button');
+      db.type = 'button';
+      db.className = 'btn btn-skill';
+      db.dataset.act = 'dizuidaijianshuOpen';
+      db.textContent = '弃置对方 2 颗能力骰（种类不相同）';
+      db.addEventListener('click', () => startPendingSelection(ctx, '@dizuidaijianshu', 'dizuidaijianshu'));
+      box.appendChild(db);
+      continue;
+    }
+    if (a.t === 'nudengzuiren') {
+      // L10 汝等罪人：发动＝改为对对方造成（名义量）真实伤害；不发动＝正常回复（受生命上限封顶）
+      const pdN = state.pending;
+      const amt = pdN && pdN.kind === 'nudengzuiren' ? pdN.amount : 0;
+      const healer = pdN && pdN.kind === 'nudengzuiren' ? state.players[pdN.player] : null;
+      const healable = healer ? Math.min(amt, Math.max(0, healer.lifeMax - healer.life)) : amt;
+      if (seenNudeng.has(a.accept ? 'yes' : 'no')) continue;
+      seenNudeng.add(a.accept ? 'yes' : 'no');
+      const label = a.accept
+        ? `发动「汝等罪人」（改为对对方造成 ${amt} 点真实伤害）`
+        : `不发动「汝等罪人」（正常回复 ${healable} 点生命）`;
+      box.appendChild(button(label, a, ctx.hooks));
+      continue;
+    }
+    if (a.t === 'shangjin') {
+      // L08 只为赏金而来（触发）：不发动 / 选一个"已激活的启动式"技能（打开它自己的选择器）
+      if (a.decline) {
+        if (seenShangjin.has('decline')) continue;
+        seenShangjin.add('decline');
+        box.appendChild(button('不发动「只为赏金而来」', a, ctx.hooks));
+        continue;
+      }
+      const sig = `skill:${a.artifactId}:${a.skillKey ?? a.side}`;
+      if (seenShangjin.has(sig)) continue;
+      seenShangjin.add(sig);
+      const skillAction: SkillAction = { t: 'skill', artifactId: a.artifactId ?? '', side: a.side ?? 'left' };
+      const sb = document.createElement('button');
+      sb.type = 'button';
+      sb.className = 'btn btn-skill';
+      sb.dataset.act = 'shangjinOpen';
+      sb.textContent = `启动「${skillName(state, skillAction)}」`;
+      sb.addEventListener('click', () =>
+        startSkillSelection(ctx, skillAction, (a.skillKey ?? '') as string, 'shangjin'),
+      );
+      box.appendChild(sb);
+      continue;
+    }
+    if (a.t === 'shizushouhun') {
+      // L07 始祖兽魂（触发）：不发动 / 额外消耗 1 个冥想骰把「兽魂」计数改为 3
+      if (!a.accept) {
+        if (seenShizushouhunDecline) continue;
+        seenShizushouhunDecline = true;
+        box.appendChild(button('不发动「始祖兽魂」', a, ctx.hooks));
+        continue;
+      }
+      if (seenShizushouhunPay) continue;
+      seenShizushouhunPay = true;
+      const sb = document.createElement('button');
+      sb.type = 'button';
+      sb.className = 'btn btn-skill';
+      sb.dataset.act = 'shizushouhunOpen';
+      sb.textContent = '额外消耗 1 个冥想骰（计数改为 3）';
+      sb.addEventListener('click', () => startPendingSelection(ctx, '@shizushouhun', 'shizushouhun'));
+      box.appendChild(sb);
+      continue;
+    }
+    if (a.t === 'wufaraoshu') {
+      // L05 无法饶恕（触发）：不发动 / 点开选骰面板弃置对方 1 个同点数防御骰
+      if (a.choice === 'decline') {
+        if (seenWufaraoshuDecline) continue;
+        seenWufaraoshuDecline = true;
+        box.appendChild(button('不发动「无法饶恕」', a, ctx.hooks));
+        continue;
+      }
+      if (seenWufaraoshuDiscard) continue;
+      seenWufaraoshuDiscard = true;
+      const wb = document.createElement('button');
+      wb.type = 'button';
+      wb.className = 'btn btn-skill';
+      wb.dataset.act = 'wufaraoshuOpen';
+      wb.textContent = '弃置对方的 1 个同点数防御骰';
+      wb.addEventListener('click', () => startPendingSelection(ctx, '@wufaraoshu', 'wufaraoshu'));
+      box.appendChild(wb);
+      continue;
+    }
+    if (a.t === 'kongYuluo') {
+      // L01 雨落狂流：两步式——操作列表仅三个按钮（不发动 / 弃置对方 1 骰 / 获得随机能力骰），
+      // 后两者点进去才选（骰片面板 / 区域面板）。
+      if (a.choice === 'decline') {
+        if (seenYuluoDecline) continue;
+        seenYuluoDecline = true;
+        box.appendChild(button('不发动「雨落狂流」', a, ctx.hooks));
+        continue;
+      }
+      if (a.choice === 'gain') {
+        if (seenYuluoGain) continue;
+        seenYuluoGain = true;
+        const gb = document.createElement('button');
+        gb.type = 'button';
+        gb.className = 'btn btn-skill';
+        gb.dataset.act = 'kongYuluoGainOpen';
+        gb.textContent = '获得随机能力骰';
+        gb.addEventListener('click', () => startPendingSelection(ctx, '@kongYuluoGain', 'kongYuluoGain'));
+        box.appendChild(gb);
+        continue;
+      }
+      // discard：入口按钮 → 选骰面板（面板里才是敌方骰片）
+      if (seenYuluoDiscard) continue;
+      seenYuluoDiscard = true;
+      const db = document.createElement('button');
+      db.type = 'button';
+      db.className = 'btn btn-skill';
+      db.dataset.act = 'kongYuluoDiscardOpen';
+      db.textContent = '弃置对方的 1 个能力骰';
+      db.addEventListener('click', () => startPendingSelection(ctx, '@kongYuluo', 'kongYuluo'));
+      box.appendChild(db);
+      continue;
+    }
     if (a.t === 'shouhunCancel') {
       // 020 兽魂：攻击方选择取消伤害 vs 正常造成伤害（唯一渲染来源）
       if (seenShouhun) continue;
@@ -2036,6 +2467,49 @@ function operationList(ctx: Ctx): HTMLElement {
       continue;
     }
     if (a.t === 'skill') {
+      // 传奇面板技能：操作列表也渲染一个按钮（与神器一致：卡面行 + 操作按钮）
+      const lgOwner = state.players[actorOf(state)].legend;
+      if (lgOwner && lgOwner.id === a.artifactId) {
+        // 按动作携带的 `legendKey` 精确定位该面板技能（面板可同时含「启动 / 必杀」）
+        const legendKey = (a.params?.legendKey as string | undefined) ?? undefined;
+        const sk = lgOwner.skills.find((x) => x.key === legendKey);
+        const sigLg = `${a.artifactId}:${legendKey ?? a.side}`;
+        if (seenSkill.has(sigLg)) continue;
+        seenSkill.add(sigLg);
+        const txt = LEGEND_TEXT[lgOwner.id]?.skills.find(
+          (x) => kindFromType(x.type) === (sk?.kind ?? 'ultimate'),
+        );
+        const nm = txt?.name ?? '技能';
+        // 文案按技能类型区分（与神器 skillButton 的风格一致）：启动 → 「启动技能：X」；必杀 → 「发动必杀：「X」」
+        const label = sk?.kind === 'activate' ? `启动技能：${nm}` : `发动必杀：「${nm}」`;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-skill';
+        b.dataset.act = 'skill';
+        b.textContent = label;
+        b.addEventListener('click', () => {
+          if (legendKey && SKILL_SELECTION[legendKey]) startSkillSelection(ctx, a, legendKey);
+          else ctx.hooks.propose(a, label);
+        });
+        box.appendChild(b);
+        continue;
+      }
+      // L01 断苇一斩：改动「斩神切」参数的**独立入口**（直接确认发动，不走"逐类选骰"向导）
+      if (a.params?.opponentDiscardAll === true) {
+        const sig = `${a.artifactId}:${a.side}:duanweiyizhan`;
+        if (seenSkill.has(sig)) continue;
+        seenSkill.add(sig);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-skill';
+        b.dataset.act = 'skill';
+        b.textContent = '发动「断苇一斩」：斩神切改为弃置对方全部能力骰';
+        b.addEventListener('click', () =>
+          ctx.hooks.propose(a, '发动「断苇一斩」：斩神切改为弃置对方全部能力骰'),
+        );
+        box.appendChild(b);
+        continue;
+      }
       const sig = `${a.artifactId}:${a.side}`;
       if (seenSkill.has(sig)) continue;
       seenSkill.add(sig);
@@ -2045,10 +2519,14 @@ function operationList(ctx: Ctx): HTMLElement {
     if (a.t === 'dustRise') {
       if (seenDust.has(a.artifactId)) continue;
       seenDust.add(a.artifactId);
-      const art = state.players[state.activePlayer].artifacts.find((x) => x.id === a.artifactId);
-      // 019 尘起赠予的免费额外尘起：同一次尘起入口按「免费」处理
-      const free = state.freeNoCostRise > 0;
-      if (art) box.appendChild(dustEntryButton(ctx, art, free));
+      // L05 复仇之灵：强制尘起可能属于"非当前回合玩家"（如对方回合中触发）→ 按其归属玩家取神器
+      const isFuchou = a.fuchou === true;
+      const owner: PlayerId =
+        isFuchou && state.pending?.kind === 'fuchouRise' ? state.pending.player : state.activePlayer;
+      const art = state.players[owner].artifacts.find((x) => x.id === a.artifactId);
+      // 019 免费额外尘起 / L05 复仇之灵强制额外尘起：按「免费」处理（fuchou 走强制额外通道）
+      const free = isFuchou || state.freeNoCostRise > 0;
+      if (art) box.appendChild(dustEntryButton(ctx, art, free, isFuchou));
       continue;
     }
     if (a.t === 'fengmang') {
@@ -2132,7 +2610,8 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
     box.appendChild(row);
   }
 
-  const payer = state.players[state.activePlayer];
+  // 付款方 = 「现在轮到谁」的视角（待决策玩家优先）——与面板/生命值栏一致
+  const payer = state.players[actorOf(state)];
   const current = firstUnfilledSelSlot(sel, step);
   const used = new Set(sel.slots.flat());
   const diceBox = el('div', 'pay-dice');
@@ -2431,6 +2910,30 @@ function confirmSelection(ctx: Ctx): void {
         hooks.onAction({ t: 'wanzhangDiscard', dieIds: sel.chosenDice[0] ?? [] });
         return;
       }
+      if (sel.pendingKind === 'kongYuluo') {
+        hooks.ui.selection = null;
+        hooks.onAction({ t: 'kongYuluo', choice: 'discard', dieId: sel.chosenDice[0]?.[0] ?? '' });
+        return;
+      }
+      if (sel.pendingKind === 'kongYuluoGain') {
+        hooks.ui.selection = null;
+        hooks.onAction({ t: 'kongYuluo', choice: 'gain', kind: (sel.options[0] ?? 'attack') as DiceKind });
+        return;
+      }
+      if (sel.pendingKind === 'wufaraoshu') {
+        hooks.ui.selection = null;
+        hooks.onAction({ t: 'wufaraoshu', choice: 'discard', dieId: sel.chosenDice[0]?.[0] ?? '' });
+        return;
+      }
+      if (sel.pendingKind === 'yuanwu') {
+        hooks.ui.selection = null;
+        hooks.onAction({
+          t: 'yuanwu',
+          dieId: sel.chosenDice[0]?.[0] ?? '',
+          to: (sel.options[1] ?? 'attack') as DiceKind,
+        });
+        return;
+      }
       if (sel.pendingKind === 'endDiscard') {
         hooks.ui.selection = null;
         hooks.onAction({ t: 'endDiscardResolve', dieIds: sel.chosenDice[0] ?? [] });
@@ -2464,7 +2967,26 @@ function confirmSelection(ctx: Ctx): void {
         pendingAction = { t: 'xianzhenResolve', dieId: sel.chosenDice[0]?.[0] ?? '' };
       else if (sel.pendingKind === 'hengguan')
         pendingAction = { t: 'hengguan', dieId: sel.chosenDice[0]?.[0] };
-      else pendingAction = { t: 'zhihaiReroll', dieIds: ids };
+      else if (sel.pendingKind === 'shizushouhun')
+        pendingAction = { t: 'shizushouhun', accept: true, costSlots: [{ dieIds: sel.chosenDice[0] ?? [] }] };
+      else if (sel.pendingKind === 'dizuidaijianshu')
+        pendingAction = { t: 'dizuidaijianshu', dieIds: sel.chosenDice[0] ?? [] };
+      else if (sel.pendingKind === 'shangjin') {
+        // L08「只为赏金而来」：按该技能自己的选择器补全参数后，以**普通技能动作**提交
+        //（引擎在 `shangjin` 待决策存在时认定"不计入每回合上限"）
+        const params = spec.buildParams({
+          state,
+          player,
+          chosenDice: sel.chosenDice,
+          options: sel.options,
+          numbers,
+          slots: sel.slots,
+        });
+        const skillAction: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
+        hooks.ui.selection = null;
+        hooks.propose(skillAction, skillActionLabel(ctx, skillAction));
+        return;
+      } else pendingAction = { t: 'zhihaiReroll', dieIds: ids };
       hooks.ui.selection = null;
       hooks.onAction(pendingAction);
       return;
@@ -2477,19 +2999,64 @@ function confirmSelection(ctx: Ctx): void {
   hooks.requestRender();
 }
 
-function logPanel(ctx: Ctx): HTMLElement {
-  const box = el('div', 'log');
-  const recent = ctx.state.log.slice(-30).reverse();
-  if (recent.length === 0) {
+function logLines(box: HTMLElement, entries: GameState['log']): void {
+  if (entries.length === 0) {
     box.textContent = '（暂无记录）';
-  } else {
-    for (const entry of recent) {
-      const line = el('div', 'log-line');
-      line.textContent = `T${entry.turn}·${PHASE_LABEL[entry.phase]}：${entry.text}`;
-      box.appendChild(line);
-    }
+    return;
   }
+  for (const entry of entries) {
+    const line = el('div', 'log-line');
+    line.textContent = `T${entry.turn}·${PHASE_LABEL[entry.phase]}：${entry.text}`;
+    box.appendChild(line);
+  }
+}
+
+function logPanel(ctx: Ctx, zoomable = false): HTMLElement {
+  const box = el('div', 'log');
+  // 右键 → 战报放大弹窗（更大的空间看全量战报）
+  if (zoomable) {
+    box.classList.add('log--zoomable');
+    box.title = '右键放大战报';
+    box.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      ctx.hooks.ui.logPop = true;
+      ctx.hooks.requestRender();
+    });
+  }
+  logLines(box, ctx.state.log.slice(-30).reverse());
   return box;
+}
+
+/** 战报放大弹窗：全量战报、大空间（右键战报栏打开；点空白或 ✕ 关闭） */
+function logPopModal(ctx: Ctx): HTMLElement {
+  const overlay = el('div', 'logpop-overlay');
+  const modal = el('div', 'logpop-modal');
+  const head = el('div', 'logpop-head');
+  const title = el('div', 'logpop-title');
+  title.textContent = '战报';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel';
+  close.dataset.act = 'logPopClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ctx.hooks.ui.logPop = false;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  modal.appendChild(head);
+  const body = el('div', 'log log--pop');
+  logLines(body, [...ctx.state.log].reverse());
+  modal.appendChild(body);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ctx.hooks.ui.logPop = false;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(modal);
+  return overlay;
 }
 
 function gameOverModal(ctx: Ctx): HTMLElement {
@@ -2521,10 +3088,30 @@ function gameOverModal(ctx: Ctx): HTMLElement {
 }
 
 /** 在任意玩家处查找神器 */
+/** 把传奇英雄面板适配成 `Artifact` 形状（仅供只读详情浮窗复用，不写入对局状态） */
+function legendAsArtifact(lg: LegendPanel): Artifact {
+  return {
+    id: lg.id,
+    name: lg.name,
+    column: 1,
+    activeMarkerSide: 'left',
+    armedSide: null,
+    armedTurn: -1,
+    count: lg.count,
+    countCap: lg.countCap,
+    continuousLost: lg.continuousLost,
+    continuousLostThisTurn: lg.continuousLostThisTurn,
+    chargeLayer: 0,
+    skills: lg.skills,
+  };
+}
+
 function findArtifactAnywhere(state: GameState, id: string): { art: Artifact; owner: PlayerId } | null {
   for (const pid of ['A', 'B'] as PlayerId[]) {
     const art = state.players[pid].artifacts.find((a) => a.id === id);
     if (art) return { art, owner: pid };
+    const lg = state.players[pid].legend;
+    if (lg && lg.id === id) return { art: legendAsArtifact(lg), owner: pid };
   }
   return null;
 }
@@ -2736,7 +3323,8 @@ function logDrawer(ctx: Ctx): HTMLElement {
 
 function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
   const box = el('div', 'skills');
-  const text = ARTIFACT_TEXT[art.id];
+  const isLegend = /^L\d{2}$/.test(art.id);
+  const text = isLegend ? LEGEND_TEXT[art.id] : ARTIFACT_TEXT[art.id];
   if (!text) return box;
   const groups = new Map<string, typeof text.skills>();
   for (const s of text.skills) {
@@ -2752,7 +3340,13 @@ function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
     head.appendChild(name);
     wrap.appendChild(head);
     for (const s of parts) {
-      const st = skillPartState(ctx, art, s);
+      const lgOwner = isLegend
+        ? (['A', 'B'] as PlayerId[]).find((id) => ctx.state.players[id].legend?.id === art.id)
+        : undefined;
+      const st =
+        isLegend && lgOwner
+          ? legendSkillState(ctx, ctx.state.players[lgOwner], ctx.state.players[lgOwner].legend!, s)
+          : skillPartState(ctx, art, s);
       const cls =
         st === 'on'
           ? 'skill-part--on'
@@ -2784,6 +3378,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   const found = findArtifactAnywhere(ctx.state, d.artifactId);
   if (!found) return null;
   const { art } = found;
+  const isLegend = /^L\d{2}$/.test(art.id);
   const ui = ctx.hooks.ui;
 
   const overlay = el('div', 'detail-overlay');
@@ -2810,7 +3405,9 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
 
   const head = el('div', 'detail-head');
   const title = el('div', 'detail-title');
-  title.textContent = `${art.name}${art.weapon ? `（${art.weapon}）` : ''}${art.special ? '　〔特典〕' : ''}`;
+  title.textContent = isLegend
+    ? art.name
+    : `${art.name}${art.weapon ? `（${art.weapon}）` : ''}${art.special ? '　〔特典〕' : ''}`;
   head.appendChild(title);
   const close = document.createElement('button');
   close.type = 'button';
@@ -2824,14 +3421,16 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   head.appendChild(close);
   box.appendChild(head);
 
-  const sub = el('div', 'detail-sub');
-  const meta = metaParts(art, ctx.state.players[found.owner]);
-  // 浮窗没有徽标：计数在此补上（与卡头徽标同文案，两个视图各自只出现一次）
-  if (art.count > 0) meta.push(countText(art));
-  appendParts(sub, meta);
-  box.appendChild(sub);
+  if (!isLegend) {
+    const sub = el('div', 'detail-sub');
+    const meta = metaParts(art, ctx.state.players[found.owner]);
+    // 浮窗没有徽标：计数在此补上（与卡头徽标同文案，两个视图各自只出现一次）
+    if (art.count > 0) meta.push(countText(art, ctx.state.players[found.owner]));
+    appendParts(sub, meta);
+    box.appendChild(sub);
+  }
 
-  if (art.activeMarkerSide) {
+  if (!isLegend && art.activeMarkerSide) {
     const act = el('span', 'badge badge-active');
     act.textContent = `已激活·${
       sideDisplayName(art, art.activeMarkerSide) ?? sideDisplayName(art, 'only') ?? art.name
@@ -2857,10 +3456,9 @@ function convertAvailable(state: GameState, payer: PlayerId): boolean {
   return p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length >= 2;
 }
 
-/** 置换选骰的付款方：抵挡时是防守方，否则是当前行动方 */
+/** 置换选骰的付款方：待决策 > 抵挡方（防守）> 当前行动方 —— 统一走 actorOf（禁止手写 activePlayer） */
 function convertPickOwner(state: GameState): PlayerId {
-  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
-  return state.activePlayer;
+  return actorOf(state);
 }
 
 function openConvertPick(ctx: Ctx, kind: 'attack' | 'block'): void {
@@ -3386,8 +3984,14 @@ function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
     b.addEventListener('click', () => {
       flow.side = side;
       if (flow.free) {
-        // 免费尘起：选侧后直接派发（无需支付冥想骰）
-        const action: DustRiseAction = { t: 'dustRise', artifactId: flow.artifactId, side, free: true };
+        // 免费尘起（019 / L05 复仇之灵）：选侧后直接派发（无需支付冥想骰）
+        const action: DustRiseAction = {
+          t: 'dustRise',
+          artifactId: flow.artifactId,
+          side,
+          free: true,
+          ...(flow.fuchou ? { fuchou: true } : {}),
+        };
         ctx.hooks.ui.dustFlow = null;
         ctx.hooks.onAction(action);
         return;
@@ -3505,7 +4109,7 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
 
 function dustFlowView(ctx: Ctx): HTMLElement {
   const flow = ctx.hooks.ui.dustFlow as DustFlow;
-  const payer = ctx.state.players[ctx.state.activePlayer];
+  const payer = ctx.state.players[actorOf(ctx.state)];
   const art = payer.artifacts.find((a) => a.id === flow.artifactId);
   const box = el('div', 'dustflow');
   if (!art) {
@@ -3536,6 +4140,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   const rerollAction = legal.find((a): a is Extract<Action, { t: 'reroll' }> => a.t === 'reroll');
   const maxReroll = rerollAction?.dieIds.length ?? 0;
+
+  // 预选·带传奇：中段改为 [设置+战报][快速操作栏][双方生命值]，并移除左侧栏（腾出的宽度用于传奇框）
+  const legendMode = !!(state.players.A.legend || state.players.B.legend);
 
   const sel = hooks.ui.selection;
   let selectionStep: SelectStep | null = null;
@@ -3622,7 +4229,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const stage = el('div', 'stage');
   const app = el(
     'div',
-    `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}`,
+    `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}${legendMode ? ' legend-mode' : ''}`,
   );
 
   // 贴边按钮组（战报栏收起 / 窄屏时可见）：设置 + 战报
@@ -3649,9 +4256,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   edgeBar.appendChild(edgeLog);
   app.appendChild(edgeBar);
 
-  // 左栏：设置 + 战报
-  const sidebar = el('div', 'sidebar');
-  const sidebarHead = el('div', 'sidebar-head');
+  // 设置按钮（左栏顶部 / 传奇模式中段战报栏顶部 共用）
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
   settingsBtn.className = 'btn btn-settings';
@@ -3661,16 +4266,31 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     hooks.ui.settingsOpen = true;
     hooks.requestRender();
   });
-  sidebarHead.appendChild(settingsBtn);
-  sidebar.appendChild(sidebarHead);
-  sidebar.appendChild(logPanel(ctx));
-  app.appendChild(sidebar);
+
+  // 左栏（非传奇模式）：设置 + 战报
+  if (!legendMode) {
+    const sidebar = el('div', 'sidebar');
+    const sidebarHead = el('div', 'sidebar-head');
+    sidebarHead.appendChild(settingsBtn);
+    sidebar.appendChild(sidebarHead);
+    sidebar.appendChild(logPanel(ctx, true));
+    app.appendChild(sidebar);
+  }
 
   // 主栏：敌方 / 中央操作区 / 自己
   const main = el('div', 'main');
   main.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
 
   const centerband = el('div', 'centerband');
+  // 传奇模式：中段最左格 = 设置 + 战报（内置滚动）
+  if (legendMode) {
+    const logcell = el('div', 'centerband-log');
+    const logHead = el('div', 'centerband-log-head');
+    logHead.appendChild(settingsBtn);
+    logcell.appendChild(logHead);
+    logcell.appendChild(logPanel(ctx, true));
+    centerband.appendChild(logcell);
+  }
   const left = el('div', 'centerband-left');
   left.appendChild(actionZone(ctx));
   centerband.appendChild(left);
@@ -3694,6 +4314,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   if (hooks.ui.logOpen) {
     root.appendChild(logDrawer(ctx));
+  }
+  if (hooks.ui.logPop) {
+    root.appendChild(logPopModal(ctx));
   }
   if (hooks.ui.detail) {
     const pop = detailPopover(ctx);

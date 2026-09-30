@@ -46,6 +46,10 @@ const singlePlayer = (ids: string[]): PlayerState => ({
   hasDustSeal: false,
   damagedThisTurn: false,
   attackHalvedNextTurn: false,
+  dealtDamageThisTurn: false,
+  noDamageLastTurn: false,
+  lifeTens: 0,
+  tiandanGainedThisTurn: 0,
   buffs: [],
 });
 

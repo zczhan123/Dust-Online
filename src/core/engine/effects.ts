@@ -12,6 +12,10 @@ import { SeededRng } from '../rng/rng';
 import { logLine, pname } from './log';
 import { hasActiveSkill, skillActive } from './skill-state';
 import { emptyDistribution } from './derive';
+import { dealTrueDamage } from './combat';
+// 注意：与 pending.ts 是**循环引用**（pending → effects 的 gainRandomAbilityDice/withRngState）；
+// 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
+import { queuePending, pumpPending } from './pending';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
@@ -87,12 +91,101 @@ export function moveDice(g: GameState, player: PlayerId, dieIds: string[], to: D
   }
 }
 
-/** 回复生命，不超过上限。返回实际回复量 */
-export function heal(g: GameState, player: PlayerId, amount: number): number {
+/** 实际回复生命（不做任何"将要回复"的前置询问）；仅供**已经决定要回复**的结算使用。返回实际回复量 */
+export function applyHeal(g: GameState, player: PlayerId, amount: number): number {
   const p = g.players[player];
   const before = p.life;
   p.life = Math.min(p.lifeMax, p.life + amount);
-  return p.life - before;
+  const healed = p.life - before;
+  if (healed > 0) checkLifeTens(g, player);
+  return healed;
+}
+
+/**
+ * 回复生命的**唯一入口**：先给 L10 传奇面板·「汝等罪人」（触发：**当你将要回复生命时**）
+ * 一次"改为造成等量真实伤害"的机会 —— 只要本次回复量 > 0 就把本次回复**挂起**（排队 `nudengzuiren`，
+ * 由持有者决定"发动/不发动"），本函数返回 0（表示"尚未回复"；决定后的结算在 `case 'nudengzuiren'`）。
+ *
+ * **口径（2026-09-29 用户裁定）**：先确定数值（＝技能写明的回复量，**名义量**），再二选一
+ * （用于回复 / 造成等量真实伤害）。因此：
+ * - 挂起时携带的是**名义量**，**不因生命上限而削减**（46/50 被回复 10 → 询问里是 10，不是 4）；
+ * - **满血（无可回复空间）也照常触发**（"将要回复生命"已发生，只是最终回复量为 0）；
+ * - "不发动"分支仍走 `applyHeal`（会自动按生命上限封顶）。
+ * 不持该技能 → 直接回复（`applyHeal` 自带封顶）。
+ */
+export function heal(g: GameState, player: PlayerId, amount: number): number {
+  const p = g.players[player];
+  if (amount <= 0) return 0;
+  // L12 传奇面板·「见我身者菩提心」（持续）：回血时**额外回复 X**，X＝**对方** 3 个骰区中"没有能力骰"的区数。
+  // 仅当本次基础回复**实际能回 >0** 时生效（满血 / 无空间 → 不算"生命回复"，不加 X）。
+  if (hasActiveSkill(p, 'miyun.putixin')) {
+    const base = Math.min(amount, p.lifeMax - p.life);
+    if (base > 0) {
+      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+      const opp = g.players[oppId];
+      const x = KINDS.filter((k) => opp.areas[k].length === 0).length;
+      if (x > 0) {
+        amount += x;
+        logLine(g, `${pname(player)} 「见我身者菩提心」：对方有 ${x} 个空骰区 → 额外回复 ${x} 点生命`);
+      }
+    }
+  }
+  if (hasActiveSkill(p, 'mate.nudengzuiren')) {
+    queuePending(g, { kind: 'nudengzuiren', player, amount });
+    pumpPending(g);
+    return 0;
+  }
+  return applyHeal(g, player, amount);
+}
+
+/**
+ * L05 传奇面板·复仇之灵（持续）：**生命十位数发生变化**后 → **强制立即**进行 1 次
+ * 「无需使用冥想骰的额外尘起行动」。由**所有改生命处**调用（`applyLifeLoss` / `heal` / 033 抹零）；
+ * 同一次调用内跨多位（如 50→35）只算 1 次。无可用尘起目标时不弹（避免空待决策）。
+ */
+export function checkLifeTens(g: GameState, player: PlayerId): void {
+  const p = g.players[player];
+  const tens = Math.floor(p.life / 10);
+  if (tens === p.lifeTens) return;
+  p.lifeTens = tens;
+  if (g.phase === 'gameOver') return;
+  if (!hasActiveSkill(p, 'zoray.fuchouzhiling')) return;
+  const hasTarget = p.artifacts.some(
+    (a) =>
+      a.column !== 3 ||
+      a.chargeLayer < (a.chargeReq ?? 0) ||
+      (a.chargeExtend === true && a.count < (a.countCap ?? Infinity)),
+  );
+  if (!hasTarget) return;
+  g.pendingQueue.push({ kind: 'fuchouRise', player });
+  logLine(g, `${pname(player)} 「复仇之灵」：生命十位数变化 → 立即进行 1 次无需冥想骰的额外尘起行动`);
+}
+
+/**
+ * L11 传奇面板·「邪灵序曲」（持续）：**每当有玩家的生命下降** → 为**每个**持有该面板的玩家
+ * 叠加**等量**计数（上限 99）。
+ * - 这是"**生命减少**"的**唯一钩子**：**伤害**（`applyLifeLoss`）、**真实伤害**（同经 `applyLifeLoss`）、
+ *   **非伤害的下降**（033「抹零」的直接改值）、以及被直接设 0 等，**都必须调用它**；
+ * - **上升（回复）/ 不变 不调用**；
+ * - 「下降」不是关键词（说明书关键词表里只有 使用/消耗/弃置、不可抵挡、顺点、真实伤害、重设），
+ *   卡面即为"生命减少"的日常语义（2026-09-28 用户裁定：含伤害与真实伤害）。
+ */
+export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): void {
+  if (amount <= 0) return;
+  for (const id of ['A', 'B'] as PlayerId[]) {
+    const lg = g.players[id].legend;
+    if (!lg || lg.id !== 'L11') continue;
+    if (!hasActiveSkill(g.players[id], 'aiwa.xielingxuqu')) continue;
+    const cap = lg.countCap ?? 99;
+    const before = lg.count;
+    lg.count = Math.min(cap, lg.count + amount);
+    if (lg.count !== before) {
+      logLine(
+        g,
+        `「邪灵序曲」：${pname(player)} 的生命下降 ${amount} → 计数 ${before} → ${lg.count}/${cap}`,
+      );
+    }
+  }
 }
 
 /** 可作为「使用/消耗」支付来源的能力骰池：区域真骰 + 034/A03 破障的神器存放骰（启用破障时）。
@@ -229,6 +322,53 @@ export function xuyuYouhunTrigger(g: GameState, player: PlayerId, count: number)
   );
 }
 
+/**
+ * L06 传奇面板·圆舞（持续）：**受到自己造成的伤害**后 → **强制**将 1 个任意能力骰移动到**另 1 个区域**。
+ * 由 `combat.dealTrueDamage` 在 `source === target` 时调用；无能力骰可移时不弹（避免空待决策）。
+ */
+export function noteYuanwu(g: GameState, player: PlayerId): void {
+  if (g.phase === 'gameOver') return;
+  const p = g.players[player];
+  if (!hasActiveSkill(p, 'xiu.yuanwu')) return;
+  const total = p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length;
+  if (total <= 0) return;
+  g.pendingQueue.push({ kind: 'yuanwu', player });
+  logLine(g, `${pname(player)} 「圆舞」：受到自己造成的伤害 → 必须将 1 个能力骰移动到另 1 个区域`);
+}
+
+/** 该骰是否「不符合骰点分布」＝其**点数**不在持有者**第二列分布**中、其所在区域对应的点数集里。 */
+export function nonConforming(g: GameState, owner: PlayerId, kind: DiceKind, value: number): boolean {
+  const dist = emptyDistribution(g.players[owner]);
+  if (!dist) return false;
+  return !dist[kind].includes(value);
+}
+
+/**
+ * L01 传奇面板·「雨落狂流」（持续+触发）——**口径 (B)：只要"你的骰"被使用/消耗/弃置**（不论由谁执行）：
+ * 若其中**含**"不符合骰点分布"的骰（按**骰主**的分布判定）→ 面板计数 +1；
+ * 计数达到 3 → 重设为 0，并排队待决策 `kongYuluo`（由持有者选①/②/不发动）。
+ * （"使用/消耗"本就只涉及支付方自己的骰；"弃置"不看是谁执行的——对手弃你的骰同样计数。）
+ */
+export function noteYuluoDiceConsumed(
+  g: GameState,
+  owner: PlayerId,
+  dice: { kind: DiceKind; value: number }[],
+): void {
+  if (dice.length === 0) return;
+  const p = g.players[owner];
+  const lg = p.legend;
+  if (!lg || lg.id !== 'L01') return;
+  if (!hasActiveSkill(p, 'kong.yuluo')) return;
+  if (!dice.some((d) => nonConforming(g, owner, d.kind, d.value))) return;
+  lg.count += 1;
+  logLine(g, `${pname(owner)} 「雨落狂流」：使用/消耗/弃置了不符合骰点分布的能力骰 → 计数 +1（${lg.count}/3）`);
+  if (lg.count >= 3) {
+    lg.count = 0;
+    logLine(g, `${pname(owner)} 「雨落狂流」计数达到 3 → 重设为 0，请选择 1 项执行`);
+    g.pendingQueue.push({ kind: 'kongYuluo', player: owner });
+  }
+}
+
 /** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(置换,值5)。
  *  移除所有真骰(返还供应堆)；返回各格“有效骰”；reportConsumed 按“格数”上报。 */
 export function paySlots(
@@ -237,7 +377,7 @@ export function paySlots(
   spec: SlotSpec[],
   fills: SlotFill[],
   reportConsumed?: (n: number) => void,
-  // 触发 026「威压」的这次「使用能力骰」来自哪种支付（供 UI 提示显示触发原因）
+  // 该次支付属于哪种「使用能力骰」（026「威压」只在 attack / defense / dustRise 触发；reason='skill'＝「消耗」不触发）
   reason: 'attack' | 'defense' | 'dustRise' | 'skill' = 'skill',
 ): EffectiveDie[] {
   if (fills.length !== spec.length) throw new Error(`expect ${spec.length} slot fills, got ${fills.length}`);
@@ -245,6 +385,8 @@ export function paySlots(
   const effective: EffectiveDie[] = [];
   const toRemove: string[] = [];
   const converted: { kind: DiceKind; values: number[] }[] = [];
+  // L01 传奇面板·雨落狂流：记录本次支付「实际用到」的区域骰（区域 + 点数），供"不符合骰点分布"判定
+  const paidDice: { kind: DiceKind; value: number }[] = [];
   for (let i = 0; i < spec.length; i++) {
     const { kind } = spec[i];
     const ids = fills[i]?.dieIds ?? [];
@@ -260,6 +402,7 @@ export function paySlots(
       const treated = fills[i]?.treated === true;
       const actualKind = found ? found.kind : held!.kind;
       const actualValue = found ? found.die.value : held!.value;
+      if (found) paidDice.push({ kind: found.kind, value: found.die.value });
       if (actualKind !== kind && !treated) throw new Error(`slot needs a ${kind} die, got ${actualKind}`);
       effective.push({
         kind,
@@ -275,6 +418,10 @@ export function paySlots(
       }
     } else {
       converted.push({ kind, values: ids.map((id) => abilityDieInfo(g, player, id)?.value ?? 0) });
+      for (const id of ids) {
+        const f = findDieOf(g, player, id);
+        if (f) paidDice.push({ kind: f.kind, value: f.die.value });
+      }
       effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
     }
     toRemove.push(...ids);
@@ -305,23 +452,43 @@ export function paySlots(
     }
   }
   reportConsumed?.(spec.length);
+  // L01 传奇面板·雨落狂流：本次「使用/消耗」若含"不符合骰点分布"的骰 → 计数 +1
+  noteYuluoDiceConsumed(g, player, paidDice);
   // A06 异相·「幽魂不散」：「使用」防御/冥想骰（抵挡 reason='defense' / 尘起 reason='dustRise'）时触发；
   // 「消耗」（reason='skill'）与攻击支付（reason='attack'）不触发。
   if (reason === 'defense' || reason === 'dustRise') {
     const usedDefMed = effective.filter((e) => e.kind === 'defense' || e.kind === 'meditation').length;
     if (usedDefMed > 0) xuyuYouhunTrigger(g, player, usedDefMed);
   }
-  // 026 哀歌·威压（触发）：某人「使用 1 个任意能力骰后」→ 若其持有威压，弹出强制选择
+  // 026 哀歌·威压（触发）：**当持有者"使用"1 个任意能力骰后** → 弹出强制选择
   // （FAQ 26.2.1：先结算「威压」，再结算该骰的基础效果 —— 支付后立即排队，挡在后续结算之前）
+  // ⚠️「使用」＝攻击支付 / 抵挡支付 / 尘起支付（关键词规则；见 AGENTS 第 22 条）；
+  //    **「消耗」（技能代价，reason='skill'）不是"使用" → 不触发**（2026-09-28 用户更正，此前误含）。
   const weiyaCard = g.players[player].artifacts.find((a) => a.skills.some((s) => s.key === 'aige.weiya'));
   const weiyaSkill = weiyaCard?.skills.find((s) => s.key === 'aige.weiya');
-  if (weiyaCard && weiyaSkill && skillActive(weiyaCard, weiyaSkill)) {
+  if (weiyaCard && weiyaSkill && skillActive(weiyaCard, weiyaSkill) && reason !== 'skill') {
     const me = g.players[player];
     const oppId: PlayerId = player === 'A' ? 'B' : 'A';
     const opp = g.players[oppId];
     const anyTarget = KINDS.some((k) => me.areas[k].length > 0 || opp.areas[k].length > 0);
     if (anyTarget) {
       g.pendingQueue.push({ kind: 'weiyaPick', player, value: weiyaSkill.value ?? 4, reason });
+    }
+  }
+  // L04 传奇面板·无上剑术（持续）：**使用**（＝攻击支付 / 抵挡支付）**有效点数 5** 的骰 →
+  //   攻击骰：回复 1 点生命／颗；防御骰：对对方造成 1 点真实伤害／颗。
+  //   （010「真实之剑」置换产出的骰有效值就是 5 → 同样计入；「消耗/弃置」不触发。）
+  if ((reason === 'attack' || reason === 'defense') && hasActiveSkill(g.players[player], 'tata.wushangjianshu')) {
+    const five = effective.filter((e) => e.kind === reason && e.value === 5).length;
+    if (five > 0) {
+      if (reason === 'attack') {
+        const healed = heal(g, player, five);
+        logLine(g, `${pname(player)} 「无上剑术」：使用 ${five} 个 5 点攻击骰 → 回复 ${healed} 点生命`);
+      } else {
+        const opp: PlayerId = player === 'A' ? 'B' : 'A';
+        logLine(g, `${pname(player)} 「无上剑术」：使用 ${five} 个 5 点防御骰 → 对 ${pname(opp)} 造成 ${five} 点真实伤害`);
+        dealTrueDamage(g, opp, five, player);
+      }
     }
   }
   return effective;

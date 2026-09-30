@@ -118,13 +118,92 @@ describe('战斗提示 battleNotes（主要阶段、只读状态）', () => {
     expect(notes(g2, 'A')).toEqual([{ label: '中央突破', text: '本回合攻击不可抵挡' }]);
   });
 
-  it('D：022 处刑通牒 —— 计数 ≥1 才显示', () => {
+  it('A：L10 迟来的正义 —— 攻击伤害 +X（X＝尘落，最大 4）', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['028', '029', '030'],
+      heroB: ['004', '005', '006'],
+      legendA: 'L10',
+    });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g.players[who].areas.attack = [];
+      g.players[who].areas.defense = [];
+      g.players[who].areas.meditation = [];
+    }
+    g.dustfall = 0;
+    expect(notes(g, 'A').some((n) => n.label === '迟来的正义')).toBe(false); // 尘落 0 → 无加成
+    g.dustfall = 2;
+    expect(notes(g, 'A')).toEqual([{ label: '迟来的正义', text: '攻击伤害 +2（＝当前尘落，最大 4）' }]);
+    g.dustfall = 9;
+    expect(notes(g, 'A')).toEqual([{ label: '迟来的正义', text: '攻击伤害 +4（＝当前尘落，最大 4）' }]);
+  });
+
+  it('A：L09 吞虎之狼 —— **常驻提醒**（不看已攻击次数）；不持 L09 则不显示', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['025', '026', '027'],
+      heroB: ['004', '005', '006'],
+      legendA: 'L09',
+    });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g.players[who].areas.attack = [];
+      g.players[who].areas.defense = [];
+      g.players[who].areas.meditation = [];
+    }
+    // 0/1/2/5 次攻击都显示（常驻）
+    for (const n of [0, 1, 2, 5]) {
+      g.attacksThisTurn.A = n;
+      expect(notes(g, 'A')).toContainEqual({ label: '吞虎之狼', text: '本回合的第 3 次攻击伤害 +3' });
+    }
+    // 对照：不持 L09 → 不显示
+    const g2 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g2);
+    g2.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g2.players[who].areas.attack = [];
+      g2.players[who].areas.defense = [];
+      g2.players[who].areas.meditation = [];
+    }
+    expect(notes(g2, 'A').some((n) => n.label === '吞虎之狼')).toBe(false);
+  });
+
+  it('D：022 处刑通牒 —— 计数 ≥1 才显示；带 L08「只为赏金而来」时追加提示', () => {
     const g = mk(['022', '023', '024']);
     arm(g, 'A', '022', 'right');
     expect(notes(g, 'A')).toEqual([]);
     art(g, 'A', '022').count = 1;
     expect(notes(g, 'A')).toEqual([
       { label: '处刑通牒', text: '使用攻击骰前，可令本次伤害 +1 且不可抵挡，或 +5' },
+    ]);
+
+    // L08：同一条件下追加"发动后还可额外启动 1 个「启动式」技能"
+    const g2 = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['022', '023', '024'],
+      heroB: ['004', '005', '006'],
+      legendA: 'L08',
+    });
+    skipInitialReroll(g2);
+    g2.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g2.players[who].areas.attack = [];
+      g2.players[who].areas.defense = [];
+      g2.players[who].areas.meditation = [];
+    }
+    arm(g2, 'A', '022', 'right');
+    art(g2, 'A', '022').count = 1;
+    expect(notes(g2, 'A')).toEqual([
+      {
+        label: '处刑通牒',
+        text: '使用攻击骰前，可令本次伤害 +1 且不可抵挡，或 +5（发动后还可额外启动 1 个「启动式」技能）',
+      },
     ]);
   });
 
@@ -169,27 +248,28 @@ describe('战斗提示 battleNotes（主要阶段、只读状态）', () => {
     expect(notes(g, 'A')).toEqual([]);
   });
 
-  it('B：025 屠虎·横贯·触发 —— 对方有可弃置、且点数小于「可用攻击骰」的能力骰时才显示', () => {
+  it('B：025 屠虎·横贯·触发 —— 对方有可弃置、且点数小于「可用攻击骰」的能力骰时才显示（另：持续部分常驻提醒）', () => {
     const g = mk(['025', '026', '027']);
     arm(g, 'A', '025', 'right'); // 横贯（持续 + 触发·右）
     putDie(g, 'A', 'attack', 3);
     putDie(g, 'B', 'defense', 2); // 2 < 3 → 可弃置
     expect(notes(g, 'A')).toEqual([
-      { label: '横贯', text: '攻击被抵挡时，可弃置对方 1 颗点数小于该攻击的能力骰' },
+      { label: '横贯', text: '本回合的第 2 次攻击伤害 +2' }, // 常驻（持续）
+      { label: '横贯', text: '攻击被抵挡时，可弃置对方 1 颗点数小于该攻击的能力骰' }, // 触发
     ]);
 
-    // 对方没有严格小于最高可用攻击点数的骰 → 不显示
+    // 对方没有严格小于最高可用攻击点数的骰 → 触发不显示（**但持续那条常驻仍在**）
     const g2 = mk(['025', '026', '027']);
     arm(g2, 'A', '025', 'right');
     putDie(g2, 'A', 'attack', 3);
     putDie(g2, 'B', 'defense', 5);
-    expect(notes(g2, 'A')).toEqual([]);
+    expect(notes(g2, 'A')).toEqual([{ label: '横贯', text: '本回合的第 2 次攻击伤害 +2' }]);
 
-    // 自己没有攻击骰（无法发动攻击）→ 不显示
+    // 自己没有攻击骰（无法发动攻击）→ **触发**不显示（持续那条常驻仍在）
     const g3 = mk(['025', '026', '027']);
     arm(g3, 'A', '025', 'right');
     putDie(g3, 'B', 'defense', 2);
-    expect(notes(g3, 'A')).toEqual([]);
+    expect(notes(g3, 'A')).toEqual([{ label: '横贯', text: '本回合的第 2 次攻击伤害 +2' }]);
 
     // 未激活触发侧 → 不显示
     const g4 = mk(['025', '026', '027']);
@@ -253,7 +333,7 @@ describe('战斗提示：028 天罚 / 030 寰宇飞升', () => {
     expect(notes(g, 'A').some((n) => n.label === '白昼之火' || n.label === '陨落')).toBe(false);
   });
 
-  it('030：寰宇飞升（持续）由 attackDamageBonus 自动显示为「第一次攻击将 +3 伤害」', () => {
+  it('030：寰宇飞升（持续）→ **对方持有**时我方也显示（双向）；自己尘落≥4 的「迟来的正义」会取最大盖过它', () => {
     const g = mk(['001', '002', '003'], ['028', '029', '030']);
     arm(g, 'B', '030', 'left');
     g.activePlayer = 'A';
@@ -262,15 +342,43 @@ describe('战斗提示：028 天罚 / 030 寰宇飞升', () => {
     // 失去持续式后（必杀已用）不再显示
     art(g, 'B', '030').continuousLost = true;
     expect(notes(g, 'A').some((n) => n.label === '寰宇飞升')).toBe(false);
+
+    // L10 局：持「迟来的正义」且尘落 ≥4 → 取最大 → 只显示迟来的正义（+4 盖过寰宇飞升 +3）
+    const g2 = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['028', '029', '030'],
+      heroB: ['001', '002', '003'],
+      legendA: 'L10',
+    });
+    skipInitialReroll(g2);
+    g2.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g2.players[who].areas.attack = [];
+      g2.players[who].areas.defense = [];
+      g2.players[who].areas.meditation = [];
+    }
+    arm(g2, 'A', '030', 'left');
+    g2.attacksThisTurn.A = 0;
+    g2.dustfall = 4;
+    const labels = notes(g2, 'A').map((n) => n.label);
+    expect(labels).toContain('迟来的正义');
+    expect(labels).not.toContain('寰宇飞升');
   });
 
-  it('A：025 横贯·持续（本回合第 2 次攻击）→ 文案点明「第二次攻击」', () => {
+  it('A：025 横贯·持续 → **常驻提醒**（不看已攻击次数）；且与生效加成条目**不重复**', () => {
     const g = mk(['025', '026', '027']);
     arm(g, 'A', '025', 'right');
-    g.attacksThisTurn.A = 1; // 本回合已是第 2 次攻击
-    expect(notes(g, 'A')).toContainEqual({ label: '横贯', text: '本回合第二次攻击将 +2 伤害' });
-    // 第 1 次攻击时该持续加成不生效 → 不显示
-    g.attacksThisTurn.A = 0;
+    // 0/1/5 次攻击都显示（常驻）
+    for (const n of [0, 1, 5]) {
+      g.attacksThisTurn.A = n;
+      expect(notes(g, 'A')).toContainEqual({ label: '横贯', text: '本回合的第 2 次攻击伤害 +2' });
+    }
+    // 第 2 次攻击（横贯正是生效加成）→ **只出现常驻那一条**（不重复渲染）
+    g.attacksThisTurn.A = 1;
+    expect(notes(g, 'A').filter((n) => n.label === '横贯')).toHaveLength(1);
+    // 对照：未激活 → 不显示
+    g.players.A.artifacts.find((a) => a.id === '025')!.activeMarkerSide = null;
     expect(notes(g, 'A').some((n) => n.label === '横贯')).toBe(false);
   });
 });
@@ -291,5 +399,114 @@ describe('战斗提示：031 血祭 / 032 恶意', () => {
     arm(g, 'A', '032', 'right');
     for (let v = 1; v <= 4; v++) putDie(g, 'A', 'meditation', v);
     expect(notes(g, 'A')).toContainEqual({ label: '恶意', text: '攻击伤害 +2' });
+  });
+});
+
+describe('战斗提示 · 传奇英雄面板（L01–L03）', () => {
+  /** 带传奇面板的只读局面（清空骰子） */
+  const mkL = (
+    heroA: [string, string, string],
+    legendA: string,
+    heroB: [string, string, string] = ['010', '011', '012'],
+  ): GameState => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA, heroB, legendA });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g.players[who].areas.attack = [];
+      g.players[who].areas.defense = [];
+      g.players[who].areas.meditation = [];
+    }
+    return g;
+  };
+
+  it('残影：影袭本回合仍可启动 → 精确一条；用满 2 次后消失', () => {
+    const g = mkL(['004', '005', '006'], 'L02');
+    arm(g, 'A', '005', 'left');
+    putDie(g, 'A', 'defense', 3); // 影袭需 ≥2 点骰；无攻击骰 → 不出「锋芒」提示
+    expect(notes(g, 'A')).toEqual([{ label: '残影', text: '「影袭」本回合还可启动 2 次' }]);
+    g.skillsUsedThisTurn.push('A:yingle.yingxi');
+    expect(notes(g, 'A')).toEqual([{ label: '残影', text: '「影袭」本回合还可启动 1 次' }]);
+    g.skillsUsedThisTurn.push('A:yingle.yingxi');
+    expect(notes(g, 'A')).toEqual([]);
+  });
+
+  it('暗夜凶神：锋芒可发动且不祥计数 <3 → 出现；满 3 层后消失', () => {
+    const g = mkL(['004', '005', '006'], 'L02');
+    arm(g, 'A', '004', 'right');
+    putDie(g, 'A', 'attack', 3);
+    putDie(g, 'A', 'meditation', 2);
+    expect(notes(g, 'A')).toEqual([
+      { label: '锋芒', text: '攻击被抵挡时，可追加 2 真实伤害' },
+      { label: '暗夜凶神', text: '通过「锋芒」取消对方防御骰后，可使「不祥」计数 +1（最高 3 层）' },
+    ]);
+    art(g, 'A', '004').count = 3;
+    expect(notes(g, 'A').some((n) => n.label === '暗夜凶神')).toBe(false);
+  });
+
+  it('无上剑术：有 5 点攻击/防御骰（或可置换）→ 出现；否则不出现', () => {
+    const g = mkL(['010', '011', '012'], 'L04');
+    expect(notes(g, 'A').some((n) => n.label === '无上剑术')).toBe(false); // 无骰
+    putDie(g, 'A', 'attack', 5);
+    expect(notes(g, 'A')).toEqual([
+      { label: '无上剑术', text: '使用 5 点攻击骰 → 回复 1 生命；使用 5 点防御骰 → 造成 1 点真实伤害' },
+    ]);
+    // 清掉 5 点骰；010 真实之剑已激活且有 ≥2 颗骰 → 「可置换出 5 点」也算可用
+    const g2 = mkL(['010', '011', '012'], 'L04');
+    arm(g2, 'A', '010', 'left'); // 真实之剑（持续·置换）
+    putDie(g2, 'A', 'attack', 3);
+    putDie(g2, 'A', 'meditation', 2);
+    expect(notes(g2, 'A').some((n) => n.label === '无上剑术')).toBe(true);
+  });
+
+  it('无尽追猎：攻击骰区恰剩 1 颗 → 出现（精确一条）；多于 1 颗或没有攻击骰 → 不出现', () => {
+    const g = mkL(['019', '020', '021'], 'L07');
+    putDie(g, 'A', 'attack', 3);
+    putDie(g, 'A', 'attack', 4);
+    expect(notes(g, 'A').some((n) => n.label === '无尽追猎')).toBe(false); // 有 2 颗 → 不是「最后 1 个攻击骰」
+    g.players.A.areas.attack = [g.players.A.areas.attack[0]];
+    expect(notes(g, 'A')).toEqual([
+      { label: '无尽追猎', text: '攻击骰区仅剩 1 颗攻击骰 → 用它攻击时不可抵挡' },
+    ]);
+    g.players.A.areas.attack = [];
+    expect(notes(g, 'A').some((n) => n.label === '无尽追猎')).toBe(false);
+  });
+
+  it('无法饶恕：对方有"点数＝可用攻击点数"的防御骰 → 出现；否则不出现', () => {
+    const g = mkL(['013', '014', '015'], 'L05');
+    expect(notes(g, 'A').some((n) => n.label === '无法饶恕')).toBe(false); // 无骰
+    putDie(g, 'A', 'attack', 3);
+    putDie(g, 'B', 'defense', 3);
+    expect(notes(g, 'A')).toEqual([
+      { label: '无法饶恕', text: '攻击造成伤害后，可弃置对方 1 个与该攻击点数相同的防御骰' },
+    ]);
+    // 对方没有同点数防御骰 → 不出现
+    const g2 = mkL(['013', '014', '015'], 'L05');
+    putDie(g2, 'A', 'attack', 3);
+    putDie(g2, 'B', 'defense', 4);
+    expect(notes(g2, 'A').some((n) => n.label === '无法饶恕')).toBe(false);
+  });
+
+  it('无光领域：设定状态后按 上升/下降 显示', () => {
+    const g = mkL(['016', '017', '018'], 'L06');
+    expect(notes(g, 'A').some((n) => n.label === '无光领域')).toBe(false);
+    g.players.A.wuguang = 'up';
+    expect(notes(g, 'A')).toEqual([{ label: '无光领域', text: '你的攻击点数视为上升 1 点（最大 6）' }]);
+    g.players.A.wuguang = 'down';
+    expect(notes(g, 'A')).toEqual([{ label: '无光领域', text: '你的攻击点数视为下降 1 点（最小 1）' }]);
+  });
+
+  it('拔城：主宰已激活且该侧技能未用 → 精确一条', () => {
+    const g = mkL(['007', '008', '009'], 'L03');
+    expect(notes(g, 'A').some((n) => n.label === '拔城')).toBe(false); // 未激活主宰 → 无
+    arm(g, 'A', '007', 'left');
+    expect(notes(g, 'A')).toEqual([
+      {
+        label: '拔城',
+        text: '启动「主宰」技能后，若对方弃置的能力骰少于你消耗的，可视为以 5 点攻击 1 次并切换「主宰」技能',
+      },
+    ]);
+    g.skillsUsedThisTurn.push('A:zhuzai.sweep');
+    expect(notes(g, 'A').some((n) => n.label === '拔城')).toBe(false);
   });
 });

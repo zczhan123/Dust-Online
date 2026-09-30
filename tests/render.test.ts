@@ -18,6 +18,7 @@ const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   prefs: { showSkillText: false, cardArt: 'thumb', density: 'compact', mirrorEnemy: false, preset: 'desktop', logCollapsed: false, zoomMode: 'off', zoomPercent: 90, ...prefs },
   settingsOpen: false,
   logOpen: false,
+  logPop: false,
   detail: null,
   error: null,
 });
@@ -2587,7 +2588,7 @@ describe('renderGame (interaction)', () => {
   it('026 威压：选择器可变更对方 1 颗能力骰为固定值，或「不发动」', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'skill' };
+    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'attack' };
     state.players.A.areas.attack = [{ id: 'a1', value: 3, kind: 'attack' }];
     state.players.B.areas.defense = [{ id: 'bd', value: 1, kind: 'defense' }];
 
@@ -2635,7 +2636,7 @@ describe('renderGame (interaction)', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'xianzhenResolve', dieId: 'xa' });
   });
 
-  it('027 寒光·必杀：卡图下方显示「置于「寒光」上的骰子」（玩家色）+ 纯点数骰片；两步式走 ①移入', () => {
+  it('027 寒光·必杀：卡片标题行显示纯点数骰片（无标签）；两步式走 ①移入', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
     const card = state.players.A.artifacts.find((a) => a.id === '027')!;
@@ -2650,15 +2651,12 @@ describe('renderGame (interaction)', () => {
 
     const { ui, onAction } = mount(state, root);
     const selfCard = root.querySelector<HTMLElement>('.player--self .card[data-artifact="027"]')!;
-    // 位置：紧跟卡图（.card-art）之后
-    const art = selfCard.querySelector('.card-art')!;
-    expect(art.nextElementSibling?.classList.contains('card-held')).toBe(true);
-    // 标签：精确文案 + 玩家色类
-    const lab = selfCard.querySelector<HTMLElement>('.card-held .chip-label')!;
-    expect(lab.textContent).toBe('置于「寒光」上的骰子');
-    expect(lab.classList.contains('player-A')).toBe(true);
+    // 位置：在卡片标题行（.card-head）内，且带 --head 修饰类；**不再有标签**
+    const head = selfCard.querySelector('.card-head')!;
+    expect(head.querySelector('.card-held--head')).not.toBeNull();
+    expect(selfCard.querySelector('.chip-label')).toBeNull();
     // 骰片：纯点数（无 ◆、无攻/防/冥前缀）
-    const heldChips = Array.from(selfCard.querySelectorAll<HTMLElement>('.card-held .pay-die--held')).map((c) => c.textContent);
+    const heldChips = Array.from(selfCard.querySelectorAll<HTMLElement>('.card-held--head .pay-die--held')).map((c) => c.textContent);
     expect(heldChips).toEqual(['3', '5']);
     expect(root.querySelector('.selector-title')!.textContent).toContain('凛冽之音');
 
@@ -3137,7 +3135,7 @@ describe('文案与选中态修复（用户反馈）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
     state.players.A.artifacts.find((a) => a.id === '026')!.activeMarkerSide = 'right'; // 威压
-    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'skill' };
+    state.pending = { kind: 'weiyaPick', player: 'A', value: 4, reason: 'attack' };
     state.players.B.areas.attack = [{ id: 'bd', value: 2, kind: 'attack' }];
     const { ui } = mount(state, root);
     root.querySelector<HTMLButtonElement>('.actionlist [data-act="weiyaOpen"]')!.click();
@@ -3686,6 +3684,9 @@ describe('034 金刚：存放骰的合法出现范围（使用/消耗 vs 弃置�
     const hdX = root.querySelector<HTMLElement>('.card-held .pay-die[data-id="hdX"]');
     expect(hdX).not.toBeNull();
     expect(hdX!.classList.contains('clickable')).toBe(false);
+    // 存放骰现在显示在**卡片标题行内**、且无标签
+    expect(hdX!.closest('.card-head')).not.toBeNull();
+    expect(hdX!.closest('.card')!.querySelector('.chip-label')).toBeNull();
     const h27 = root.querySelector<HTMLElement>('.card-held .pay-die[data-id="027-held-1"]');
     expect(h27).not.toBeNull();
     expect(h27!.classList.contains('clickable')).toBe(true);

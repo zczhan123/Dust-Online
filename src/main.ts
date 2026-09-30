@@ -21,6 +21,7 @@ const ui: UiState = {
   prefs: loadPrefs(),
   settingsOpen: false,
   logOpen: false,
+  logPop: false,
   detail: null,
   error: null,
 };
@@ -65,6 +66,8 @@ const showSetup = () => {
       firstPlayer: opts.firstPlayer,
       heroA: opts.heroA,
       heroB: opts.heroB,
+      legendA: opts.legendA,
+      legendB: opts.legendB,
     });
     ui.rerollSelected.clear();
     ui.selection = null;

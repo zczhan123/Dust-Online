@@ -38,7 +38,7 @@ export interface EffectiveDie {
 export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
-  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; free?: boolean; costSlots?: SlotFill[] }
+  | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; free?: boolean; costSlots?: SlotFill[]; /** L05 复仇之灵：强制额外尘起（不耗冥想骰/不占次数/不消耗 019 免费计数） */ fuchou?: boolean }
   | { t: 'attack'; costSlots: SlotFill[] }
   | { t: 'block'; costSlots?: SlotFill[] }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
@@ -59,6 +59,26 @@ export type Action =
   | { t: 'zhihaiReroll'; dieIds: string[] }
   /** 019 尘哀·尘起：是否接受赠送的 1 次「无需冥想骰的额外尘起行动」 */
   | { t: 'chenaiFreeRise'; accept: boolean }
+  /** L01 传奇面板·雨落狂流：计数达 3 → 选①弃置对方 1 骰（dieId）/②获随机骰并移入 kind 区域/不发动 */
+  | { t: 'kongYuluo'; choice: 'discard' | 'gain' | 'decline'; dieId?: string; kind?: DiceKind }
+  /** L02 传奇面板·暗夜凶神：通过「锋芒」取消对方防御骰后，可选使「不祥」计数 +1 */
+  | { t: 'anyexiongshen'; accept: boolean }
+  /** L03 传奇面板·拔城：启动「主宰」技能后，可选视为以 5 点攻击 1 次并切换「主宰」技能 */
+  | { t: 'bacheng'; accept: boolean }
+  /** L05 传奇面板·无法饶恕：可选弃置对方 1 个"点数＝该攻击点数"的防御骰（dieId）/不发动 */
+  | { t: 'wufaraoshu'; choice: 'discard' | 'decline'; dieId?: string }
+  /** L06 传奇面板·圆舞：强制把 1 个能力骰移动到另 1 个区域 */
+  | { t: 'yuanwu'; dieId?: string; to?: DiceKind }
+  /** L07 传奇面板·始祖兽魂：是否额外消耗 1 个冥想骰（改为把「兽魂」计数重设为 3） */
+  | { t: 'shizushouhun'; accept: boolean; costSlots?: SlotFill[] }
+  /** L08 传奇面板·只为赏金而来：不发动 / 选择启动哪个（`artifactId`+`side`；参数由该技能自己的选择器补全） */
+  | { t: 'shangjin'; decline?: boolean; artifactId?: string; side?: 'left' | 'right' | 'only'; skillKey?: string }
+  /** L10 传奇面板·涤罪大剑术：不发动 / 弃置对方 2 颗**种类不相同**的能力骰 */
+  | { t: 'dizuidaijianshu'; accept?: false; dieIds?: string[] }
+  /** L10 传奇面板·汝等罪人：不发动（正常回复）/ 发动（改为对对方造成等量真实伤害） */
+  | { t: 'nudengzuiren'; accept: boolean }
+  /** L12 传奇面板·闻我名者断恶行：不发动 / 弃置对方 1 个**攻击骰**（接受时必带 dieId） */
+  | { t: 'duanexing'; accept: boolean; dieId?: string }
   /** 022 死契·处刑通牒：使用攻击骰前的强制决定（不发动 / ①伤害+1且不可抵挡 / ②伤害+5） */
   | { t: 'chuxingPick'; pick: 'none' | 'unblockable' | 'bonus5' }
   /** 023 蛇蝎·畏惧：对方被迫消耗他选择的那颗能力骰（可用 010 置换：costSlots 2 颗顶 1） */
@@ -166,7 +186,29 @@ export type Pending =
   /** 035 千劫·万丈明光（持续）：持有者**主要阶段开始时**，弃置 2 个能力骰 */
   | { kind: 'wanzhangDiscard'; player: PlayerId }
   /** 034 金刚·不动菩提（触发）：对方使用防御/攻击骰后，持有者可移除神器上同点数骰，取消其效果 */
-  | { kind: 'putiPick'; player: PlayerId; owner: PlayerId; value: number; mode: 'block' | 'attack'; attack?: PendingAttack };
+  | { kind: 'putiPick'; player: PlayerId; owner: PlayerId; value: number; mode: 'block' | 'attack'; attack?: PendingAttack }
+  /** L01 传奇面板·雨落狂流：面板计数达到 3 → 重设为 0，由持有者选择①弃置对方 1 个能力骰 /②获得 1 个随机点数能力骰并移入任意区域 /不发动 */
+  | { kind: 'kongYuluo'; player: PlayerId }
+  /** L02 传奇面板·暗夜凶神（触发）：通过「锋芒」取消对方防御骰后，由持有者决定是否使「不祥」计数 +1 */
+  | { kind: 'anyexiongshen'; player: PlayerId }
+  /** L03 传奇面板·拔城（触发）：启动「主宰」技能后，由持有者决定是否视为以 5 点攻击 1 次并切换「主宰」技能 */
+  | { kind: 'bacheng'; player: PlayerId }
+  /** L05 传奇面板·复仇之灵（持续）：生命十位数变化 → **强制立即**进行 1 次无需冥想骰的额外尘起行动 */
+  | { kind: 'fuchouRise'; player: PlayerId }
+  /** L05 传奇面板·无法饶恕（触发）：攻击造成伤害后，可选弃置对方 1 个点数＝该攻击点数的防御骰 */
+  | { kind: 'wufaraoshu'; player: PlayerId; value: number }
+  /** L06 传奇面板·圆舞（持续）：**受到自己造成的伤害**后 → 强制将 1 个能力骰移动到另 1 个区域 */
+  | { kind: 'yuanwu'; player: PlayerId }
+  /** L07 传奇面板·始祖兽魂（触发）：激活「兽魂」（计数重设为 2）后，由持有者决定是否**额外消耗 1 个冥想骰**改为把计数重设为 3 */
+  | { kind: 'shizushouhun'; player: PlayerId; artifactId: string }
+  /** L08 传奇面板·只为赏金而来（触发）：触发「处刑通牒」后，由持有者选择启动 1 个"已激活的启动式"技能（不计入每回合上限） */
+  | { kind: 'shangjin'; player: PlayerId }
+  /** L10 传奇面板·涤罪大剑术（触发）：进行 1 次尘起行动后（第一/二列标记同侧），由持有者决定是否弃置对方 2 颗种类不同的能力骰 */
+  | { kind: 'dizuidaijianshu'; player: PlayerId }
+  /** L10 传奇面板·汝等罪人（触发）：将要回复生命时，由持有者决定是否改为对对方造成等量真实伤害（`amount`＝实际回复量） */
+  | { kind: 'nudengzuiren'; player: PlayerId; amount: number }
+  /** L12 传奇面板·闻我名者断恶行：受到伤害后，可弃置对方 1 个攻击骰（每回合最多 1 次） */
+  | { kind: 'duanexing'; player: PlayerId };
 
 export interface Distribution {
   defense: number[];
@@ -220,6 +262,8 @@ export interface Artifact {
   continuousLost?: boolean;
   /** A07 异相·完杀必杀：「直到本回合结束前，双方所有持续式效果失效」——本回合临时失效（回合开始时清除，区别于永久的 `continuousLost`） */
   continuousLostThisTurn?: boolean;
+  /** L09 传奇面板·遍野残杀：本回合该神器的**左右两侧技能全部视为处于激活状态**（回合开始时清除；持有者回合结束时死亡） */
+  allSidesActiveThisTurn?: boolean;
   /** 特典神器（如 C01）：不能在正式比赛中使用 */
   special?: boolean;
   /** 置于本神器上的骰子（027 寒光·必杀：1–6 点各 1 颗；回合结束时清空）。这些骰不在任何区域，落区时按点数决定类型 */
@@ -227,10 +271,28 @@ export interface Artifact {
   skills: SkillDef[];
 }
 
+/** 传奇英雄面板（仅预选模式·带传奇）：与英雄一一绑定，≈"第 4 件神器"；技能开局即可用（无需激活）。 */
+export interface LegendPanel {
+  id: string; // 'L01'
+  heroKey: string; // 绑定的英雄 key
+  name: string; // 英雄显示名（如「雨中剑圣 空」）
+  /** 面板计数（部分面板有；默认 0） */
+  count: number;
+  /** 计数上限（部分面板有） */
+  countCap?: number;
+  /** 「在接下来的游戏中，本面板失去持续式效果」（同 Artifact 语义） */
+  continuousLost?: boolean;
+  /** A07 异相·完杀必杀等：本回合临时失效 */
+  continuousLostThisTurn?: boolean;
+  skills: SkillDef[];
+}
+
 export interface PlayerState {
   id: PlayerId;
   areas: Record<DiceKind, Die[]>;
   artifacts: Artifact[];
+  /** 传奇英雄面板（仅预选模式·带传奇时存在，否则为 undefined） */
+  legend?: LegendPanel | null;
   life: number;
   lifeMax: number;
   markers: number;
@@ -240,6 +302,16 @@ export interface PlayerState {
   damagedThisTurn: boolean;
   /** 023 蛇蝎·畏惧：该玩家「下个回合」中攻击造成的伤害减半（其回合结束时清除） */
   attackHalvedNextTurn: boolean;
+  /** L01 断苇一斩：本回合（我方回合）是否造成过任何伤害（回合开始时重置） */
+  dealtDamageThisTurn: boolean;
+  /** L01 断苇一斩：我方「上一个回合」整个回合都没有造成伤害（回合开始时据上值判定） */
+  noDamageLastTurn: boolean;
+  /** L05 复仇之灵：生命「十位数」上次的值（生命变化时比对以判定是否触发） */
+  lifeTens: number;
+  /** L06 无光领域：你的攻击点数视为 ±1（持续到下次启动；未设=null） */
+  wuguang?: 'up' | 'down' | null;
+  /** L08 蛇蝎之泪：本回合内由「填弹」**实际叠加**的计数累计（回合开始清零；X 取其平方） */
+  tiandanGainedThisTurn: number;
 }
 
 export interface LogEntry {
@@ -263,12 +335,15 @@ export interface GameState {
   pending: Pending | null;
   unblockableThisTurn: boolean;
   caiyuliuUsed: number;
-  dustRiseNormalUsed: boolean;
+  /** 本回合已进行的「普通尘起行动」次数（默认上限 1；L02 残影 → 2） */
+  dustRiseNormalCount: number;
   dustRiseActed: boolean;
   freeDustRise: number;
   rerollUsed: number;
   skillsUsedThisTurn: string[];
   ultimatesUsed: string[];
+  /** 「整局一次」类的**传奇面板**技能（键为 `玩家:key`，如 L11「永恒女王」）——与必杀的 `ultimatesUsed` 分开记 */
+  legendOnceUsed: string[];
   winner: PlayerId | null;
   skillConsumedThisAction: number;
   dunwuPulseUsedThisTurn: boolean;

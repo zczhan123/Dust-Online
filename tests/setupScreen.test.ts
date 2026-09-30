@@ -99,6 +99,24 @@ describe('renderHeroSetup（预选模式 · 3 栏）', () => {
     expect(modal.querySelector('img')!.getAttribute('src')).toBe('./legend/L01.jpg');
   });
 
+  it('传奇英雄面板弹窗：黑底板头像 + LEGEND_TEXT 技能（弹框缩小）', () => {
+    renderHeroSetup(root, () => {});
+    ab(root, 'kong', 'A').click();
+    qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用传奇英雄面板')!.parentElement!.click();
+    root.querySelector<HTMLElement>('.pick-col.confirm.A .pick-legend-chip')!.click();
+    const boxEl = q(root, '.pick-modal-box')!;
+    expect(boxEl.classList.contains('legend')).toBe(true);
+    const av = boxEl.querySelector('.pick-modal-av')!;
+    expect(av).not.toBeNull();
+    expect(av.querySelector('img')!.getAttribute('src')).toBe('./legend/L01.jpg');
+    expect(qa(boxEl, '.pick-sk-t').map((n) => n.textContent)).toEqual([
+      '雨落狂流持续',
+      '雨落狂流触发',
+      '断苇一斩触发',
+    ]);
+    expect(qa(boxEl, '.pick-sk-type').map((n) => n.textContent)).toEqual(['持续', '触发', '触发']);
+  });
+
   it('点 A 选定英雄 → 确认列出现其 3 张卡；确定盖章；取消清空', () => {
     renderHeroSetup(root, () => {});
     ab(root, 'kong', 'A').click();
@@ -137,6 +155,31 @@ describe('renderHeroSetup（预选模式 · 3 栏）', () => {
     expect(o.heroA).toEqual(['001', '002', '003']);
     expect(o.heroB).toEqual(['004', '005', '006']);
     expect(o.firstPlayer).toBe('A');
+  });
+
+  it('传奇英雄面板：开启后 onStart 带上双方面板 id（按所选英雄绑定）', () => {
+    const onStart = vi.fn();
+    renderHeroSetup(root, onStart);
+    qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用传奇英雄面板')!.parentElement!.click();
+    ab(root, 'ying', 'A').click();
+    ab(root, 'batton', 'B').click();
+    clickEl(q(root, '.pick-tbtn[data-first="A"]'));
+    clickEl(q(root, '.pick-start'));
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.legendA).toBe('L02');
+    expect(o.legendB).toBe('L03');
+  });
+
+  it('传奇英雄面板：未开启则不带 legend 字段', () => {
+    const onStart = vi.fn();
+    renderHeroSetup(root, onStart);
+    ab(root, 'kong', 'A').click();
+    ab(root, 'ying', 'B').click();
+    clickEl(q(root, '.pick-tbtn[data-first="A"]'));
+    clickEl(q(root, '.pick-start'));
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.legendA).toBeUndefined();
+    expect(o.legendB).toBeUndefined();
   });
 
   it('未选的一方随机补足，且双方不同英雄', () => {

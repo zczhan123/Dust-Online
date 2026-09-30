@@ -1,7 +1,8 @@
 import type { Artifact, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
-import { hasActiveSkill, skillActive } from './skill-state';
+import { hasActiveSkill, skillActive, skillUseKey } from './skill-state';
 import { pumpPending, queuePending } from './pending';
-import { paySlots, heal, canPayCosts, type SlotFill } from './effects';
+import { runChargeSkill } from './charge';
+import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -11,6 +12,27 @@ export function artifactWithSkill(p: PlayerState, key: string): Artifact | undef
 
 /** 010「真实之剑」置换可用且拥有 ≥2 颗任意能力骰 → 「消耗 1 颗」的触发即使没有对应类型骰也可发动 */
 /** 攻击伤害加成的来源（同属性取最大；label 供文案显示） */
+/** 013 电刑＝1/2/3；A08「将至的电刑」＝**1/3/6**；（均无 → null）。点数**唯一来源**。 */
+/** 电刑类「点数序列」唯一来源（§19⑨）：013=1/2/3、A08=1/3/6；未持有则 null */
+export function dianxingValuesOf(p: PlayerState): number[] | null {
+  if (hasActiveSkill(p, 'minglei.alt.dianxing')) return [1, 3, 6];
+  if (hasActiveSkill(p, 'minglei.dianxing')) return [1, 2, 3];
+  return null;
+}
+
+/** 可用于「消耗 2 冥想骰」的冥想骰数（区域真骰 + 034/A03 破障存放骰；不含 010 置换——
+ *  「电刑」的选择器只提供"冥想骰"且带 `allowArtifact`，不支持置换）。 */
+function meditationPoolCount(g: GameState, player: PlayerId): number {
+  return abilityDicePool(g, player).filter((d) => d.kind === 'meditation').length;
+}
+
+/** L06「无光领域」：把**攻击点数**按状态 ±1（钳制 1–6；与"伤害"无关）。 */
+function applyWuguang(p: PlayerState, point: number): number {
+  if (p.wuguang === 'up') return Math.min(6, point + 1);
+  if (p.wuguang === 'down') return Math.max(1, point - 1);
+  return point;
+}
+
 export function attackDamageBonus(
   g: GameState,
   player: PlayerId,
@@ -46,6 +68,15 @@ export function attackDamageBonus(
   if (hasActiveSkill(p, 'tuohu.hengguan') && g.attacksThisTurn[player] === 1) {
     consider(2, '横贯');
   }
+  // L09 传奇面板·吞虎之狼（持续）：本回合的**第 3 次**攻击伤害 +3（与其它加成取最大）
+  if (hasActiveSkill(p, 'lifeng.tunhuzhilang') && g.attacksThisTurn[player] === 2) {
+    consider(3, '吞虎之狼');
+  }
+  // L10 传奇面板·迟来的正义（持续）：攻击伤害 +X，X ＝ 当前尘落（最大 4；与其它加成取最大）
+  if (hasActiveSkill(p, 'mate.chilaidezhengyi')) {
+    const x = Math.min(4, g.dustfall);
+    if (x > 0) consider(x, '迟来的正义');
+  }
   // 030 救赎·寰宇飞升（持续·双向）：双方各自回合的**第一次**攻击伤害 +3（FAQ 30.1.1；任一方持有并激活即生效）
   if (g.attacksThisTurn[player] === 0) {
     for (const id of ['A', 'B'] as PlayerId[]) {
@@ -69,10 +100,36 @@ export function attackDamageBuff(g: GameState, player: PlayerId): number {
 
 /** 统一受伤入口：扣血 → 判胜负 → 018 至黑「每回合第一次受伤」计数。
  *  所有扣血点（物理伤害/真实伤害/延后真伤/锋芒取消）都必须走这里。 */
+/** L11 传奇面板·「永恒女王」的信号：由 `applyAction` 统一捕获 → "取消一切 + 立即开始新回合"。
+ *  用异常是为了**立刻展开当前结算栈**，从而真正做到"取消所有尚待结算的效果和阶段"。 */
+export class YonghengQueenSignal extends Error {
+  constructor(public readonly target: PlayerId) {
+    super('yongheng-queen');
+    this.name = 'YonghengQueenSignal';
+  }
+}
+
+/**
+ * L11 传奇面板·永恒女王（持续）：当你受到**能让你死亡的「伤害」或「真实伤害」**时拦截（整局最多 1 次）。
+ * - 返回 **true** ＝已拦截（调用方**不得**再扣血）；触发时抛 `YonghengQueenSignal`（由 `applyAction` 收尾）。
+ * - **只认「伤害」与「真实伤害」**：**非伤害**的生命下降（033 抹零）、L09 遍野残杀"立即死亡"、尘落 10 等**不触发**。
+ */
+export function tryYonghengQueen(g: GameState, target: PlayerId, amount: number): boolean {
+  if (amount <= 0) return false;
+  const p = g.players[target];
+  if (!hasActiveSkill(p, 'aiwa.yonghengnvwang')) return false;
+  if (g.legendOnceUsed.includes(`${target}:aiwa.yonghengnvwang`)) return false;
+  if (p.life - amount > 0) return false;
+  throw new YonghengQueenSignal(target);
+}
+
 export function applyLifeLoss(g: GameState, target: PlayerId, amount: number): void {
   g.players[target].life -= amount;
+  noteLifeDrop(g, target, amount); // L11 邪灵序曲：任何"生命减少"都计数（含伤害/真伤）
   checkLifeEnd(g);
   noteDamageTaken(g, target);
+  noteDuanexing(g, target); // L12 闻我名者断恶行：受到伤害/真伤后（gameOver 时内部直接跳过）
+  checkLifeTens(g, target); // L05 复仇之灵：生命十位数变化 → 强制额外尘起
 }
 
 /** 018 至黑·持续：每当你于任何玩家的回合中第一次受到伤害后，计数 +1（上限 5） */
@@ -86,6 +143,25 @@ function noteDamageTaken(g: GameState, target: PlayerId): void {
   const before = card.count;
   card.count = Math.min(5, card.count + 1);
   logLine(g, `「${card.name}」：本回合首次受到伤害，计数 ${before} → ${card.count}`);
+}
+
+/**
+ * L12 传奇面板·「闻我名者断恶行」（触发）：当你**受到伤害 / 真实伤害后**（`applyLifeLoss` 是共同的落血点，
+ * 含自伤真伤），若**对方攻击骰区有骰**，弹询问让你可弃置对方 1 个攻击骰（**每回合最多 1 次**）。
+ * 决策人＝持有者本人；神上的存放骰不算攻击骰（只取对方 `areas.attack`）。
+ * 用 `skillsUsedThisTurn`（键 `玩家:miyun.duanexing`）记"本回合已触发"——在**入队时**即登记，避免同回合两次受伤重复排队。
+ */
+function noteDuanexing(g: GameState, target: PlayerId): void {
+  if (g.phase === 'gameOver') return;
+  const p = g.players[target];
+  if (!hasActiveSkill(p, 'miyun.duanexing')) return;
+  const key = skillUseKey(target, 'miyun.duanexing');
+  if (g.skillsUsedThisTurn.includes(key)) return; // 每回合最多触发 1 次
+  const oppId: PlayerId = target === 'A' ? 'B' : 'A';
+  if (g.players[oppId].areas.attack.length === 0) return; // 无可弃的攻击骰 → 不弹（不可完成）
+  g.skillsUsedThisTurn.push(key);
+  queuePending(g, { kind: 'duanexing', player: target });
+  logLine(g, `${pname(target)} 「闻我名者断恶行」：受到伤害 → 可弃置对方 1 个攻击骰（本回合 1 次）`);
 }
 
 export function checkLifeEnd(g: GameState): void {
@@ -138,11 +214,17 @@ function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack)
 /** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
 export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], mods?: AttackMods): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
+  // L07「无尽追猎」（持续）：**攻击时你的攻击骰区恰剩 1 颗**（＝"最后 1 个攻击骰"）→ 该次攻击不可抵挡。
+  // 注意：必须在 paySlots 之前判定（支付会把该骰移出攻击骰区）；只作用于**用这颗骰打出的这一次攻击**，
+  // 技能发起的虚拟攻击（013 电刑 / A01 不败之王 等）没有实体攻击骰 → 不受影响。
+  const loneLastAttackDie =
+    g.players[player].areas.attack.length === 1 && hasActiveSkill(g.players[player], 'nisa.wujinzhulie');
   const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
   const effDie = eff[0];
   // 028 天罚（激活·本回合）：攻击点数「始终视为固定值」（FAQ 28.1.1）；A05 异相无固定值（value 未设）→ 用骰点
   const tianfa = g.tianfa[player];
-  const attackPoint = tianfa && tianfa.value !== undefined ? tianfa.value : effDie.value;
+  const rawPoint = tianfa && tianfa.value !== undefined ? tianfa.value : effDie.value;
+  const attackPoint = applyWuguang(g.players[player], rawPoint); // L06 无光领域：攻击点数 ±1（钳制 1–6）
   const base = attackDamageBonus(g, player);
   const bonus = Math.max(base.value, mods?.minBonus ?? 0);
   const bonusLabel = mods?.minBonus !== undefined && mods.minBonus > base.value ? mods.bonusLabel : base.label;
@@ -150,7 +232,7 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   const pa: PendingAttack = {
     attacker: player,
     value,
-    unblockable: g.unblockableThisTurn || mods?.forceUnblockable === true,
+    unblockable: g.unblockableThisTurn || mods?.forceUnblockable === true || loneLastAttackDie,
     physical: true,
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
@@ -165,6 +247,9 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${pa.value} 点）` : '';
   logLine(g, `${pname(player)} 使用 ${attackPoint} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  if (loneLastAttackDie) {
+    logLine(g, `${pname(player)} 「无尽追猎」：攻击骰区仅剩这 1 颗攻击骰 → 本次攻击不可抵挡`);
+  }
   // 034 金刚·不动菩提（触发）：防守方可用「神器上同点数存放骰」取消该攻击 → 先询问
   const puti = artifactWithSkill(g.players[defender], 'jingang.puti.trigger');
   if (
@@ -211,17 +296,21 @@ export function virtualAttack(
   source?: { skill: string; owner: PlayerId },
 ): void {
   const base = attackDamageBonus(g, player);
+  const point = applyWuguang(g.players[player], baseValue); // L06 无光领域：攻击点数 ±1
   g.pendingAttack = {
     attacker: player,
-    value: baseValue + base.value,
+    value: point + base.value,
     unblockable: g.unblockableThisTurn,
     physical: false,
-    baseValue,
+    baseValue: point,
     bonusValue: base.value,
     bonusLabel: base.label,
     ...(source ? { sourceSkill: source.skill, sourceSkillOwner: source.owner } : {}),
   };
   applyNextTurnHalving(g, player, g.pendingAttack);
+  // 攻击次数统计（"第 N 次攻击"类加成：025 横贯 / 030 寰宇飞升 / L09 吞虎之狼 / 025 横贯·触发等）：
+  // **技能发起的虚拟攻击同样计入**（2026-09-28 用户裁定）；与 `doAttack` 同序：先算加成、再计数。
+  g.attacksThisTurn[player] += 1;
 }
 
 /**
@@ -290,6 +379,8 @@ export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocke
     blockedForTriggers = !(r.halfApplied && damageDealt === 0);
   }
   if (damageDealt > 0 || !blocked) {
+    // L11 永恒女王：若本次**攻击伤害**会致死 → 拦截（抛信号，由 applyAction 收尾"取消一切 + 开新回合"）
+    if (damageDealt > 0) tryYonghengQueen(g, defenderId, damageDealt);
     const before = defender.life;
     applyLifeLoss(g, defenderId, damageDealt);
     logLine(
@@ -303,13 +394,12 @@ export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocke
   if (g.phase === 'gameOver') return;
   afterAttackResolved(g, pa, { blocked: blockedForTriggers, damageDealt });
   // FAQ 28.2.1：028「陨落」限制下，对方用**攻击骰**抵挡 = “使用攻击骰” → 可触发其「电刑」（在攻击方的回合反击）
-  if (
-    blocked &&
-    pa.blockKind === 'attack' &&
-    hasActiveSkill(defender, 'minglei.dianxing') &&
-    defender.areas.meditation.length >= 2
-  ) {
-    queuePending(g, { kind: 'dianxing', player: defenderId });
+  // 注意：① 也要认 **A08「将至的电刑」**；② 点数必须传 `values`（013=1/2/3、A08=1/3/6）；③ 门槛走冥想池（含 034 存放骰）
+  if (blocked && pa.blockKind === 'attack') {
+    const dv = dianxingValuesOf(defender);
+    if (dv && meditationPoolCount(g, defenderId) >= 2) {
+      queuePending(g, { kind: 'dianxing', player: defenderId, values: dv });
+    }
   }
   // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
   pumpAttackQueue(g);
@@ -382,24 +472,53 @@ export function afterAttackResolved(
   res: { blocked: boolean; damageDealt: number },
 ): void {
   const atk = g.players[pa.attacker];
+  // L05 传奇面板·无法饶恕（触发）：攻击**造成伤害**后，可选弃置对方 1 个"**点数**＝该攻击**点数**"的防御骰。
+  // 注意：触发看 **伤害**（damageDealt>0）、匹配看 **点数**（baseValue ?? value）——两者是不同概念。
+  if (res.damageDealt > 0 && hasActiveSkill(g.players[pa.attacker], 'zoray.wufaraoshu')) {
+    const atkPoint = pa.baseValue ?? pa.value;
+    const defenderId2: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+    if (g.players[defenderId2].areas.defense.some((d) => d.value === atkPoint)) {
+      queuePending(g, { kind: 'wufaraoshu', player: pa.attacker, value: atkPoint });
+    }
+  }
+  // L01 断苇一斩：记录"本回合（我方回合）造成过伤害"（仅攻击方＝当前回合玩家时计）
+  if (res.damageDealt > 0 && g.activePlayer === pa.attacker) atk.dealtDamageThisTurn = true;
+  // L03 传奇面板·统御战场（持续）：受到**攻击造成的伤害**后 → 该玩家的「孤王」充能 +1
+  // （封顶 chargeReq；满 3 不再加、也不触发充能效果）
+  if (res.damageDealt > 0) {
+    const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+    const def = g.players[defenderId];
+    if (hasActiveSkill(def, 'batton.tongyuzhancang')) {
+      const guwang = def.artifacts.find((a) => a.skills.some((s) => s.key === 'guwang.charge'));
+      if (guwang) {
+        const cap = guwang.chargeReq ?? 0;
+        if (guwang.chargeLayer < cap) {
+          guwang.chargeLayer += 1;
+          logLine(
+            g,
+            `${pname(defenderId)} 「统御战场」：受到攻击伤害 → 「${guwang.name}」充能 +1（${guwang.chargeLayer}/${cap}）`,
+          );
+          // 连锁执行该神器的「充能效果」（009「高塔铁幕」→ 把对方 1 个攻击骰点数变为 1）
+          runChargeSkill(g, defenderId, guwang.id);
+        }
+      }
+    }
+  }
   // 028 天罚：统计本回合通过攻击造成伤害的次数（满 2 次由 game.ts 结束主要阶段）
   const tf = g.tianfa[pa.attacker];
   if (res.damageDealt > 0 && tf && g.activePlayer === pa.attacker) {
     tf.damageCount += 1;
   }
-  // 031 恶兆·血祭（持续）：进行 1 次攻击后计数 +1（含虚拟攻击）；造成伤害后按**新计数**受 X 真实伤害
-  // （FAQ 31.1.1：0 伤害也 +1、但不受真伤；FAQ 31.1.2：先 +1 再按新计数结算）
+  // 031 恶兆·血祭（持续）：进行 1 次攻击后计数 +1（含虚拟攻击）。
+  // （FAQ 31.1.1：0 伤害也 +1；FAQ 31.1.2：先 +1、再按新计数结算自伤。）
+  // 自伤（按新计数受真伤）**改到本函数最末尾**结算：它可能致死并触发 L11「永恒女王」；
+  // 此时攻击已完整结算、不应算"中断攻击"，若放中段会把后面所有"攻击结算后"触发一起截断。
   {
     const xueji = artifactWithSkill(atk, 'ezhao.xueji');
     if (xueji && hasActiveSkill(atk, 'ezhao.xueji')) {
       const before = xueji.count;
       xueji.count = Math.min(xueji.countCap ?? 7, xueji.count + 1);
       logLine(g, `「${xueji.name}」：进行 1 次攻击，计数 ${before} → ${xueji.count}`);
-      if (res.damageDealt > 0 && (g.phase as string) !== 'gameOver') {
-        logLine(g, `${pname(pa.attacker)} 「血祭」：攻击造成伤害，受到 ${xueji.count} 点真实伤害`);
-        dealTrueDamage(g, pa.attacker, xueji.count, pa.attacker);
-        if ((g.phase as string) === 'gameOver') return;
-      }
     }
   }
   // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
@@ -452,19 +571,27 @@ export function afterAttackResolved(
     if (hasTarget) queuePending(g, { kind: 'hengguan', player: pa.attacker, value: cmp });
   }
   // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
-  if (g.pending === null && g.pendingQueue.length === 0 && !g.attackQueue && !g.virtualQueue) {
-    const med = atk.areas.meditation.length;
+  // 不再用"是否处于多段攻击队列"做一刀切抑制：
+  //  - 电刑：靠 `usedAttackDie`（**必须有实体攻击骰**）天然防自链——多段攻击的"虚拟段"不触发；
+  //  - 雷暴：按卡面"攻击被抵挡后"——**多段攻击中途某段被抵挡时同样触发**。
+  {
     const usedAttackDie = pa.physical && pa.sourceDieId !== undefined;
-    // 013 电刑=1/2/3；A08 异相·将至的电刑=1/2/6（逻辑同、点数不同）
-    const dianxingValues = hasActiveSkill(atk, 'minglei.alt.dianxing')
-      ? [1, 2, 6]
-      : hasActiveSkill(atk, 'minglei.dianxing')
-        ? [1, 2, 3]
-        : null;
-    if (usedAttackDie && dianxingValues && med >= 2) {
-      queuePending(g, { kind: 'dianxing', player: pa.attacker, values: dianxingValues });
-    } else if (res.blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && med >= 1) {
+    const dv = dianxingValuesOf(atk);
+    if (usedAttackDie && dv && meditationPoolCount(g, pa.attacker) >= 2) {
+      queuePending(g, { kind: 'dianxing', player: pa.attacker, values: dv });
+    } else if (res.blocked && hasActiveSkill(atk, 'minglei.leibao.trigger') && atk.areas.meditation.length >= 1) {
+      // 雷暴是「移动冥想骰」→ 必须数**区域**冥想骰（034 存放骰不可移动，故此处**故意**不用 meditationPoolCount）
+      // `else if` 是安全的：电刑(左)/雷暴(右) 同属一件神器，activeMarkerSide 同时只能在一侧 → 不可能同时可用
       queuePending(g, { kind: 'leibao', player: pa.attacker });
+    }
+  }
+  // 031 恶兆·血祭：攻击造成伤害后，按**新计数**对自己造成真伤（放在最后：不截断其它"攻击结算后"触发；
+  // 此时攻击已完整结算，即便致死并触发自身「永恒女王」也不算"中断攻击"）。
+  {
+    const xueji = artifactWithSkill(atk, 'ezhao.xueji');
+    if (xueji && hasActiveSkill(atk, 'ezhao.xueji') && res.damageDealt > 0 && (g.phase as string) !== 'gameOver') {
+      logLine(g, `${pname(pa.attacker)} 「血祭」：攻击造成伤害，受到 ${xueji.count} 点真实伤害`);
+      dealTrueDamage(g, pa.attacker, xueji.count, pa.attacker);
     }
   }
 }
@@ -525,13 +652,29 @@ export function dealTrueDamage(g: GameState, target: PlayerId, amount: number, s
     g.pending = { kind: 'guwangCancel', player: target, amount };
     return; // 伤害延后到决策解决时结算
   }
-  applyLifeLoss(g, target, amount);
+  // L06 死即新生（持续）：**因自己造成的伤害**死亡 → 改为生命重设 13（上限不变、不判负、游戏继续）
+  if (source === target && hasActiveSkill(p, 'xiu.sijixinsheng') && p.life - amount <= 0) {
+    g.players[target].life = 13;
+    logLine(g, `${pname(target)} 「死即新生」：因自己造成的伤害将死亡 → 生命重设为 13`);
+    noteDamageTaken(g, target);
+    checkLifeTens(g, target);
+  } else {
+    // L01 断苇一斩：真伤**实际落到生命上**时，记"造成伤害"（来源＝对方；仅其回合内计）
+    if (source !== target && g.activePlayer === source) g.players[source].dealtDamageThisTurn = true;
+    tryYonghengQueen(g, target, amount); // L11 永恒女王：**真伤**致死者同样触发
+    applyLifeLoss(g, target, amount);
+  }
+  // L06 圆舞（持续）：**受到自己造成的伤害**后 → 强制将 1 个能力骰移动到另 1 个区域
+  if (source === target) noteYuanwu(g, target);
 }
 
 /** 结算被延后的真实伤害（由 guwangCancel 决策在放弃取消时调用） */
 export function applyDeferredTrueDamage(g: GameState, target: PlayerId, amount: number): void {
   const p = g.players[target];
   const before = p.life;
+  // L01 断苇一斩：延后的真伤实际结算时，记"造成伤害"（来源＝当前回合玩家）
+  if (g.activePlayer !== target) g.players[g.activePlayer].dealtDamageThisTurn = true;
+  tryYonghengQueen(g, target, amount); // L11 永恒女王：延后的真伤同样按"真实伤害"处理
   applyLifeLoss(g, target, amount);
   logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${p.life}）`);
 }
