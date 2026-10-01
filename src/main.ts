@@ -68,6 +68,9 @@ const showSetup = () => {
       heroB: opts.heroB,
       legendA: opts.legendA,
       legendB: opts.legendB,
+      tactics: opts.tactics,
+      tacticA: opts.tacticA,
+      tacticB: opts.tacticB,
     });
     ui.rerollSelected.clear();
     ui.selection = null;

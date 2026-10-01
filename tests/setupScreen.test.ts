@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   HEROES,
+  randomColumnPool,
   renderBuildSetup,
   renderChallengeSetup,
   renderHeroSetup,
@@ -57,7 +58,7 @@ beforeEach(() => {
   root = document.getElementById('app')!;
 });
 
-describe('renderHeroSetup（预选模式 · 3 栏）', () => {
+describe('renderHeroSetup（预设模式 · 3 栏）', () => {
   it('结构：3 栏 / 12 行（单列名 + A/B）/ 顶栏文案 / 附加模组禁用', () => {
     renderHeroSetup(root, () => {});
     expect(root.classList.contains('setup-page')).toBe(true);
@@ -67,15 +68,15 @@ describe('renderHeroSetup（预选模式 · 3 栏）', () => {
     expect(qa(root, '.pick-cell')).toHaveLength(12);
     expect(qa(root, '.pick-cell .pick-name').map((n) => n.textContent)).toEqual(HERO_LABEL_ORDER);
     expect(qa(root, '.pick-cell .pick-ab')).toHaveLength(24);
-    expect(q(root, '.pick-ttl')!.textContent).toBe('预选模式');
+    expect(q(root, '.pick-ttl')!.textContent).toBe('预设模式');
     expect(q(root, '.pick-back')!.textContent).toBe('返回');
     expect(q(root, '.pick-start')!.textContent).toBe('开始游戏');
-    // 「使用传奇英雄面板」开关在预选**可用**（不再是禁用占位）；仅「战术牌」仍为禁用占位
+    // 预设：「使用传奇英雄面板」「使用战术牌」两个开关均可用（战术牌＝进战斗后抽 2 留 1）
     const swLab = (t: string): HTMLElement =>
       qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === t)!.parentElement!;
     expect(swLab('使用传奇英雄面板').classList.contains('is-disabled')).toBe(false);
-    expect(swLab('使用战术牌').classList.contains('is-disabled')).toBe(true);
-    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual(['使用战术牌']);
+    expect(swLab('使用战术牌').classList.contains('is-disabled')).toBe(false);
+    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(0);
     expect(q(root, '.pick-tbtn[data-first="random"]')!.classList.contains('on')).toBe(true);
     expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
       '第一列',
@@ -198,7 +199,7 @@ describe('renderHeroSetup（预选模式 · 3 栏）', () => {
     clickEl(q(root, '.pick-back'));
     expect(qa(root, '.menu .menu-item .word').map((n) => n.textContent)).toEqual([
       '轮选模式',
-      '预选模式',
+      '预设模式',
       '构筑模式',
     ]);
   });
@@ -221,7 +222,7 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     expect(cols[4]).toContain('confirm');
     expect(cols[4]).toContain('B');
     expect(q(root, '.pick-ttl')!.textContent).toBe('构筑模式');
-    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual(['使用战术牌']);
+    expect(qa(root, '.pick-sw.is-disabled .pick-swlab').map((n) => n.textContent)).toEqual([]); // 构筑：异相/战术均已接入
     expect(qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent)).toEqual(['使用异相神器', '使用战术牌']);
     expect(qa(root, '.pick-col.confirm.A .pick-slot.empty .pick-colno').map((n) => n.textContent)).toEqual([
       '第一列',
@@ -274,11 +275,14 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(false);
   });
 
-  it('开始游戏：双方各 3 件、每列一件、六件互不重复', () => {
+  it('开始游戏：双方各 3 件、每列一件、六件互不重复（需双方都确定）', () => {
     const onStart = vi.fn();
     renderBuildSetup(root, onStart);
     ab(root, 'kong', 'A').click();
     dbl(candSlotBySrc(root, 'A', '001')!);
+    dbl(candSlotBySrc(root, 'A', '002')!);
+    dbl(candSlotBySrc(root, 'A', '003')!);
+    clickEl(q(root, '.pick-rand.B')); // B 随机补足并确定
     clickEl(q(root, '.pick-start'));
     const o = onStart.mock.calls[0][0] as SetupOptions;
     expect(o.heroA[0]).toBe('001');
@@ -287,6 +291,86 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     for (const trio of [o.heroA, o.heroB]) {
       trio.forEach((id, i) => expect(colOfId(id)).toBe(i + 1));
     }
+  });
+
+  it('开始游戏门槛（构筑）：双方都确定神器才能开始；缺一方 → 禁用 + 提示', () => {
+    const onStart = vi.fn();
+    renderBuildSetup(root, onStart);
+    ab(root, 'kong', 'A').click();
+    dbl(candSlotBySrc(root, 'A', '001')!);
+    dbl(candSlotBySrc(root, 'A', '002')!);
+    dbl(candSlotBySrc(root, 'A', '003')!);
+    expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(true); // B 未确定
+    expect(q(root, '.pick-start-hint')!.textContent).toContain('神器');
+    clickEl(q(root, '.pick-rand.B'));
+    expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(false);
+    expect(q(root, '.pick-start-hint')).toBeNull();
+    clickEl(q(root, '.pick-start'));
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('开始游戏门槛（构筑·战术牌）：双方都选战术牌才能开始', () => {
+    renderBuildSetup(root, () => {});
+    const tacticSwitch = qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!;
+    clickEl(tacticSwitch);
+    clickEl(q(root, '.pick-rand.A'));
+    clickEl(q(root, '.pick-rand.B'));
+    expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(true); // 战术牌未选
+    expect(q(root, '.pick-start-hint')!.textContent).toContain('战术牌');
+    clickEl(q(root, '.pick-col.confirm.A .pick-tactic-rand')); // 仅 A 选 → 仍禁用
+    expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(true);
+    clickEl(q(root, '.pick-col.confirm.B .pick-tactic-rand')); // 双方都选 → 可开始
+    expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(false);
+    expect(q(root, '.pick-start-hint')).toBeNull();
+  });
+
+  it('使用战术牌（构筑）：确认列下方出「战策榜」；点选后右上角显示卡图，再点取消', () => {
+    renderBuildSetup(root, () => {});
+    const tacticSwitch = qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!;
+    clickEl(tacticSwitch);
+    // 标题行：玩家A 战术牌 + 随机；榜＝18 个名牌
+    expect(q(root, '.pick-col.confirm.A .pick-tactic-title')!.textContent).toBe('玩家A 战术牌');
+    expect(q(root, '.pick-col.confirm.A .pick-tactic-rand')!.textContent).toContain('随机');
+    expect(qa(root, '.pick-col.confirm.A .pick-tactic .pick-tactic-name')).toHaveLength(18);
+    // 点第 1 张（谨慎）→ 右上角卡图
+    clickEl(qa(root, '.pick-col.confirm.A .pick-tactic-name')[0]);
+    const chip = q(root, '.pick-col.confirm.A .pick-tactic-chip') as HTMLElement;
+    expect(chip.dataset.cardId).toBe('T01');
+    expect(chip.querySelector('img')!.getAttribute('src')).toBe('./tactics/T01.jpg');
+    // 再点同一张 → 取消（回到「未选」占位）
+    clickEl(qa(root, '.pick-col.confirm.A .pick-tactic-name').find((n) => n.textContent === '谨慎')!);
+    expect(q(root, '.pick-col.confirm.A .pick-tactic-chip')!.classList.contains('empty')).toBe(true);
+  });
+
+  it('战术牌唯一性（构筑）：一方选定后，另一方该张显示「已选」且不可点', () => {
+    renderBuildSetup(root, () => {});
+    clickEl(qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!);
+    // A 选「顽强」(T03)
+    clickEl(qa(root, '.pick-col.confirm.A .pick-tactic-name').find((n) => n.textContent === '顽强')!);
+    // B 的榜里出现「已选」，且正是 T03；A 侧没有「已选」
+    const bTaken = qa(root, '.pick-col.confirm.B .pick-tactic-name.taken');
+    expect(bTaken.map((n) => n.textContent)).toEqual(['已选']);
+    expect(bTaken[0].dataset.cardId).toBe('T03');
+    expect(qa(root, '.pick-col.confirm.A .pick-tactic-name.taken')).toHaveLength(0);
+    // 点 B 侧那张「已选」不应改变状态（仍无 chip）
+    clickEl(bTaken[0]);
+    expect(q(root, '.pick-col.confirm.B .pick-tactic-chip')!.classList.contains('empty')).toBe(true);
+  });
+
+  it('构筑：直接选的战术牌会带进 onStart（tacticA/tacticB）', () => {
+    const onStart = vi.fn();
+    renderBuildSetup(root, onStart);
+    clickEl(qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!);
+    clickEl(qa(root, '.pick-col.confirm.A .pick-tactic-name').find((n) => n.textContent === '顽强')!); // T03
+    clickEl(qa(root, '.pick-col.confirm.B .pick-tactic-name').find((n) => n.textContent === '先机')!); // T02
+    clickEl(q(root, '.pick-rand.A')); // 双方神器都确定（门槛）
+    clickEl(q(root, '.pick-rand.B'));
+    clickEl(q(root, '.pick-start')!);
+    expect(onStart).toHaveBeenCalledTimes(1);
+    const o = onStart.mock.calls[0][0] as SetupOptions;
+    expect(o.tacticA).toBe('T03');
+    expect(o.tacticB).toBe('T02');
+    expect(o.tactics ?? false).toBe(false); // 构筑＝直接选，不进抽牌阶段
   });
 });
 
@@ -454,9 +538,21 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L01.jpg');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
     expect(qa(root, '.pick-legend-arts .pick-slot')).toHaveLength(3);
-    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(1);
+    expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(0); // 挑战：异相/战术均已接入
     expect(qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent)).toEqual(['使用异相神器', '使用战术牌']);
     expect((q(root, '.pick-start') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('使用战术牌（挑战者）：确认列下方出「挑战者 战术牌」；点选后右上角显示卡图', () => {
+    renderChallengeSetup(root, () => {});
+    const tacticSwitch = qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!;
+    clickEl(tacticSwitch);
+    expect(q(root, '.pick-col.confirm .pick-tactic-title')!.textContent).toBe('挑战者 战术牌');
+    expect(qa(root, '.pick-col.confirm .pick-tactic .pick-tactic-name')).toHaveLength(18);
+    clickEl(qa(root, '.pick-col.confirm .pick-tactic-name').find((n) => n.textContent === '先机')!);
+    const chip = q(root, '.pick-col.confirm .pick-tactic-chip') as HTMLElement;
+    expect(chip.dataset.cardId).toBe('T02');
+    expect(chip.querySelector('img')!.getAttribute('src')).toBe('./tactics/T02.jpg');
   });
 
   it('传：把该英雄设为昔日传奇（名字/头像/信息随动；未转写显示"待转写"）', () => {
@@ -562,7 +658,7 @@ describe('异相（A01–A03）· 选择界面', () => {
   const anomalySwitch = (): HTMLElement =>
     qa(root, '.pick-sw').find((w) => w.querySelector('.pick-swlab')?.textContent === '使用异相神器')!;
 
-  it('预选模式不提供「使用异相神器」开关', () => {
+  it('预设模式不提供「使用异相神器」开关', () => {
     renderHeroSetup(root, () => {});
     const labels = qa(root, '.pick-sw .pick-swlab').map((n) => n.textContent);
     expect(labels).toEqual(['使用传奇英雄面板', '使用战术牌']);
@@ -622,5 +718,49 @@ describe('异相（A01–A03）· 选择界面', () => {
     const inner = candSlotBySrc(root, 'A', '009')!.querySelector('.pick-art-inner');
     expect(inner).not.toBeNull();
     expect(inner!.querySelector('.pick-alt-switch')).not.toBeNull();
+  });
+
+  it('普通/异相＝两件：对方拿了普通 009 → 本侧候选自动切到异相 A01（切换钮禁用），可点选并确定', () => {
+    renderBuildSetup(root, () => {});
+    anomalySwitch().click();
+    // B 选 batton 并确定其第三列 009
+    ab(root, 'batton', 'B').click();
+    dbl(candSlotBySrc(root, 'B', '009')!);
+    // A 选 batton：第三列 009 已被 B 拿走 → 自动显示异相 A01（按钮保留但禁用）
+    ab(root, 'batton', 'A').click();
+    const alt = candSlotBySrc(root, 'A', 'A01')!;
+    expect(alt).not.toBeUndefined();
+    expect(alt.querySelector('.pick-alt-badge')!.textContent).toBe('异相');
+    expect(alt.querySelector('.pick-alt-switch')!.classList.contains('is-disabled')).toBe(true);
+    // 点选 A01 → 确定 → 确认区第三列为 A01
+    alt.click();
+    clickEl(q(root, '.pick-col.cand.A .pick-ok'));
+    expect(q(root, '.pick-col.confirm.A .pick-slot[data-col="3"] img')!.getAttribute('src')).toBe('./cards/A01.jpg');
+  });
+
+  it('普通/异相＝两件：本侧拿了异相 A01 → 对方仍可选普通 009', () => {
+    renderBuildSetup(root, () => {});
+    anomalySwitch().click();
+    ab(root, 'batton', 'A').click();
+    (candSlotBySrc(root, 'A', '009')!.querySelector('.pick-alt-switch') as HTMLElement).click(); // → A01
+    candSlotBySrc(root, 'A', 'A01')!.click();
+    clickEl(q(root, '.pick-col.cand.A .pick-ok')); // A 确定 A01
+    // B 选 batton：第三列 009 仍可正常显示（非「已被选取」）
+    ab(root, 'batton', 'B').click();
+    expect(candSlotBySrc(root, 'B', '009')).not.toBeUndefined();
+    expect(q(root, '.pick-col.cand.B .pick-slot.taken')).toBeNull();
+  });
+
+  it('构筑·随机（开异相）：可随机到异相版（每列"普通+异相"等概率）', () => {
+    renderBuildSetup(root, () => {});
+    anomalySwitch().click();
+    const pool3 = randomColumnPool(2, true, []);
+    const idx = pool3.indexOf('A01');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const spy = vi.spyOn(Math, 'random');
+    spy.mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValueOnce((idx + 0.5) / pool3.length);
+    clickEl(q(root, '.pick-rand.A'));
+    spy.mockRestore();
+    expect(q(root, '.pick-col.confirm.A .pick-slot[data-col="3"] img')!.getAttribute('src')).toBe('./cards/A01.jpg');
   });
 });

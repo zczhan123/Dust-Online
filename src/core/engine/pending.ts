@@ -3,6 +3,7 @@ import { hasActiveSkill, skillUseKey } from './skill-state';
 import { gainRandomAbilityDice, withRngState } from './effects';
 import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
+import { applyMolu } from './combat';
 
 /** 012/015/018 通用的「失去持续式效果」判定：持续技能的 key + 神器标记 */
 function findArtifactWithSkill(g: GameState, player: PlayerId, key: string) {
@@ -35,6 +36,8 @@ function checkZhihaiForced(g: GameState): boolean {
     });
     logLine(g, `「${card.name}」：本神器失去持续式效果`);
     g.pending = { kind: 'zhihaiReroll', player: id, x, forced: true };
+    // 战术牌 T04「末路」：此为"启动必杀式"，同样触发（放在设置待决策之后，避免覆盖 heal 的 L10 待决策）
+    applyMolu(g, id);
     return true;
   }
   return false;

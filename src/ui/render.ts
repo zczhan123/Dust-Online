@@ -13,9 +13,10 @@ import type {
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { isAltArtifact } from '../core/content/artifacts';
 import { legendImageUrl } from '../core/content/legends';
+import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
-import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup } from '../core/engine/game';
-import { effectiveSpeed, effectiveWill, rerollAllowance } from '../core/engine/derive';
+import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
+import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
@@ -35,6 +36,7 @@ const AREA_ORDER_MIRRORED: DiceKind[] = ['meditation', 'attack', 'defense'];
 
 const PHASE_LABEL: Record<Phase, string> = {
   setup: '准备',
+  tactics: '战前',
   initialReroll: '初始重掷',
   refill: '补充',
   reroll: '重掷',
@@ -871,7 +873,7 @@ function legendSkillState(
 }
 
 /**
- * 传奇英雄面板（预选·带传奇）：外形沿用神器卡（`.card`）。
+ * 传奇英雄面板（预设·带传奇）：外形沿用神器卡（`.card`）。
  * 技能区与神器卡同款（技能名＋类型徽标；描述跟随「显示技能描述」）。
  */
 function legendBox(player: PlayerState, ctx: Ctx): HTMLElement {
@@ -1059,6 +1061,58 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
   return box;
 }
 
+/** 战术牌横条（战斗界面）：名字按钮 +（按「显示技能描述」偏好）效果全文；名字可点/右键查看卡图详情 */
+function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
+  const id = player.tactic as string;
+  const def = TACTIC_BY_ID[id];
+  // 三态（单一来源见引擎 `tacticBarState`）：生效中（绿）/ 已用尽·已结束（灰）/ 普通
+  const state = tacticBarState(ctx.state, player.id);
+  const bar = el('div', `tactic-bar tactic-bar--${state}`);
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'tactic-bar-name';
+  name.textContent = def?.name ?? id;
+  const open = (): void => {
+    const r = name.getBoundingClientRect();
+    ctx.hooks.ui.detail = {
+      artifactId: id,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+    };
+    ctx.hooks.requestRender();
+  };
+  name.addEventListener('click', open);
+  name.addEventListener('contextmenu', (e) => { e.preventDefault(); open(); });
+  let lp: number | null = null;
+  const clearLp = (): void => { if (lp != null) { window.clearTimeout(lp); lp = null; } };
+  name.addEventListener('pointerdown', () => {
+    lp = window.setTimeout(() => { lp = null; open(); }, 500);
+  });
+  name.addEventListener('pointerup', clearLp);
+  name.addEventListener('pointerleave', clearLp);
+  name.addEventListener('pointercancel', clearLp);
+  bar.appendChild(name);
+  // T15「影子」：战术上的存放骰 → 显示在**战术标题之后、技能描述之前**（仿 034 存放骰）
+  if (player.tacticHeldDie) {
+    const hd = el('span', 'tactic-held-die');
+    hd.textContent = String(player.tacticHeldDie.value);
+    hd.title = `「影子」存放骰：${player.tacticHeldDie.value} 点`;
+    bar.appendChild(hd);
+  }
+  // T13「远见」：猜测的玩家 → 同样显示在**战术标题之后、技能描述之前**
+  if (player.tacticGuess) {
+    const gd = el('span', 'tactic-guess');
+    gd.textContent = `猜玩家${player.tacticGuess}`;
+    gd.title = `「远见」猜测：玩家${player.tacticGuess} 将最先降至 20 点或以下`;
+    bar.appendChild(gd);
+  }
+  if (ctx.prefs.showSkillText) {
+    const eff = el('div', 'tactic-bar-eff');
+    eff.textContent = def ? tacticDisplayText(def) : '（效果文本待转写）';
+    bar.appendChild(eff);
+  }
+  return bar;
+}
+
 /** 玩家面板：只保留骰区与神器卡（不显示「玩家A/B」归属标签——身份由生命值栏/面板边线呈现） */
 function playerPanel(
   player: PlayerState,
@@ -1080,7 +1134,11 @@ function playerPanel(
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
   for (const k of order) areas.appendChild(areaBox(k, player, ctx));
 
-  // 传奇英雄面板（预选·带传奇）：作为面板**直接子节点**、占第 1 列并纵跨两行
+  // 战术牌横条（黄框：神器与骰区之间）；无战术牌则不渲染该条
+  const bar = player.tactic ? tacticBar(player, ctx) : null;
+  if (bar) panel.classList.add('player--tactic');
+
+  // 传奇英雄面板（预设·带传奇）：作为面板**直接子节点**、占第 1 列并纵跨两行
   // （我方顶端＝骰区行顶；敌方＝神器行顶，维持现状）；镜像神器摆放开启时翻到第 4 列
   if (player.legend) {
     panel.classList.add('player--legend');
@@ -1089,7 +1147,9 @@ function playerPanel(
   }
 
   // 骰子区域贴近中央战场：敌人放在最下、自己放在最上（行序由 CSS 网格按角色指定）
-  const seq: HTMLElement[] = role === 'enemy' ? [cards, areas] : [areas, cards];
+  const seq = (role === 'enemy' ? [cards, bar, areas] : [areas, bar, cards]).filter(
+    (n): n is HTMLElement => !!n,
+  );
   for (const node of seq) panel.appendChild(node);
 
   return panel;
@@ -1433,8 +1493,19 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       }
       return parts;
     }
-    case 'dustRise':
-      return [{ text: '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。' }];
+    case 'dustRise': {
+      const rp = state.players[state.activePlayer];
+      const parts: HintPart[] = [
+        { text: '尘起阶段：点卡上的尘起按钮，或结束该阶段（不行动会 +尘落）。' },
+      ];
+      // 战术牌 T12「激进」：首个尘起阶段可额外充能第三列神器 1 次
+      if (TACTIC_BY_ID[rp.tactic ?? '']?.key === 'jijin' && state.firstRound[rp.id] && !rp.tacticOnceUsed) {
+        parts.push({ text: '（' });
+        parts.push({ text: '「激进」', color: rp.id });
+        parts.push({ text: '：本尘起阶段可对第三列神器额外充能 1 次）' });
+      }
+      return parts;
+    }
     case 'main':
       return [{ text: '主要阶段：可启动技能、发动攻击（顺序不限）；完成后「结束回合」。' }];
     case 'gameOver':
@@ -1526,6 +1597,16 @@ function actionZone(ctx: Ctx): HTMLElement {
     zone.appendChild(convertPickPanel(ctx));
   } else if (ui.quanzhi) {
     zone.appendChild(quanzhiPanel(ctx));
+  } else if (ctx.state.pending?.kind === 'yuhuiPlace') {
+    zone.appendChild(yuhuiPanel(ctx));
+  } else if (ctx.state.pending?.kind === 'yingziPick') {
+    zone.appendChild(yingziPanel(ctx));
+  } else if (ctx.state.pending?.kind === 'yuanjianGain') {
+    zone.appendChild(yuanjianPanel(ctx));
+  } else if (ctx.state.pending?.kind === 'youdiMove') {
+    zone.appendChild(youdiPanel(ctx));
+  } else if (ctx.state.pending?.kind === 'shipeiPick') {
+    zone.appendChild(shipeiPanel(ctx));
   } else if (ui.fengmangPick && ui.pendingConfirm == null) {
     zone.appendChild(fengmangPanel(ctx));
   } else if (ui.dustFlow) {
@@ -1668,6 +1749,13 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return a.accept ? '发动「哀悼」（对方无防御骰）' : '不发动「哀悼」';
     case 'duanexing':
       return a.accept ? '发动「闻我名者断恶行」' : '不发动「闻我名者断恶行」';
+    case 'ciBei': {
+      const pd = state.pending;
+      const amount = pd && pd.kind === 'ciBei' ? pd.amount : 0;
+      return a.accept
+        ? `发动「慈悲」（取消 ${amount} 点伤害，改为回复 ${amount} 点生命）`
+        : '不发动「慈悲」';
+    }
     case 'leibaoReroll':
       return a.accept ? '发动「雷暴」进行额外重掷' : '不发动「雷暴」';
     case 'dianxing':
@@ -2070,6 +2158,11 @@ function operationList(ctx: Ctx): HTMLElement {
   const plain: Action[] = [];
   for (const a of ctx.legal) {
     if (a.t === 'reroll') continue;
+    if (a.t === 'yuhuiPlace') continue; // T10「迂回」：由专用选择浮窗渲染（不逐条枚举 9 种组合）
+    if (a.t === 'yingziPick') continue; // T15「影子」：由专用选择面板渲染（不逐条枚举 6 个点数）
+    if (a.t === 'yuanjianGain') continue; // T13「远见」：由专用选择面板渲染（不逐条枚举 6×3 组合）
+    if (a.t === 'youdiMove') continue; // T17「诱敌」：由专用选择面板渲染（不枚举组合）
+    if (a.t === 'shipeiPick') continue; // T18「适应」：由专用选择面板渲染
     // 「真实之剑」(010) 置换入口：给 009 高塔铁幕·触发 / 011 灵能屏障·触发 / 023 畏惧·对方 的「消耗 1 颗」加「2 颗顶 1」
     if (
       (a.t === 'guwangCancel' || a.t === 'dunwuHalve' || a.t === 'weijuPay') &&
@@ -3059,6 +3152,589 @@ function logPopModal(ctx: Ctx): HTMLElement {
   return overlay;
 }
 
+/** 战术牌·战前「抽 2 留 1」弹窗（预设/轮选）：只显示当前选者的 2 张（暗牌），点击即定 */
+function tacticChooseOverlay(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const who = state.tacticQueue[0];
+  const overlay = el('div', 'tactic-choose-overlay');
+  const modal = el('div', 'tactic-choose-modal');
+  const title = el('div', 'tactic-choose-title');
+  title.textContent = who ? `玩家${who} · 从 2 张中选 1 张战术牌` : '';
+  modal.appendChild(title);
+  const grid = el('div', 'tactic-choose-grid');
+  const picks = getLegalActions(state).filter(
+    (a): a is Extract<Action, { t: 'tacticPick' }> => a.t === 'tacticPick',
+  );
+  for (const a of picks) {
+    const def = TACTIC_BY_ID[a.id];
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'tactic-choose-card';
+    card.dataset.id = a.id;
+    const img = document.createElement('img');
+    img.src = tacticImageUrl(a.id);
+    img.alt = def?.name ?? a.id;
+    img.draggable = false;
+    card.appendChild(img);
+    const nm = el('div', 'tactic-choose-name');
+    nm.textContent = def?.name ?? a.id;
+    card.appendChild(nm);
+    const eff = el('div', 'tactic-choose-eff');
+    eff.textContent = def ? tacticDisplayText(def) : '（效果文本待转写）';
+    card.appendChild(eff);
+    card.addEventListener('click', () => hooks.onAction({ t: 'tacticPick', id: a.id }));
+    grid.appendChild(card);
+  }
+  modal.appendChild(grid);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+/** T02「先机」：指定一位玩家成为先手（尘印标记随之转移） */
+function tacticFirstOverlay(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const who = state.pending?.kind === 'tacticFirst' ? state.pending.player : null;
+  const overlay = el('div', 'tactic-choose-overlay');
+  const modal = el('div', 'tactic-choose-modal');
+  const title = el('div', 'tactic-choose-title');
+  title.textContent = who ? `玩家${who} 「先机」：指定一位玩家成为先手` : '「先机」';
+  modal.appendChild(title);
+  const grid = el('div', 'tactic-choose-grid');
+  for (const w of ['A', 'B'] as const) {
+    const other = w === 'A' ? 'B' : 'A';
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'tactic-choose-card tactic-first-card';
+    card.dataset.who = w;
+    const nm = el('div', 'tactic-choose-name');
+    nm.textContent = `玩家${w} 先手`;
+    const eff = el('div', 'tactic-choose-eff');
+    eff.textContent = `尘印标记收入玩家${other}`;
+    card.appendChild(nm);
+    card.appendChild(eff);
+    card.addEventListener('click', () => hooks.onAction({ t: 'tacticFirst', who: w }));
+    grid.appendChild(card);
+  }
+  modal.appendChild(grid);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+/** T13「远见」：战斗开始时，猜测"生命最先降为 20 点或以下"的玩家 */
+function tacticGuessOverlay(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const who = state.pending?.kind === 'tacticGuess' ? state.pending.player : null;
+  const overlay = el('div', 'tactic-choose-overlay');
+  const modal = el('div', 'tactic-choose-modal');
+  const title = el('div', 'tactic-choose-title');
+  title.textContent = who ? `玩家${who} 「远见」：猜测生命最先降为 20 点或以下的玩家` : '「远见」';
+  modal.appendChild(title);
+  const grid = el('div', 'tactic-choose-grid');
+  for (const w of ['A', 'B'] as const) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'tactic-choose-card tactic-first-card';
+    card.dataset.who = w;
+    const nm = el('div', 'tactic-choose-name');
+    nm.textContent = `玩家${w}`;
+    const eff = el('div', 'tactic-choose-eff');
+    eff.textContent = `猜测玩家${w}最先降至 20 点或以下`;
+    card.appendChild(nm);
+    card.appendChild(eff);
+    card.addEventListener('click', () => hooks.onAction({ t: 'tacticGuess', who: w }));
+    grid.appendChild(card);
+  }
+  modal.appendChild(grid);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+/** T01「谨慎」：自定初始能力骰点数（同类型不超过 4 个；无初始重掷） */
+function tacticDiceOverlay(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const pd = state.pending;
+  const who = pd && pd.kind === 'tacticDice' ? pd.player : 'A';
+  const p = state.players[who];
+  const will = effectiveWill(p);
+  const dist = emptyDistribution(p) ?? { attack: [1, 2], defense: [3, 4], meditation: [5, 6] };
+  const values: (number | null)[] = new Array(will).fill(null);
+  const KIND_SHORT: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+  const KIND_ORDER: DiceKind[] = ['attack', 'defense', 'meditation'];
+
+  const overlay = el('div', 'tactic-choose-overlay');
+  const modal = el('div', 'tactic-choose-modal');
+  const title = el('div', 'tactic-choose-title');
+  title.textContent = `玩家${who} 「谨慎」：选择你的初始能力骰点数（共 ${will} 颗；同类型不超过 4 个）`;
+  modal.appendChild(title);
+
+  // 点数 → 类型映射（该玩家第二列神器的分布），让玩家知道选哪个数字得到哪种骰
+  const map = el('div', 'tactic-dice-map');
+  map.textContent = `你的分布　${KIND_ORDER.map((k) => `${KIND_SHORT[k]} ${dist[k].join('·')}`).join('　')}`;
+  modal.appendChild(map);
+
+  const grid = el('div', 'tactic-dice-grid');
+  const kindLabels: HTMLElement[] = [];
+
+  // 底部：已选类型实时统计
+  const stat = el('div', 'tactic-dice-dist');
+  const statLabel = el('span', 'tactic-dice-dist-label');
+  statLabel.textContent = '已选';
+  stat.appendChild(statLabel);
+  const statNums: Record<DiceKind, HTMLElement> = { attack: stat, defense: stat, meditation: stat };
+  for (const k of KIND_ORDER) {
+    const item = el('span', 'tactic-dice-dist-item');
+    const lab = el('span', 'tactic-dice-dist-k');
+    lab.textContent = KIND_SHORT[k];
+    const num = el('span', 'tactic-dice-dist-n');
+    num.textContent = '0';
+    statNums[k] = num;
+    item.appendChild(lab);
+    item.appendChild(num);
+    stat.appendChild(item);
+  }
+
+  const err = el('div', 'tactic-dice-err');
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'tactic-dice-confirm';
+  confirm.textContent = '确认';
+
+  const refresh = () => {
+    const counts: Record<DiceKind, number> = { attack: 0, defense: 0, meditation: 0 };
+    let filled = 0;
+    for (const v of values) {
+      if (v == null) continue;
+      counts[areaOf(v, dist)] += 1;
+      filled += 1;
+    }
+    // 每行类型标签
+    for (let i = 0; i < will; i++) {
+      const v = values[i];
+      const kl = kindLabels[i];
+      if (v == null) {
+        kl.textContent = '';
+        kl.className = 'tactic-dice-kind';
+      } else {
+        const k = areaOf(v, dist);
+        kl.textContent = KIND_SHORT[k];
+        kl.className = `tactic-dice-kind k-${k}`;
+      }
+    }
+    // 实时统计
+    for (const k of KIND_ORDER) {
+      statNums[k].textContent = String(counts[k]);
+      statNums[k].classList.toggle('over', counts[k] > 4);
+    }
+    const bad = KIND_ORDER.some((k) => counts[k] > 4);
+    err.textContent = bad ? '同类型能力骰不能超过 4 个' : filled < will ? `还需选择 ${will - filled} 颗` : '';
+    err.classList.toggle('on', bad);
+    confirm.disabled = bad || filled < will;
+  };
+
+  for (let i = 0; i < will; i++) {
+    const row = el('div', 'tactic-dice-row');
+    const idx = el('span', 'tactic-dice-idx');
+    idx.textContent = `第 ${i + 1} 颗`;
+    row.appendChild(idx);
+    const btns: HTMLButtonElement[] = [];
+    for (let v = 1; v <= 6; v++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tactic-dice-num';
+      b.dataset.val = String(v);
+      b.textContent = String(v);
+      b.addEventListener('click', () => {
+        values[i] = v;
+        for (const bb of btns) bb.classList.toggle('on', Number(bb.dataset.val) === values[i]);
+        refresh();
+      });
+      btns.push(b);
+      row.appendChild(b);
+    }
+    const kl = el('span', 'tactic-dice-kind');
+    kindLabels.push(kl);
+    row.appendChild(kl);
+    grid.appendChild(row);
+  }
+  refresh();
+
+  confirm.addEventListener('click', () => {
+    const vals = values.filter((v): v is number => v != null);
+    if (vals.length !== will) return;
+    hooks.onAction({ t: 'tacticDice', values: vals });
+  });
+  const foot = el('div', 'tactic-dice-foot');
+  foot.appendChild(confirm);
+  modal.appendChild(grid);
+  modal.appendChild(stat);
+  modal.appendChild(err);
+  modal.appendChild(foot);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+/** T10「迂回」：把 2 个 1 点能力骰放置到任意区域（快速操作栏内的选择面板；**单行**、不改栏高） */
+function yuhuiPanel(ctx: Ctx): HTMLElement {
+  const { hooks } = ctx;
+  const panel = el('div', 'selector yuhui-panel');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「迂回」';
+  head.appendChild(title);
+  const AREA: { k: DiceKind; label: string }[] = [
+    { k: 'attack', label: '攻' },
+    { k: 'defense', label: '防' },
+    { k: 'meditation', label: '冥' },
+  ];
+  const chosen: (DiceKind | null)[] = [null, null];
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn btn-confirm';
+  confirm.textContent = '确认';
+  confirm.disabled = true;
+  for (let i = 0; i < 2; i++) {
+    const idx = el('span', 'selector-info');
+    idx.textContent = i === 0 ? '①' : '②';
+    head.appendChild(idx);
+    const row = el('div', 'option-row');
+    const btns: HTMLButtonElement[] = [];
+    for (const { k, label } of AREA) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn option-btn';
+      b.dataset.k = k;
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        chosen[i] = k;
+        for (const bb of btns) bb.classList.toggle('option-btn--on', bb.dataset.k === k);
+        confirm.disabled = chosen.some((c) => c == null);
+      });
+      btns.push(b);
+      row.appendChild(b);
+    }
+    head.appendChild(row);
+  }
+  panel.appendChild(head);
+  confirm.addEventListener('click', () => {
+    if (chosen.some((c) => c == null)) return;
+    hooks.onAction({ t: 'yuhuiPlace', areas: [chosen[0]!, chosen[1]!] });
+  });
+  const actions = el('div', 'selector-actions');
+  actions.appendChild(confirm);
+  panel.appendChild(actions);
+  return panel;
+}
+
+/** T15「影子」：第一个回合开始时，为战术上的存放骰选定点数（1–6）——快速操作栏内嵌单行面板 */
+function yingziPanel(ctx: Ctx): HTMLElement {
+  const { hooks } = ctx;
+  const panel = el('div', 'selector yingzi-panel');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「影子」：选择置于战术上的能力骰点数';
+  head.appendChild(title);
+  let chosen: number | null = null;
+  const nums = el('div', 'number-row');
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn btn-confirm';
+  confirm.textContent = '确认';
+  confirm.disabled = true;
+  const btns: HTMLButtonElement[] = [];
+  for (let n = 1; n <= 6; n++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn number-btn';
+    b.dataset.n = String(n);
+    b.textContent = String(n);
+    b.addEventListener('click', () => {
+      chosen = n;
+      for (const bb of btns) bb.classList.toggle('number-btn--on', bb.dataset.n === String(n));
+      confirm.disabled = false;
+    });
+    btns.push(b);
+    nums.appendChild(b);
+  }
+  head.appendChild(nums);
+  panel.appendChild(head);
+  confirm.addEventListener('click', () => {
+    if (chosen == null) return;
+    hooks.onAction({ t: 'yingziPick', value: chosen });
+  });
+  const actions = el('div', 'selector-actions');
+  actions.appendChild(confirm);
+  panel.appendChild(actions);
+  return panel;
+}
+
+/** T13「远见」·奖励：猜测正确时，获得 1 个任意点数能力骰（1–6）并放入任意区域——快速操作栏内嵌面板 */
+function yuanjianPanel(ctx: Ctx): HTMLElement {
+  const { hooks } = ctx;
+  const panel = el('div', 'selector yuanjian-panel');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「远见」：获得 1 个任意点数能力骰';
+  head.appendChild(title);
+  let value: number | null = null;
+  let area: DiceKind | null = null;
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn btn-confirm';
+  confirm.textContent = '确认';
+  confirm.disabled = true;
+  const sync = (): void => {
+    confirm.disabled = value == null || area == null;
+  };
+  const nums = el('div', 'number-row');
+  const numBtns: HTMLButtonElement[] = [];
+  for (let n = 1; n <= 6; n++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn number-btn';
+    b.dataset.n = String(n);
+    b.textContent = String(n);
+    b.addEventListener('click', () => {
+      value = n;
+      for (const bb of numBtns) bb.classList.toggle('number-btn--on', bb.dataset.n === String(n));
+      sync();
+    });
+    numBtns.push(b);
+    nums.appendChild(b);
+  }
+  head.appendChild(nums);
+  const AREA: { k: DiceKind; label: string }[] = [
+    { k: 'attack', label: '攻' },
+    { k: 'defense', label: '防' },
+    { k: 'meditation', label: '冥' },
+  ];
+  const row = el('div', 'option-row');
+  const areaBtns: HTMLButtonElement[] = [];
+  for (const { k, label } of AREA) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn option-btn';
+    b.dataset.k = k;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      area = k;
+      for (const bb of areaBtns) bb.classList.toggle('option-btn--on', bb.dataset.k === k);
+      sync();
+    });
+    areaBtns.push(b);
+    row.appendChild(b);
+  }
+  head.appendChild(row);
+  panel.appendChild(head);
+  confirm.addEventListener('click', () => {
+    if (value == null || area == null) return;
+    hooks.onAction({ t: 'yuanjianGain', value, area });
+  });
+  const actions = el('div', 'selector-actions');
+  actions.appendChild(confirm);
+  panel.appendChild(actions);
+  return panel;
+}
+function youdiPanel(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const pd = state.pending;
+  const who: PlayerId = pd && pd.kind === 'youdiMove' ? pd.player : 'A';
+  const p = state.players[who];
+  const AREAS: { k: DiceKind; label: string }[] = [
+    { k: 'attack', label: '攻' },
+    { k: 'defense', label: '防' },
+    { k: 'meditation', label: '冥' },
+  ];
+  const KIND_SHORT: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+  let from: DiceKind | null = null;
+  let to: DiceKind | null = null;
+  const selected = new Set<string>();
+
+  const panel = el('div', 'selector youdi-panel');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「诱敌」：将某区域最多 3 颗骰移到另一区域（保留点数）';
+  head.appendChild(title);
+
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn btn-confirm';
+  confirm.textContent = '确认';
+  confirm.disabled = true;
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.textContent = '不发动';
+  cancel.addEventListener('click', () => hooks.onAction({ t: 'youdiMove', cancel: true }));
+
+  const fromRow = el('div', 'option-row');
+  const fromLab = el('span', 'selector-info');
+  fromLab.textContent = '从';
+  fromRow.appendChild(fromLab);
+  const fromBtns: HTMLButtonElement[] = [];
+  for (const { k, label } of AREAS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn option-btn';
+    b.dataset.k = k;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      from = k;
+      selected.clear();
+      if (to === from) to = null;
+      for (const bb of fromBtns) bb.classList.toggle('option-btn--on', bb.dataset.k === k);
+      rebuildDice();
+      rebuildTo();
+      refresh();
+    });
+    fromBtns.push(b);
+    fromRow.appendChild(b);
+  }
+  head.appendChild(fromRow);
+
+  const diceRow = el('div', 'pay-dice youdi-dice');
+  head.appendChild(diceRow);
+
+  const toRow = el('div', 'option-row');
+  const toLab = el('span', 'selector-info');
+  toLab.textContent = '到';
+  toRow.appendChild(toLab);
+  const toBtns: HTMLButtonElement[] = [];
+  for (const { k, label } of AREAS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn option-btn';
+    b.dataset.k = k;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      to = k;
+      for (const bb of toBtns) bb.classList.toggle('option-btn--on', bb.dataset.k === k);
+      refresh();
+    });
+    toBtns.push(b);
+    toRow.appendChild(b);
+  }
+  head.appendChild(toRow);
+
+  const rebuildDice = (): void => {
+    diceRow.innerHTML = '';
+    if (!from) return;
+    for (const d of p.areas[from]) {
+      const chip = el('span', `pay-die die-${who} clickable`);
+      chip.dataset.id = d.id;
+      chip.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+      if (selected.has(d.id)) chip.classList.add('youdi-die--on');
+      chip.addEventListener('click', () => {
+        if (selected.has(d.id)) selected.delete(d.id);
+        else if (selected.size < 3) selected.add(d.id);
+        chip.classList.toggle('youdi-die--on', selected.has(d.id));
+        refresh();
+      });
+      diceRow.appendChild(chip);
+    }
+  };
+  const rebuildTo = (): void => {
+    for (const b of toBtns) {
+      const off = from != null && b.dataset.k === from;
+      b.disabled = off;
+      if (off) b.classList.remove('option-btn--on');
+    }
+    if (to && to === from) to = null;
+  };
+  const refresh = (): void => {
+    confirm.disabled = !(from && to && from !== to && selected.size >= 1 && selected.size <= 3);
+  };
+
+  confirm.addEventListener('click', () => {
+    if (!(from && to && from !== to && selected.size >= 1)) return;
+    hooks.onAction({ t: 'youdiMove', from, to, dieIds: [...selected] });
+  });
+
+  panel.appendChild(head);
+  const actions = el('div', 'selector-actions');
+  actions.appendChild(cancel);
+  actions.appendChild(confirm);
+  panel.appendChild(actions);
+  rebuildDice();
+  return panel;
+}
+
+/** T18「适应」：把本次掷出/获得的其中 1 颗骰改为任意点数（快速操作栏内嵌选择面板） */
+function shipeiPanel(ctx: Ctx): HTMLElement {
+  const { state, hooks } = ctx;
+  const pd = state.pending;
+  const who: PlayerId = pd && pd.kind === 'shipeiPick' ? pd.player : 'A';
+  const p = state.players[who];
+  const dieIds = pd && pd.kind === 'shipeiPick' ? pd.dieIds : [];
+  const KIND_SHORT: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+  const panel = el('div', 'selector shipei-panel');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = '「适应」：指定其中 1 颗骰的点数';
+  head.appendChild(title);
+
+  let selDie: string | null = null;
+  let selVal: number | null = null;
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn btn-confirm';
+  confirm.textContent = '确认';
+  confirm.disabled = true;
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-cancel';
+  cancel.textContent = '不发动';
+  cancel.addEventListener('click', () => hooks.onAction({ t: 'shipeiPick', cancel: true }));
+  const refresh = (): void => {
+    confirm.disabled = !(selDie && selVal != null);
+  };
+
+  const diceRow = el('div', 'pay-dice shipei-dice');
+  const chips = new Map<string, HTMLElement>();
+  for (const id of dieIds) {
+    const d = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].find((x) => x.id === id);
+    if (!d) continue;
+    const chip = el('span', `pay-die die-${who} clickable`);
+    chip.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+    chip.addEventListener('click', () => {
+      selDie = id;
+      for (const [k, c] of chips) c.classList.toggle('youdi-die--on', k === id);
+      refresh();
+    });
+    chips.set(id, chip);
+    diceRow.appendChild(chip);
+  }
+  head.appendChild(diceRow);
+
+  const valRow = el('div', 'number-row');
+  const vbtns: HTMLButtonElement[] = [];
+  for (let n = 1; n <= 6; n++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn number-btn';
+    b.dataset.n = String(n);
+    b.textContent = String(n);
+    b.addEventListener('click', () => {
+      selVal = n;
+      for (const bb of vbtns) bb.classList.toggle('number-btn--on', bb.dataset.n === String(n));
+      refresh();
+    });
+    vbtns.push(b);
+    valRow.appendChild(b);
+  }
+  head.appendChild(valRow);
+  panel.appendChild(head);
+
+  confirm.addEventListener('click', () => {
+    if (!selDie || selVal == null) return;
+    hooks.onAction({ t: 'shipeiPick', dieId: selDie, value: selVal });
+  });
+  const actions = el('div', 'selector-actions');
+  actions.appendChild(cancel);
+  actions.appendChild(confirm);
+  panel.appendChild(actions);
+  return panel;
+}
+
 function gameOverModal(ctx: Ctx): HTMLElement {
   const { state, hooks } = ctx;
   const overlay = el('div', 'gameover-overlay');
@@ -3372,9 +4048,75 @@ function detailSkillList(ctx: Ctx, art: Artifact): HTMLElement {
 }
 
 /** 只读技能详情浮窗：锚定触发卡片，内部可滚动 */
+/** 详情浮窗定位（点击处附近；窄屏改底部抽屉，交由 CSS）——神器与战术牌共用 */
+function layoutDetailBox(box: HTMLElement, rect: { left: number; top: number; width: number; height: number }): void {
+  const vw = window.innerWidth || 1280;
+  const vh = window.innerHeight || 800;
+  if (vw > 0 && vw < 720) {
+    box.classList.add('detail-popover--sheet');
+    return;
+  }
+  const W = Math.min(340, Math.max(220, vw - 24));
+  let left = rect.left + rect.width + 8;
+  if (left + W > vw - 8) left = rect.left - W - 8;
+  left = Math.max(8, Math.min(left, vw - W - 8));
+  const top = Math.max(8, Math.min(rect.top, vh - 120));
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+  box.style.width = `${W}px`;
+  box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
+}
+
+/** 战术牌详情浮窗：裁切卡图 + 名字 + 效果全文（与神器浮窗不同——此处含卡图） */
+function tacticDetailPopover(
+  ctx: Ctx,
+  d: { artifactId: string; rect: { left: number; top: number; width: number; height: number } },
+): HTMLElement {
+  const ui = ctx.hooks.ui;
+  const id = d.artifactId;
+  const def = TACTIC_BY_ID[id];
+  const overlay = el('div', 'detail-overlay');
+  const box = el('div', 'detail-popover detail-popover--tactic');
+  box.dataset.tactic = id;
+  layoutDetailBox(box, d.rect);
+  const head = el('div', 'detail-head');
+  const title = el('div', 'detail-title');
+  title.textContent = def?.name ?? id;
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel detail-close';
+  close.dataset.act = 'detailClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ui.detail = null;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  box.appendChild(head);
+  const img = document.createElement('img');
+  img.className = 'detail-tactic-img';
+  img.src = tacticImageUrl(id);
+  img.alt = def?.name ?? id;
+  img.draggable = false;
+  box.appendChild(img);
+  const eff = el('div', 'detail-tactic-eff');
+  eff.textContent = def ? tacticDisplayText(def) : '（效果文本待转写）';
+  box.appendChild(eff);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ui.detail = null;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(box);
+  return overlay;
+}
+
 function detailPopover(ctx: Ctx): HTMLElement | null {
   const d = ctx.hooks.ui.detail;
   if (!d) return null;
+  if (isTacticId(d.artifactId)) return tacticDetailPopover(ctx, d);
   const found = findArtifactAnywhere(ctx.state, d.artifactId);
   if (!found) return null;
   const { art } = found;
@@ -3384,24 +4126,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   const overlay = el('div', 'detail-overlay');
   const box = el('div', 'detail-popover');
   box.dataset.artifact = art.id;
-
-  const vw = window.innerWidth || 1280;
-  const vh = window.innerHeight || 800;
-  // 窄屏（手机）：改为底部抽屉形态，交由 CSS 定位
-  const narrow = vw > 0 && vw < 720;
-  if (narrow) {
-    box.classList.add('detail-popover--sheet');
-  } else {
-    const W = Math.min(340, Math.max(220, vw - 24));
-    let left = d.rect.left + d.rect.width + 8;
-    if (left + W > vw - 8) left = d.rect.left - W - 8;
-    left = Math.max(8, Math.min(left, vw - W - 8));
-    const top = Math.max(8, Math.min(d.rect.top, vh - 120));
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-    box.style.width = `${W}px`;
-    box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
-  }
+  layoutDetailBox(box, d.rect);
 
   const head = el('div', 'detail-head');
   const title = el('div', 'detail-title');
@@ -4141,7 +4866,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const rerollAction = legal.find((a): a is Extract<Action, { t: 'reroll' }> => a.t === 'reroll');
   const maxReroll = rerollAction?.dieIds.length ?? 0;
 
-  // 预选·带传奇：中段改为 [设置+战报][快速操作栏][双方生命值]，并移除左侧栏（腾出的宽度用于传奇框）
+  // 预设·带传奇：中段改为 [设置+战报][快速操作栏][双方生命值]，并移除左侧栏（腾出的宽度用于传奇框）
   const legendMode = !!(state.players.A.legend || state.players.B.legend);
 
   const sel = hooks.ui.selection;
@@ -4308,6 +5033,12 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   if (state.phase === 'gameOver') {
     root.appendChild(gameOverModal(ctx));
+  }
+  if (state.phase === 'tactics') {
+    if (state.pending?.kind === 'tacticDice') root.appendChild(tacticDiceOverlay(ctx));
+    else if (state.pending?.kind === 'tacticFirst') root.appendChild(tacticFirstOverlay(ctx));
+    else if (state.pending?.kind === 'tacticGuess') root.appendChild(tacticGuessOverlay(ctx));
+    else root.appendChild(tacticChooseOverlay(ctx));
   }
   if (hooks.ui.settingsOpen) {
     root.appendChild(settingsPanel(ctx));

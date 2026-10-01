@@ -3,7 +3,7 @@ import type { LegendPanel, SkillDef } from '../model/types';
 
 /**
  * 传奇英雄面板（12 块）：与 12 个英雄**一一绑定**（L01 = 第 1 个英雄…L12 = 第 12 个英雄）。
- * 仅预选模式可用；面板≈"第 4 件神器"，技能**开局即可用（无需激活）**，可受"失去持续效果 / 被弃置"影响。
+ * 仅预设模式可用；面板≈"第 4 件神器"，技能**开局即可用（无需激活）**，可受"失去持续效果 / 被弃置"影响。
  *
  * 注：技能文本后续逐张转写进 `LEGENDS[id].skills`；本文件先提供 id/英雄绑定/名称/预设神器/卡图。
  */
@@ -176,7 +176,7 @@ export function makeLegend(id: string): LegendPanel {
   };
 }
 
-/** 预选模式下，由某方所选「3 件神器」反查其英雄对应的传奇面板 id（非英雄三件套 → undefined）。 */
+/** 预设模式下，由某方所选「3 件神器」反查其英雄对应的传奇面板 id（非英雄三件套 → undefined）。 */
 export function legendOfTrio(trio: readonly string[]): string | undefined {
   const key = (Object.keys(HEROES) as LegendHeroKey[]).find((k) => {
     const arts = HEROES[k].artifacts;

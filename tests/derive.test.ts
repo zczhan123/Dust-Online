@@ -10,7 +10,7 @@ function player(ids: string[]): PlayerState {
     artifacts: ids.map(makeArtifact),
     life: 50, lifeMax: 50, markers: 0, hasDustSeal: false,
     damagedThisTurn: false,
-    attackHalvedNextTurn: false, dealtDamageThisTurn: false, noDamageLastTurn: false, lifeTens: 0, tiandanGainedThisTurn: 0, buffs: [],
+      attackHalvedNextTurn: false, dealtDamageThisTurn: false, noDamageLastTurn: false, lifeTens: 0, tiandanGainedThisTurn: 0, turnsTaken: 0, tacticOnceUsed: false, tacticHeldDie: null, tacticGuess: null, buffs: [],
   };
 }
 

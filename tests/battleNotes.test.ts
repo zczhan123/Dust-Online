@@ -510,3 +510,50 @@ describe('战斗提示 · 传奇英雄面板（L01–L03）', () => {
     expect(notes(g, 'A').some((n) => n.label === '拔城')).toBe(false);
   });
 });
+
+describe('战斗提示·战术牌（T04 末路 / T05 狂热 / T06 残忍）', () => {
+  it('T05 狂热：自己前 3 个回合内 → 精确一条「攻击伤害 +1」', () => {
+    const g = mk(['001', '002', '003']);
+    g.players.A.tactic = 'T05';
+    g.activePlayer = 'A';
+    g.players.A.turnsTaken = 1;
+    expect(notes(g, 'A')).toEqual([{ label: '狂热', text: '攻击伤害 +1' }]);
+    g.players.A.turnsTaken = 4; // 已过前 3 个回合
+    expect(notes(g, 'A').some((n) => n.label === '狂热')).toBe(false);
+  });
+
+  it('T06 残忍：对方生命 ≤13 → 精确一条「攻击伤害 +5」；14 → 无', () => {
+    const g = mk(['001', '002', '003']);
+    g.players.A.tactic = 'T06';
+    g.activePlayer = 'A';
+    g.players.B.life = 13;
+    expect(notes(g, 'A')).toEqual([{ label: '残忍', text: '攻击伤害 +5' }]);
+    g.players.B.life = 14;
+    expect(notes(g, 'A').some((n) => n.label === '残忍')).toBe(false);
+  });
+
+  it('T04 末路：持有即提醒（含第三列充能需求数值）', () => {
+    const g = mk(['001', '002', '003']);
+    g.players.A.tactic = 'T04';
+    g.activePlayer = 'A';
+    const req = art(g, 'A', '003').chargeReq ?? 0;
+    expect(req).toBeGreaterThan(0);
+    expect(notes(g, 'A')).toEqual([
+      {
+        label: '末路',
+        text: `启动「必杀式」后，造成 ${req} 点真实伤害并回复 ${req} 点生命（＝第三列神器充能需求）`,
+      },
+    ]);
+  });
+
+  it('T09 慈悲：持有且未用 → 精确一条；用后不再出现', () => {
+    const g = mk(['001', '002', '003']);
+    g.players.A.tactic = 'T09';
+    g.activePlayer = 'A';
+    expect(notes(g, 'A')).toEqual([
+      { label: '慈悲', text: '造成伤害时，可取消该伤害并回复等量生命（整局 1 次）' },
+    ]);
+    g.players.A.tacticOnceUsed = true;
+    expect(notes(g, 'A').some((n) => n.label === '慈悲')).toBe(false);
+  });
+});

@@ -3,6 +3,7 @@ import { hasActiveSkill, skillUseKey } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
 import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
+import { TACTIC_BY_ID } from '../content/tactics';
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
@@ -215,6 +216,22 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   if (hasActiveSkill(p, 'ezhao.xueji')) {
     const xueji = artifactWithSkill(p, 'ezhao.xueji');
     notes.push({ label: '血祭', text: `攻击造成伤害后，你受到 ${xueji?.count ?? 0} 点真实伤害（计数）` });
+  }
+
+  // F 战术牌·T04「末路」（触发）：启动「必杀式」后造成/回复＝第三列神器充能需求
+  if (TACTIC_BY_ID[p.tactic ?? '']?.key === 'molu') {
+    const req = p.artifacts.find((a) => a.column === 3)?.chargeReq ?? 0;
+    if (req > 0) {
+      notes.push({
+        label: '末路',
+        text: `启动「必杀式」后，造成 ${req} 点真实伤害并回复 ${req} 点生命（＝第三列神器充能需求）`,
+      });
+    }
+  }
+
+  // F 战术牌·T09「慈悲」（整局 1 次）：造成伤害时可取消并回复等量生命
+  if (TACTIC_BY_ID[p.tactic ?? '']?.key === 'cibei' && !p.tacticOnceUsed) {
+    notes.push({ label: '慈悲', text: '造成伤害时，可取消该伤害并回复等量生命（整局 1 次）' });
   }
 
   return notes;

@@ -1,18 +1,19 @@
-import { setupGame, type SetupOptions } from './setup';
+import { setupGame, applyFirstPlayer, type SetupOptions } from './setup';
 import { SeededRng } from '../rng/rng';
 import { refillPhase, doReroll, endPhase } from './phases';
 import { effectiveSpeed, effectiveWill, emptyDistribution, rerollAllowance, totalDice } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { afterAttackResolved, applyLifeLoss, artifactWithSkill, checkLifeEnd, commitAttack, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, SHOUHUN_CONT_KEYS, YonghengQueenSignal, type AttackMods } from './combat';
-import { abilityDieInfo, abilityDicePool, canPayCosts, defaultCostFills, findDieOf, gainRandomDice, maxAffordableSlots, setDieValue, applyHeal, heal, moveDice, noteLifeDrop, paySlots, withRngState } from './effects';
-import { areaOf, newDieId } from '../model/dice';
+import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attacksBanned, checkLifeEnd, commitAttack, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, SHOUHUN_CONT_KEYS, YonghengQueenSignal, tacticActiveBonus, settleAttack, type AttackMods } from './combat';
+import { abilityDieInfo, abilityDicePool, canPayCosts, defaultCostFills, findDieOf, gainRandomDice, maxAffordableSlots, setDieValue, applyHeal, heal, moveDice, noteLifeDrop, offerAdapt, paySlots, withRngState } from './effects';
+import { areaOf, createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
 import { runChargeSkill } from './charge';
 import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
+import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
 /** 把传奇英雄面板适配成 `Artifact` 形状（仅用于把面板技能送进统一技能处理器；不写入对局状态） */
@@ -120,9 +121,13 @@ function queueXianzhen(g: GameState, owner: PlayerId, reason: 'rerollEnd' | 'mai
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
   const p = g.activePlayer;
+  // 战术牌 T05「狂热」：该玩家**自己的回合**计数 +1（封顶 4；L04 重开清零）——"前 3 个回合"判定用
+  g.players[p].turnsTaken = Math.min(4, g.players[p].turnsTaken + 1);
   // 先切入新回合的起始阶段，再打「回合开始」战报：让该行日志携带新回合的阶段标签
   //（首回合 = 尘起、其后 = 重掷），否则会带上上一回合遗留的标签（初始重掷 / 结束）
-  g.phase = g.firstRound[p] ? 'dustRise' : 'reroll';
+  // 战术牌 T11「迷烟」：你自己的**第一个回合仍具有重掷阶段**（首回合本来跳过重掷）
+  const t11 = TACTIC_BY_ID[g.players[p].tactic ?? '']?.key === 'miyan';
+  g.phase = g.firstRound[p] && !t11 ? 'dustRise' : 'reroll';
   logLine(g, `${pname(p)} 的回合开始`);
   g.pendingAttack = null;
   g.pending = null;
@@ -170,6 +175,19 @@ export function beginTurn(g: GameState): void {
   g.players[p].dealtDamageThisTurn = false;
   // 回合开始触发（补充之前，故获得的骰计入意志上限）：008 战车
   applyTurnStartEffects(g, p);
+  // 战术牌 T08「无情」：对方的回合开始时（补充骰之前），若任一方生命 ≤20 → 本回合玩家受 2 真伤
+  checkWuqing(g, p);
+  if ((g.phase as string) === 'gameOver') return;
+  // 战术牌 T15「影子」：你自己的**第一个回合开始时** → 为战术上的存放骰选定点数（1–6）
+  if (
+    g.firstRound[p] &&
+    TACTIC_BY_ID[g.players[p].tactic ?? '']?.key === 'yingzi' &&
+    !g.players[p].tacticHeldDie &&
+    !g.players[p].tacticOnceUsed
+  ) {
+    queuePending(g, { kind: 'yingziPick', player: p });
+    pumpPending(g);
+  }
   if (g.firstRound[p]) {
     // 第一回合跳过补充与重掷
     // 027 凛冽之音：持续到「持有者自己的下个尘起阶段开始」→ 尘起阶段开始时清除
@@ -194,6 +212,8 @@ export function beginTurn(g: GameState): void {
       pumpPending(g);
     }
   }
+  // 战术牌 T07「保守」：回合开始时也检查（从第一回合起，防御骰第一次为空即触发）
+  checkBaoshou(g);
 }
 
 export function endTurn(g: GameState): void {
@@ -346,12 +366,215 @@ export function endMainPhase(g: GameState): void {
 
 export function createGame(opts: SetupOptions): GameState {
   const g = setupGame(opts);
+  if (opts.tactics) {
+    enterTacticsPhase(g);
+  } else if (opts.tacticA || opts.tacticB) {
+    // 构筑/挑战＝设置页**直接指定**战术牌：进"战前"阶段承载其"战斗开始时"交互（T01 选骰 / T02 先手）
+    g.phase = 'tactics';
+    for (const id of ['A', 'B'] as PlayerId[]) applyTacticStart(g, id);
+    pumpPending(g);
+    maybeEnterInitialReroll(g);
+  } else {
+    enterInitialReroll(g);
+  }
+  return g;
+}
+
+/** 进入「初始重掷」（战前管线的最后一步） */
+function enterInitialReroll(g: GameState): void {
   const second: PlayerId = g.firstPlayer === 'A' ? 'B' : 'A';
   g.phase = 'initialReroll';
   g.activePlayer = g.firstPlayer;
   g.initialRerollQueue = [g.firstPlayer, second];
   logLine(g, `${pname(g.firstPlayer)} 先手；初始重掷：可重掷任意数量的初始能力骰`);
-  return g;
+}
+
+/** 战术牌·战前抽牌：进入 `tactics` 阶段，先给先手抽 2 张（另一人待其选完再从剩余池抽 → 双方不同名） */
+function enterTacticsPhase(g: GameState): void {
+  const second: PlayerId = g.firstPlayer === 'A' ? 'B' : 'A';
+  g.phase = 'tactics';
+  g.activePlayer = g.firstPlayer;
+  g.tacticPool = TACTIC_POOL.slice();
+  g.tacticQueue = [g.firstPlayer, second];
+  drawNextTacticHand(g);
+}
+
+/** 给队首（`tacticQueue[0]`）从剩余池抽 2 张并移出池（保证双方不选到同一张），写战报 */
+function drawNextTacticHand(g: GameState): void {
+  const who = g.tacticQueue[0];
+  if (!who) { g.tacticHand = []; return; }
+  const hand: string[] = [];
+  withRng(g, (rng) => {
+    for (let i = 0; i < 2 && g.tacticPool.length > 0; i++) {
+      hand.push(g.tacticPool.splice(rng.int(g.tacticPool.length), 1)[0]);
+    }
+  });
+  g.tacticHand = hand;
+  logLine(
+    g,
+    `${pname(who)} 战术牌：抽到${hand.map((id) => `「${TACTIC_BY_ID[id]?.name ?? id}」`).join('、')}（留 1 张）`,
+  );
+}
+
+/**
+ * 战术牌"战斗开始时"交互挂载：战术牌**定下时**调用（构筑带入 / 预设·轮选抽到后 / L04 重开重跑 T01）。
+ * 只挂**交互待决策**（T01 选点 / T02 先手）；**生命修正**不在这里——它们要等双方都定好、在战前收口统一结算。
+ *
+ * ⚠️ L04 重开只重跑**触发时点 ≥「获得初始能力骰子」**的战术牌（见 `TacticDef.reOnReset`）；调用方自行过滤。
+ */
+export function applyTacticStart(g: GameState, player: PlayerId): void {
+  const id = g.players[player].tactic;
+  if (!id) return;
+  const key = TACTIC_BY_ID[id]?.key;
+  if (key === 'qingzhen') {
+    // L03「无敌」＝没有初始能力骰 → 与 T01 同人时**无敌优先**（无骰可选）
+    if (hasActiveSkill(g.players[player], 'batton.wudi')) return;
+    g.players[player].areas.attack = [];
+    g.players[player].areas.defense = [];
+    g.players[player].areas.meditation = [];
+    queuePending(g, { kind: 'tacticDice', player });
+  } else if (key === 'xianji') {
+    queuePending(g, { kind: 'tacticFirst', player });
+  } else if (key === 'yuanjian') {
+    // T13「远见」：战斗开始时猜测"生命最先降为 20 点或以下"的玩家
+    queuePending(g, { kind: 'tacticGuess', player });
+  }
+}
+
+/** 战术牌生命修正（战前收口一次）：**先「+生命」取最大 → 再「−生命」取最大**，同时改生命上限 */
+function applyTacticLifeMods(g: GameState): void {
+  for (const id of ['A', 'B'] as PlayerId[]) {
+    // 收集该玩家受到的生命修正贡献（来源战术牌名 + 数值；按来源 A→B 顺序）；+ 与 − 各取一笔生效
+    let posBest: { name: string; amount: number } | null = null;
+    let negBest: { name: string; amount: number } | null = null;
+    for (const src of ['A', 'B'] as PlayerId[]) {
+      const t = g.players[src].tactic;
+      if (!t) continue;
+      const def = TACTIC_BY_ID[t];
+      if (!def) continue;
+      const name = def.name ?? t;
+      for (const lm of def.lifeMods) {
+        const target: PlayerId = lm.who === 'self' ? src : src === 'A' ? 'B' : 'A';
+        if (target !== id) continue;
+        // 方向由 `who` 决定（amount 一律存正数）：self＝提高 / opp＝降低
+        if (lm.who === 'self') {
+          if (!posBest || lm.amount > posBest.amount) posBest = { name, amount: lm.amount };
+        } else if (!negBest || lm.amount < negBest.amount) {
+          negBest = { name, amount: lm.amount }; // 多条 − 取"数值最大"（最接近 0）
+        }
+      }
+    }
+    if (!posBest && !negBest) continue; // 无任何贡献 → 不写战报
+    const delta = (posBest?.amount ?? 0) - (negBest?.amount ?? 0);
+    const p = g.players[id];
+    p.life += delta;
+    p.lifeMax += delta;
+    // 战报始终反映结果（含净 0，如 +2 再 −2）；列出实际生效的来源
+    const parts: string[] = [];
+    if (posBest) parts.push(`「${posBest.name}」+${posBest.amount}`);
+    if (negBest) parts.push(`「${negBest.name}」−${negBest.amount}`);
+    const suffix = delta === 0 ? '（不变）' : '';
+    logLine(
+      g,
+      `${pname(id)} 战术牌·初始生命修正：${parts.join('、')} → 生命 ${p.life}／上限 ${p.lifeMax}${suffix}`,
+    );
+  }
+}
+
+/** 战前收口：抽牌完、无待决策 → 结算战术牌生命修正（一次）并进入初始重掷 */
+function maybeEnterInitialReroll(g: GameState): void {
+  if (g.phase !== 'tactics') return;
+  if (g.tacticQueue.length > 0) return;
+  if (g.pending || g.pendingQueue.length > 0) return;
+  if (!g.tacticStartDone) {
+    applyTacticLifeMods(g);
+    g.tacticStartDone = true;
+  }
+  enterInitialReroll(g);
+}
+
+/**
+ * 战术牌横条三态（**单一来源**；`render.ts` 的战术牌横条只读它）：
+ * - `active`（绿·生效中）：T05 前 3 回合 / T06 对方血≤13 / T04 有就绪必杀 / T08 任一方血≤20；
+ * - `spent`（灰·已用尽）：T01/T02/T03（开局类）、T05 过前 3 回合、T07 已触发（整局 1 次）；
+ * - `normal`：其余。
+ */
+export type TacticBarState = 'active' | 'spent' | 'normal';
+export function tacticBarState(g: GameState, player: PlayerId): TacticBarState {
+  const def = TACTIC_BY_ID[g.players[player].tactic ?? ''];
+  if (!def) return 'normal';
+  const p = g.players[player];
+  const active =
+    tacticActiveBonus(g, player) !== null ||
+    (def.key === 'molu' && hasReadyUltimate(g, player)) ||
+    (def.key === 'wuqing' && (g.players.A.life <= 20 || g.players.B.life <= 20)) ||
+    (def.key === 'cibei' && !p.tacticOnceUsed) ||
+    (def.key === 'baoshou' && !p.tacticOnceUsed) ||
+    (def.key === 'yuhui' && !p.tacticOnceUsed) ||
+    (def.key === 'fuhuo' && !p.tacticOnceUsed) ||
+    (def.key === 'yingzi' && !p.tacticOnceUsed) ||
+    // T17「诱敌」：未发动＝绿（待命）
+    (def.key === 'youdi' && !p.tacticOnceUsed) ||
+    // T18「适应」：未用＝绿（待命）
+    (def.key === 'shipei' && !p.tacticOnceUsed) ||
+    // T16「潜伏」（全局）：当前回合玩家的第 1 或第 2 个回合期间＝生效中
+    (def.key === 'qianfu' &&
+      (g.firstRound[g.activePlayer] || g.players[g.activePlayer].turnsTaken === 2)) ||
+    (def.key === 'miyan' && g.firstRound[player]) ||
+    (def.key === 'jijin' && g.firstRound[player] && !p.tacticOnceUsed) ||
+    // T13「远见」：尚未有人降到 ≤20（待命）＝生效中
+    (def.key === 'yuanjian' && g.tacticLowFirst === null);
+  if (active) return 'active';
+  if (def.setupOnly) return 'spent';
+  if (def.key === 'kuangre' && p.turnsTaken > 3) return 'spent';
+  if (def.key === 'baoshou' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'cibei' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'yuhui' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'fuhuo' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'yingzi' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'youdi' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'shipei' && p.tacticOnceUsed) return 'spent';
+  if (def.key === 'miyan' && !g.firstRound[player]) return 'spent';
+  if (def.key === 'jijin' && (p.tacticOnceUsed || !g.firstRound[player])) return 'spent';
+  if (def.key === 'yuanjian' && g.tacticLowFirst !== null) return 'spent';
+  return 'normal';
+}
+
+/**
+ * 战术牌 T07「保守」：**从游戏的第一个回合起**，当某玩家**防御骰区第一次为空**时，立即获得
+ * 1 个随机点数防御骰 + 1 个随机点数冥想骰（整局 1 次）。在**每次行动结算后**与**每个回合开始时**检查。
+ */
+function checkBaoshou(g: GameState): void {
+  if (g.phase === 'gameOver') return;
+  if (g.turnIndex < 1) return; // 「从游戏的第一个回合开始」→ 战前不检查
+  for (const id of ['A', 'B'] as PlayerId[]) {
+    const p = g.players[id];
+    if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'baoshou') continue;
+    if (p.tacticOnceUsed) continue;
+    if (p.areas.defense.length !== 0) continue;
+    p.tacticOnceUsed = true;
+    withRng(g, (rng) => {
+      const d1 = gainRandomDice(g, id, 'defense', 1, rng)[0];
+      const d2 = gainRandomDice(g, id, 'meditation', 1, rng)[0];
+      logLine(
+        g,
+        `${pname(id)} 「保守」：防御骰第一次为 0 → 获得 1 个随机防御骰（${d1.value}）与 1 个随机冥想骰（${d2.value}）`,
+      );
+    });
+  }
+}
+
+/**
+ * 战术牌 T08「无情」：**对方的回合开始时**（`turnStarter` ＝本回合玩家），若**任一方生命 ≤20**，
+ * 则本回合玩家受到 2 点真实伤害（source＝持有者）。每个对方回合均可再次触发。
+ */
+function checkWuqing(g: GameState, turnStarter: PlayerId): void {
+  if (g.phase === 'gameOver') return;
+  const holder: PlayerId = turnStarter === 'A' ? 'B' : 'A';
+  if (TACTIC_BY_ID[g.players[holder].tactic ?? '']?.key !== 'wuqing') return;
+  if (g.players.A.life > 20 && g.players.B.life > 20) return;
+  logLine(g, `${pname(holder)} 「无情」：有玩家生命 ≤20 → ${pname(turnStarter)} 受到 2 点真实伤害`);
+  dealTrueDamage(g, turnStarter, 2, holder);
 }
 
 /** 跳过后手/先手的初始重掷，进入先手第一回合（供快速开始/测试） */
@@ -406,6 +629,9 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
   // L02 残影（持续）：每个尘起阶段可进行最多 2 次「尘起行动」（默认 1 次）
   const normalLimit = hasActiveSkill(p, 'ying.canying') ? 2 : 1;
   const canNormal = (g.freeDustRise > 0 || g.dustRiseNormalCount < normalLimit) && hasMed;
+  // 战术牌 T12「激进」：你自己的**第一个尘起阶段**里，可对**第三列**神器额外充能 1 次（正常支付冥想骰）
+  const t12Extra =
+    g.firstRound[player] && TACTIC_BY_ID[p.tactic ?? '']?.key === 'jijin' && !p.tacticOnceUsed;
   // 默认候选（仅供 AI/测试；UI 会让玩家自选）：有冥想骰就用它；没有（但可用 010 置换）就用求值器构造的可行填法
   const medId = p.areas.meditation[0]?.id;
   const medSlot: SlotFill[] | undefined = medId
@@ -424,7 +650,8 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       }
     }
     if (a.column === 3) {
-      if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, costSlots: medSlot });
+      // 第三列充能：正常尘起次数内，或（T12 额外）首个尘起阶段的第 2 次充能
+      if ((canNormal || t12Extra) && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, costSlots: medSlot });
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
       if (canNormal && medSlot) {
@@ -988,8 +1215,51 @@ export function legendSkillReady(g: GameState, player: PlayerId, key: string): b
   return true;
 }
 
+/**
+ * 「必杀就绪」唯一来源：该玩家当前是否有**可发动的必杀式**（只看"就绪前提"，**不看是否轮到他行动、
+ * 也不看是否付得起代价**）。供战术牌 T04「末路」的"生效中"（绿）判定。
+ * - 第三列神器必杀：充能满（已激活，`skillActive` 成立）且未用尽；
+ * - **没有怜悯**（L08）：持 `xiva.meiyoulianmin` 且尘落 ≥4 时，024「狂舞」的必杀**无需充能**即算就绪；
+ * - 传奇面板必杀：`legendSkillReady`（尘落前置等）且未用尽；
+ * 均需本回合次数上限未用完。
+ */
+export function hasReadyUltimate(g: GameState, player: PlayerId): boolean {
+  const p = g.players[player];
+  const lianmin = hasActiveSkill(p, 'xiva.meiyoulianmin') && g.dustfall >= 4;
+  const perTurnLeft = (key: string): boolean =>
+    g.skillsUsedThisTurn.filter((k) => k === skillUseKey(player, key)).length < skillPerTurnLimit(p, key);
+  for (const a of p.artifacts) {
+    for (const s of a.skills) {
+      if (s.kind !== 'ultimate') continue;
+      const lianminUlt = lianmin && s.key === 'kuangwu.ultimate';
+      if (!lianminUlt) {
+        if (!skillActive(a, s)) continue;
+        if (g.ultimatesUsed.includes(skillUseKey(player, s.key))) continue;
+      }
+      if (!perTurnLeft(s.key)) continue;
+      return true;
+    }
+  }
+  const lg = p.legend;
+  if (lg) {
+    for (const s of lg.skills) {
+      if (s.kind !== 'ultimate') continue;
+      if (g.ultimatesUsed.includes(skillUseKey(player, s.key))) continue;
+      if (!legendSkillReady(g, player, s.key)) continue;
+      if (!perTurnLeft(s.key)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getLegalActions(g: GameState): Action[] {
   if (g.phase === 'gameOver') return [];
+  // 战术牌·战前抽 2 留 1：只枚举**当前选者**手里的 2 张（有待决策时交给下面的 pending 分支）
+  if (g.phase === 'tactics' && !g.pending) {
+    if (!g.tacticQueue[0]) return [];
+    return g.tacticHand.map((id) => ({ t: 'tacticPick' as const, id }));
+  }
 
   if (g.pending) {
     if (g.pending.kind === 'caiyuliu') {
@@ -1115,6 +1385,31 @@ export function getLegalActions(g: GameState): Action[] {
       return [
         { t: 'duanexing', accept: false },
         ...opp.areas.attack.map((d) => ({ t: 'duanexing' as const, accept: true, dieId: d.id })),
+      ];
+    }
+    if (g.pending.kind === 'tacticDice') {
+      // 默认动作（供 AI/测试）：按分布每类最多取 4 颗、凑满意志数；真人由 UI 弹窗自选
+      const p = g.players[g.pending.player];
+      const dist = emptyDistribution(p) ?? { attack: [1, 2], defense: [3, 4], meditation: [5, 6] };
+      const will = effectiveWill(p);
+      const values: number[] = [];
+      for (const kind of ['attack', 'defense', 'meditation'] as const) {
+        for (let i = 0; i < 4 && values.length < will && dist[kind].length > 0; i++) {
+          values.push(dist[kind][0]);
+        }
+      }
+      return [{ t: 'tacticDice', values }];
+    }
+    if (g.pending.kind === 'tacticFirst') {
+      return [
+        { t: 'tacticFirst', who: 'A' },
+        { t: 'tacticFirst', who: 'B' },
+      ];
+    }
+    if (g.pending.kind === 'tacticGuess') {
+      return [
+        { t: 'tacticGuess', who: 'A' },
+        { t: 'tacticGuess', who: 'B' },
       ];
     }
     if (g.pending.kind === 'sijiChuxing') {
@@ -1307,6 +1602,50 @@ export function getLegalActions(g: GameState): Action[] {
         { t: 'shouhunCancel', cancel: false },
       ];
     }
+    if (g.pending.kind === 'ciBei') {
+      return [
+        { t: 'ciBei', accept: true },
+        { t: 'ciBei', accept: false },
+      ];
+    }
+    if (g.pending.kind === 'yuhuiPlace') {
+      const areas: DiceKind[] = ['attack', 'defense', 'meditation'];
+      const out: Action[] = [];
+      for (const a of areas) for (const b of areas) out.push({ t: 'yuhuiPlace', areas: [a, b] });
+      return out;
+    }
+    if (g.pending.kind === 'yingziPick') {
+      return [1, 2, 3, 4, 5, 6].map((value) => ({ t: 'yingziPick' as const, value }));
+    }
+    if (g.pending.kind === 'yuanjianGain') {
+      // 完整枚举：6 点数 × 3 区域（真人由 UI 面板呈现）
+      const out: Action[] = [];
+      for (let value = 1; value <= 6; value++) {
+        for (const area of ['attack', 'defense', 'meditation'] as DiceKind[]) {
+          out.push({ t: 'yuanjianGain', value, area });
+        }
+      }
+      return out;
+    }
+    if (g.pending.kind === 'youdiMove') {
+      // 不发动 + 默认（AI/测试）：取第一个非空区域的前 1 颗 → 另一个区域
+      const p = g.players[g.pending.player];
+      const out: Action[] = [{ t: 'youdiMove', cancel: true }];
+      const areas: DiceKind[] = ['attack', 'defense', 'meditation'];
+      for (const from of areas) {
+        if (p.areas[from].length === 0) continue;
+        const to = areas.find((k) => k !== from)!;
+        out.push({ t: 'youdiMove', from, to, dieIds: [p.areas[from][0].id] });
+        break;
+      }
+      return out;
+    }
+    if (g.pending.kind === 'shipeiPick') {
+      const pd = g.pending;
+      const out: Action[] = [{ t: 'shipeiPick', cancel: true }];
+      if (pd.dieIds.length > 0) out.push({ t: 'shipeiPick', dieId: pd.dieIds[0], value: 1 });
+      return out;
+    }
     if (g.pending.kind === 'activationResolve') {
       const pd = g.pending;
       const p = g.players[pd.player];
@@ -1400,18 +1739,21 @@ export function getLegalActions(g: GameState): Action[] {
       return [...dustRiseActions(g, g.activePlayer), { t: 'advance' }];
     case 'main': {
       const acts: Action[] = [{ t: 'advance' }];
-      for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
-      // 034 破障（持续）：神器上存放的骰按分布视为攻击骰时，也可用于发起攻击
-      for (const h of heldAbilityDice(g, g.activePlayer)) {
-        if (h.kind === 'attack') acts.push({ t: 'attack', costSlots: [{ dieIds: [h.id] }] });
-      }
-      // 025 屠虎·奇袭（持续）：把「点数不在对方任意区域」的能力骰**视为攻击骰**发起攻击
-      // （默认候选供 AI/测试；真人由 UI 显式选择）
-      if (hasActiveSkill(p, 'tuohu.qixi')) {
-        for (const k of ['defense', 'meditation'] as const) {
-          for (const d of p.areas[k]) {
-            if (canTreatAsAttack(g, g.activePlayer, d.id)) {
-              acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id], treated: true }] });
+      // 战术牌 T16「潜伏」：双方各自的第一个回合内不能进行攻击（不产出任何 attack 动作）
+      if (!attacksBanned(g)) {
+        for (const d of p.areas.attack) acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id] }] });
+        // 034 破障（持续）：神器上存放的骰按分布视为攻击骰时，也可用于发起攻击
+        for (const h of heldAbilityDice(g, g.activePlayer)) {
+          if (h.kind === 'attack') acts.push({ t: 'attack', costSlots: [{ dieIds: [h.id] }] });
+        }
+        // 025 屠虎·奇袭（持续）：把「点数不在对方任意区域」的能力骰**视为攻击骰**发起攻击
+        // （默认候选供 AI/测试；真人由 UI 显式选择）
+        if (hasActiveSkill(p, 'tuohu.qixi')) {
+          for (const k of ['defense', 'meditation'] as const) {
+            for (const d of p.areas[k]) {
+              if (canTreatAsAttack(g, g.activePlayer, d.id)) {
+                acts.push({ t: 'attack', costSlots: [{ dieIds: [d.id], treated: true }] });
+              }
             }
           }
         }
@@ -1450,6 +1792,7 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
   zhihaiReroll: 'zhihaiReroll',
   chenaiFreeRise: 'chenaiFreeRise',
   shouhunCancel: 'shouhunCancel',
+  ciBei: 'ciBei',
   sijiChuxing: 'chuxingPick',
   weijuPay: 'weijuPay',
   gongzhenPick: 'gongzhenResolve',
@@ -1475,6 +1818,14 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
   dizuidaijianshu: 'dizuidaijianshu',
   nudengzuiren: 'nudengzuiren',
   duanexing: 'duanexing',
+  tacticDice: 'tacticDice',
+  tacticFirst: 'tacticFirst',
+  tacticGuess: 'tacticGuess',
+  yuhuiPlace: 'yuhuiPlace',
+  yingziPick: 'yingziPick',
+  yuanjianGain: 'yuanjianGain',
+  youdiMove: 'youdiMove',
+  shipeiPick: 'shipeiPick',
 };
 
 /**
@@ -1530,6 +1881,70 @@ function applyActionCore(g: GameState, action: Action): GameState {
     throw new Error('resolve pending decision first');
   }
   switch (action.t) {
+    case 'tacticPick': {
+      if (g.phase !== 'tactics') throw new Error('not tactics phase');
+      const who = g.tacticQueue[0];
+      if (!who) throw new Error('no tactic picker');
+      if (!g.tacticHand.includes(action.id)) throw new Error(`not in tactic hand: ${action.id}`);
+      g.players[who].tactic = action.id;
+      logLine(g, `${pname(who)} 战术牌：选择「${TACTIC_BY_ID[action.id]?.name ?? action.id}」`);
+      g.tacticQueue.shift();
+      if (g.tacticQueue.length > 0) {
+        g.activePlayer = g.tacticQueue[0];
+        drawNextTacticHand(g); // 从剩余池抽 → 天然不含对方所选
+      } else {
+        // 双方都选完 → 再统一挂"战斗开始时"交互（T01 选骰 / T02 先手）；生命修正留到战前收口
+        g.tacticHand = [];
+        for (const id of ['A', 'B'] as PlayerId[]) applyTacticStart(g, id);
+      }
+      break;
+    }
+    case 'tacticDice': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'tacticDice') throw new Error('no tacticDice pending');
+      const p = g.players[pd.player];
+      const dist = emptyDistribution(p);
+      if (!dist) throw new Error('no distribution');
+      const will = effectiveWill(p);
+      if (action.values.length !== will) throw new Error(`「谨慎」需恰好 ${will} 颗`);
+      const counts: Record<DiceKind, number> = { attack: 0, defense: 0, meditation: 0 };
+      for (const v of action.values) {
+        if (!Number.isInteger(v) || v < 1 || v > 6) throw new Error(`非法点数：${v}`);
+        counts[areaOf(v, dist)] += 1;
+      }
+      if (counts.attack > 4 || counts.defense > 4 || counts.meditation > 4) {
+        throw new Error('「谨慎」：同类型能力骰不能超过 4 个');
+      }
+      // 先校验后落状态
+      g.pending = null;
+      p.areas.attack = [];
+      p.areas.defense = [];
+      p.areas.meditation = [];
+      for (const v of action.values) placeDieByDistribution(p.areas, createDie(newDieId(`${pd.player}-`), v), dist);
+      logLine(g, `${pname(pd.player)} 「谨慎」：自定初始能力骰点数（${action.values.join('、')}）`);
+      break;
+    }
+    case 'tacticFirst': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'tacticFirst') throw new Error('no tacticFirst pending');
+      if (action.who !== 'A' && action.who !== 'B') throw new Error('invalid first player');
+      g.pending = null;
+      applyFirstPlayer(g, action.who);
+      logLine(
+        g,
+        `${pname(pd.player)} 「先机」：指定 ${pname(action.who)} 为先手；尘印标记归 ${pname(action.who === 'A' ? 'B' : 'A')}`,
+      );
+      break;
+    }
+    case 'tacticGuess': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'tacticGuess') throw new Error('no tacticGuess pending');
+      if (action.who !== 'A' && action.who !== 'B') throw new Error('invalid guess player');
+      g.pending = null;
+      g.players[pd.player].tacticGuess = action.who;
+      logLine(g, `${pname(pd.player)} 「远见」：猜测 ${pname(action.who)} 将最先降为 20 点或以下`);
+      break;
+    }
     case 'advance':
       if (g.phase === 'initialReroll') finishInitialRerollStep(g);
       else advancePhase(g);
@@ -1537,6 +1952,10 @@ function applyActionCore(g: GameState, action: Action): GameState {
     case 'reroll': {
       if (g.phase === 'initialReroll') {
         const p = g.players[g.activePlayer];
+        // T01「谨慎」：你没有对初始能力骰的重掷步骤
+        if (TACTIC_BY_ID[p.tactic ?? '']?.key === 'qingzhen') {
+          throw new Error('「谨慎」：没有初始重掷步骤');
+        }
         const owned = new Set(
           [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id),
         );
@@ -1656,6 +2075,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       // 第三列：只有「本次充能完成激活」时才结算该神器的「激活」技能（续充不重复结算）
       const beforeRise = p.artifacts.find((x) => x.id === action.artifactId);
       const wasFullyCharged = beforeRise?.column === 3 && beforeRise.chargeLayer >= (beforeRise.chargeReq ?? 0);
+      const wasSwitching = beforeRise?.activeMarkerSide != null; // 本次是"切换"（而非首次激活）
       if (action.fuchou) {
         // L05 复仇之灵：强制额外尘起——不耗冥想骰、不占次数、不消耗 019 的 freeNoCostRise；结算该待决策
         if (g.pending && g.pending.kind === 'fuchouRise') g.pending = null;
@@ -1669,6 +2089,15 @@ function applyActionCore(g: GameState, action: Action): GameState {
           g.freeDustRise -= 1;
         } else if (g.dustRiseNormalCount < (hasActiveSkill(p, 'ying.canying') ? 2 : 1)) {
           g.dustRiseNormalCount += 1;
+        } else if (
+          // 战术牌 T12「激进」：你自己的**第一个尘起阶段**里，可对**第三列**神器额外充能 1 次（正常支付冥想骰）
+          g.firstRound[who] &&
+          TACTIC_BY_ID[p.tactic ?? '']?.key === 'jijin' &&
+          !p.tacticOnceUsed &&
+          beforeRise?.column === 3
+        ) {
+          p.tacticOnceUsed = true;
+          logLine(g, `${pname(who)} 「激进」：第一个尘起阶段 → 对第三列神器进行 1 次额外充能`);
         } else {
           throw new Error('no dust rise action available');
         }
@@ -1678,6 +2107,18 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       const desc = applyDustRiseToArtifact(g, who, action.artifactId, action.side);
       logLine(g, `${pname(who)} 尘起：${desc}${action.useSeal ? '（使用尘印标记）' : ''}`);
+      // 战术牌 T10「迂回」：你**第一次切换**一件**不含「激活」技能**的神器后 → 获得 2 个 1 点能力骰（待放置）
+      if (
+        wasSwitching &&
+        beforeRise &&
+        !beforeRise.skills.some((s) => s.kind === 'activation') &&
+        TACTIC_BY_ID[p.tactic ?? '']?.key === 'yuhui' &&
+        !p.tacticOnceUsed
+      ) {
+        p.tacticOnceUsed = true;
+        queuePending(g, { kind: 'yuhuiPlace', player: who });
+        logLine(g, `${pname(who)} 「迂回」：第一次切换神器 → 获得 2 个 1 点能力骰（待放置）`);
+      }
       runChargeSkill(g, who, action.artifactId, () => endMainPhase(g));
       // 「激活」类技能：装填到该侧的瞬间立即强制结算（016 虚无形态 / 014 净化·数罪并罚 / 020 兽魂 / 021 决意）
       // 第三列续充（wasFullyCharged）不再重复结算「激活」
@@ -1705,9 +2146,10 @@ function applyActionCore(g: GameState, action: Action): GameState {
     case 'attack':
       if (g.phase !== 'main') throw new Error('not main phase');
       if (g.pendingAttack) throw new Error('pending attack unresolved');
+      if (attacksBanned(g)) throw new Error('「潜伏」：双方各自的第一个回合内不能进行攻击');
       assertConversionAllowed(g, g.activePlayer, action.costSlots);
       assertTreatedAllowed(g, g.activePlayer, action.costSlots);
-      // 027 寒光·必杀：使用攻击骰前先决定是否使用神器上的骰子（先于 022；两者仅可能在非预选模式共存）
+      // 027 寒光·必杀：使用攻击骰前先决定是否使用神器上的骰子（先于 022；两者仅可能在非预设模式共存）
       if (canUseHanguang(g, g.activePlayer)) {
         g.pending = { kind: 'hanguangPick', player: g.activePlayer, costSlots: action.costSlots };
         break;
@@ -1759,9 +2201,11 @@ function applyActionCore(g: GameState, action: Action): GameState {
       withRng(g, (rng) => {
         const v = rng.rollDie();
         const kind = areaOf(v, dist);
-        p.areas[kind].push({ id: newDieId(`${pd.player}-`), value: v, kind });
+        const die = { id: newDieId(`${pd.player}-`), value: v, kind };
+        p.areas[kind].push(die);
         const cn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
         logLine(g, `${pname(pd.player)} 发动「极之境·裁雨流」：将该攻击骰重新投掷为 ${v} 点，移回${cn}骰区`);
+        offerAdapt(g, pd.player, [die], true); // T18「适应」
       });
       break;
     }
@@ -2132,7 +2576,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         logLine(g, `${pname(pd.player)} 不发动「始祖兽魂」：保留「${card.name}」计数 2`);
         break;
       }
-      // 先校验后落状态：必须恰好 1 个「冥想骰位」的填法（010 置换允许 2 顶 1；预选下 L07 与 010 不可能共存，仅为通用性）
+      // 先校验后落状态：必须恰好 1 个「冥想骰位」的填法（010 置换允许 2 顶 1；预设下 L07 与 010 不可能共存，仅为通用性）
       const fills = action.costSlots ?? [];
       const ids = fills[0]?.dieIds ?? [];
       if (fills.length !== 1 || ids.length < 1) throw new Error('「始祖兽魂」：需指定 1 个冥想骰位');
@@ -2249,6 +2693,147 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if ((g.phase as string) !== 'gameOver') {
         afterAttackResolved(g, pa2, { blocked: false, damageDealt: pa2.value });
         pumpAttackQueue(g);
+      }
+      break;
+    }
+    case 'shipeiPick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'shipeiPick') throw new Error('no shipeiPick pending');
+      if (action.cancel) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「适应」`);
+        break;
+      }
+      const dieId = action.dieId;
+      const value = action.value;
+      if (!dieId || !pd.dieIds.includes(dieId)) throw new Error('「适应」：请从本次掷出的骰中选择 1 颗');
+      if (!Number.isInteger(value) || value! < 1 || value! > 6) throw new Error('「适应」：点数须在 1–6');
+      const p = g.players[pd.player];
+      const kinds: DiceKind[] = ['attack', 'defense', 'meditation'];
+      if (!kinds.some((k) => p.areas[k].some((d) => d.id === dieId))) throw new Error(`「适应」：找不到该骰 ${dieId}`);
+      g.pending = null;
+      p.tacticOnceUsed = true;
+      if (pd.replaceByDist) {
+        const dist = p.artifacts.find((a) => a.column === 2)?.distribution;
+        if (!dist) throw new Error(`player ${pd.player} has no distribution`);
+        for (const k of kinds) p.areas[k] = p.areas[k].filter((d) => d.id !== dieId);
+        const kind = areaOf(value!, dist);
+        p.areas[kind].push(createDie(dieId, value!, kind));
+        const cn: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+        logLine(g, `${pname(pd.player)} 「适应」：将 1 颗骰的点数改为 ${value}（移入${cn[kind]}骰区）`);
+      } else {
+        for (const k of kinds) {
+          const d = p.areas[k].find((x) => x.id === dieId);
+          if (d) {
+            d.value = value!;
+            break;
+          }
+        }
+        logLine(g, `${pname(pd.player)} 「适应」：将 1 颗骰的点数改为 ${value}`);
+      }
+      break;
+    }
+    case 'youdiMove': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'youdiMove') throw new Error('no youdiMove pending');
+      if (action.cancel) {
+        g.pending = null;
+        logLine(g, `${pname(pd.player)} 不发动「诱敌」`);
+        break;
+      }
+      const p = g.players[pd.player];
+      const from = action.from;
+      const to = action.to;
+      const ids = action.dieIds ?? [];
+      if (!from || !to || from === to) throw new Error('「诱敌」需指定不同的来源/目标区域');
+      if (ids.length < 1 || ids.length > 3) throw new Error('「诱敌」需移动 1–3 颗能力骰');
+      if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
+      const inFrom = new Set(p.areas[from].map((d) => d.id));
+      for (const id of ids) if (!inFrom.has(id)) throw new Error(`not your die in ${from}: ${id}`);
+      g.pending = null;
+      p.tacticOnceUsed = true;
+      const moved = p.areas[from].filter((d) => ids.includes(d.id));
+      p.areas[from] = p.areas[from].filter((d) => !ids.includes(d.id));
+      p.areas[to].push(...moved);
+      const cn: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      logLine(g, `${pname(pd.player)} 「诱敌」：将${cn[from]}骰区的 ${ids.length} 颗骰移到${cn[to]}骰区（保留点数）`);
+      break;
+    }
+    case 'yingziPick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'yingziPick') throw new Error('no yingziPick pending');
+      if (!Number.isInteger(action.value) || action.value < 1 || action.value > 6) {
+        throw new Error('「影子」点数须在 1–6');
+      }
+      g.pending = null;
+      const p = g.players[pd.player];
+      p.tacticHeldDie = { id: newDieId(`${pd.player}-`), value: action.value };
+      logLine(g, `${pname(pd.player)} 「影子」：将 1 个 ${action.value} 点能力骰从供应堆置于战术上`);
+      break;
+    }
+    case 'yuhuiPlace': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'yuhuiPlace') throw new Error('no yuhuiPlace pending');
+      if (action.areas.length !== 2) throw new Error('「迂回」需为 2 颗骰各指定 1 个区域');
+      for (const k of action.areas) {
+        if (k !== 'attack' && k !== 'defense' && k !== 'meditation') throw new Error(`invalid area: ${k}`);
+      }
+      g.pending = null;
+      const p = g.players[pd.player];
+      const cn: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      for (const k of action.areas) p.areas[k].push(createDie(newDieId(`${pd.player}-`), 1, k));
+      logLine(g, `${pname(pd.player)} 「迂回」：获得 2 个 1 点能力骰 → 放置于 ${action.areas.map((k) => cn[k]).join('、')}`);
+      break;
+    }
+    case 'yuanjianGain': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'yuanjianGain') throw new Error('no yuanjianGain pending');
+      if (!Number.isInteger(action.value) || action.value < 1 || action.value > 6) {
+        throw new Error('「远见」点数须在 1–6');
+      }
+      if (action.area !== 'attack' && action.area !== 'defense' && action.area !== 'meditation') {
+        throw new Error(`invalid area: ${action.area}`);
+      }
+      g.pending = null;
+      const p = g.players[pd.player];
+      const cn: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      p.areas[action.area].push(createDie(newDieId(`${pd.player}-`), action.value, action.area));
+      logLine(
+        g,
+        `${pname(pd.player)} 「远见」：猜测正确 → 获得 1 个 ${action.value} 点能力骰 → ${cn[action.area]}骰区`,
+      );
+      break;
+    }
+    case 'ciBei': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'ciBei') throw new Error('no ciBei pending');
+      g.pending = null;
+      const payer = g.players[pd.player];
+      if (action.accept) {
+        payer.tacticOnceUsed = true;
+        logLine(g, `${pname(pd.player)} 「慈悲」：取消该 ${pd.amount} 点伤害，改为回复 ${pd.amount} 点生命（整局 1 次）`);
+        heal(g, pd.player, pd.amount);
+        // 攻击伤害：视为本次攻击未造成伤害（仍算进行过一次攻击；"被抵挡"事实按原结算）
+        if (pd.attack && (g.phase as string) !== 'gameOver') {
+          settleAttack(g, pd.attack, {
+            blocked: pd.blocked ?? false,
+            blockedForTriggers: pd.blockedForTriggers ?? false,
+            damageDealt: 0,
+            applyDamage: false,
+          });
+        }
+        break;
+      }
+      // 不发动 → 照常结算
+      if (pd.attack) {
+        settleAttack(g, pd.attack, {
+          blocked: pd.blocked ?? false,
+          blockedForTriggers: pd.blockedForTriggers ?? false,
+          damageDealt: pd.amount,
+          applyDamage: true,
+        });
+      } else {
+        dealTrueDamage(g, pd.target, pd.amount, pd.player, { skipCibei: true });
       }
       break;
     }
@@ -2688,6 +3273,9 @@ function applyActionCore(g: GameState, action: Action): GameState {
         logLine(g, `${pname(skillOwner)} 「没有怜悯」：启动「凶弹业舞」 → 受到 2 点真实伤害`);
         dealTrueDamage(g, skillOwner, 2, skillOwner); // 自伤：source=自己
       }
+      // 战术牌 T04「末路」（触发）：启动**必杀式**后 → 造成/回复＝第三列神器充能需求
+      // （覆盖：普通启动 / L08 没有怜悯 / L04 重开；018 强制必杀在 pending.ts 里另调）
+      if (s.kind === 'ultimate') applyMolu(g, skillUser);
       // 019 蛮王之牙等：启动后刷新自身「每回合一次」计数（本回合可再次启动）
       if (s.refresh) g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== skillUseKey(skillUser, s.key));
       // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）
@@ -2715,5 +3303,9 @@ function applyActionCore(g: GameState, action: Action): GameState {
   pumpAttackQueue(g);
   // 若已进入「结束」阶段且无待决策 → 真正结算结束阶段并交出回合（供 032/033 的待决策解决后推进）
   finalizeTurnEnd(g);
+  // 战术牌·战前：抽牌完、无待决策 → 结算生命修正并进入初始重掷
+  maybeEnterInitialReroll(g);
+  // 战术牌 T07「保守」：每次行动结算后，若某持牌者防御骰第一次为 0 → 触发
+  checkBaoshou(g);
   return g;
 }

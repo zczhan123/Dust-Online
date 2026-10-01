@@ -50,6 +50,10 @@ const singlePlayer = (ids: string[]): PlayerState => ({
   noDamageLastTurn: false,
   lifeTens: 0,
   tiandanGainedThisTurn: 0,
+  turnsTaken: 0,
+  tacticOnceUsed: false,
+  tacticHeldDie: null,
+  tacticGuess: null,
   buffs: [],
 });
 

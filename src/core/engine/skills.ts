@@ -42,13 +42,7 @@ export function changeOnePointDice(
   }
   const changed = ids.length;
   if (changed >= 1) {
-    const me = g.players[self];
-    const gained: Die[] = [];
-    for (let i = 0; i < 2; i++) {
-      const d = createDie(newDieId(`${self}-`), rng.rollDie(), 'meditation');
-      me.areas.meditation.push(d);
-      gained.push(d);
-    }
+    const gained = gainRandomDice(g, self, 'meditation', 2, rng);
     logLine(
       g,
       `${pname(self)} 获得 2 个随机点数的冥想骰（${vals(gained)}），随后受到 2 点真实伤害`,
@@ -350,7 +344,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 潜行：消耗 2 攻击骰 → 先获得 2 随机防御骰，再获得 1 随机冥想骰（顺序强制）
   'yingle.qianxing': {
     run({ player, rng, params, g, reportConsumed }) {
-      const p = g.players[player];
       const effective = paySlots(
         g,
         player,
@@ -358,19 +351,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         (params.costSlots as SlotFill[] | undefined) ?? [],
         reportConsumed,
       );
-      const def: Die[] = [];
-      for (let i = 0; i < 2; i++) {
-        const d = createDie(newDieId(`${player}-`), rng.rollDie(), 'defense');
-        p.areas.defense.push(d);
-        def.push(d);
-      }
-      const med = createDie(newDieId(`${player}-`), rng.rollDie(), 'meditation');
-      p.areas.meditation.push(med);
+      const def = gainRandomDice(g, player, 'defense', 2, rng);
+      const med = gainRandomDice(g, player, 'meditation', 1, rng);
       logLine(
         g,
         `${pname(player)} 发动「潜行」：消耗 2 颗攻击骰（${vals(effective)}），获得 2 颗防御骰（${vals(
           def,
-        )}）与 1 颗冥想骰（${med.value}点）`,
+        )}）与 1 颗冥想骰（${med[0].value}点）`,
       );
     },
   },
@@ -520,13 +507,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
       dealTrueDamage(g, opponent, x, player);
       if (g.phase === 'gameOver') return;
-      for (let i = 0; i < 3; i++) p.areas.defense.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'defense'));
+      gainRandomDice(g, player, 'defense', 3, rng);
     },
   },
   // 完杀·必杀 零时枭首：消耗 1 攻击骰 → 弃对方 X 个防御骰；若对方仍有剩余防御骰，再获得 X 个随机攻击骰（X=消耗骰点数）
   'wansha.ultimate': {
     run({ g, player, rng, params, reportConsumed }) {
-      const p = g.players[player];
       const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       const o = g.players[opponent];
       const effective = paySlots(
@@ -549,7 +535,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       consumeDice(g, o, 'defense', wanted);
       const gained = o.areas.defense.length > 0;
       if (gained) {
-        for (let i = 0; i < x; i++) p.areas.attack.push(createDie(newDieId(`${player}-`), rng.rollDie(), 'attack'));
+        gainRandomDice(g, player, 'attack', x, rng);
       }
       logLine(
         g,
@@ -642,12 +628,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         meditation: p.areas.meditation.map((d) => d.id),
       });
       const cap = effectiveWill(p);
-      const gained: Die[] = [];
-      while (totalDice(p) < cap) {
-        const die = createDie(newDieId(`${player}-`), rng.rollDie(), 'defense');
-        p.areas.defense.push(die);
-        gained.push(die);
-      }
+      const gained = gainRandomDice(g, player, 'defense', Math.max(0, cap - totalDice(p)), rng);
       logLine(
         g,
         `${pname(player)} 发动必杀「高塔铁幕」：弃置全部 ${discarded.length} 颗能力骰，获得 ${gained.length} 颗随机防御骰（能力骰总数达到意志上限 ${cap}），立即结束主要阶段`,
@@ -730,7 +711,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       consumeDice(g, p, 'defense', validDef);
       const missing = 2 - validDef.length;
       if (missing > 0) dealTrueDamage(g, player, missing * 2, player);
-      for (let i = 0; i < 4; i++) p.areas.defense.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'defense' });
+      gainRandomDice(g, player, 'defense', 4, rng);
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '王家之拳' });
       logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰，本回合攻击伤害 +1`);
     },
@@ -738,26 +719,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 011 灵能屏障·启动：消耗最多 3 个防御骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
   'dunwu.barrier.activate': {
     run({ g, player, rng, params, reportConsumed }) {
-      const p = g.players[player];
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'defense' as const }));
       const effective = paySlots(g, player, spec, fills, reportConsumed);
       const n = effective.length;
-      for (let i = 0; i < n * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      gainRandomDice(g, player, 'meditation', n * 2, rng);
       logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${n} 防御骰，获得 ${n * 2} 冥想骰`);
     },
   },
   // 011 灵能脉冲·启动：消耗最多 3 个攻击骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
   'dunwu.pulse.activate': {
     run({ g, player, rng, params, reportConsumed }) {
-      const p = g.players[player];
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'attack' as const }));
       const effective = paySlots(g, player, spec, fills, reportConsumed);
       const n = effective.length;
-      for (let i = 0; i < n * 2; i++) p.areas.meditation.push({ id: newDieId(`${player}-`), value: rng.rollDie(), kind: 'meditation' });
+      gainRandomDice(g, player, 'meditation', n * 2, rng);
       logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${n} 攻击骰，获得 ${n * 2} 冥想骰`);
     },
   },

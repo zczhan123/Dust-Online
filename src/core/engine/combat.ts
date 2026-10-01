@@ -4,10 +4,20 @@ import { pumpPending, queuePending } from './pending';
 import { runChargeSkill } from './charge';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
+import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
 export function artifactWithSkill(p: PlayerState, key: string): Artifact | undefined {
   return p.artifacts.find((a) => a.skills.some((s) => s.key === key));
+}
+
+/** 战术牌 T16「潜伏」是否在场（**全局**：任一玩家持有即生效）。 */
+export function t16Active(g: GameState): boolean {
+  return (['A', 'B'] as PlayerId[]).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.key === 'qianfu');
+}
+/** T16「潜伏」：当前回合玩家在自己的**第一个回合** → 双方均不能进行攻击。 */
+export function attacksBanned(g: GameState): boolean {
+  return t16Active(g) && g.firstRound[g.activePlayer];
 }
 
 /** 010「真实之剑」置换可用且拥有 ≥2 颗任意能力骰 → 「消耗 1 颗」的触发即使没有对应类型骰也可发动 */
@@ -91,12 +101,93 @@ export function attackDamageBonus(
   if (hasActiveSkill(p, 'mengyan.eyi.continuous')) {
     consider(Math.floor(p.areas.meditation.length / 2), '恶意');
   }
+  // 战术牌「战斗中生效」类（T05 狂热 / T06 残忍）：单一来源见 `tacticActiveBonus`
+  const tacticBonus = tacticActiveBonus(g, player);
+  if (tacticBonus) consider(tacticBonus.value, tacticBonus.label);
+  // 战术牌 T16「潜伏」：双方各自的**第二个回合**内，攻击伤害 +1（按用户定的口径：只算自己回合发出的攻击）
+  if (g.activePlayer === player && g.players[player].turnsTaken === 2 && t16Active(g)) {
+    consider(1, '潜伏');
+  }
   return best;
 }
 
-export function attackDamageBuff(g: GameState, player: PlayerId): number {
-  return attackDamageBonus(g, player).value;
+/**
+ * 战术牌中**战斗中生效/条件型**的加成（单一来源；UI 的"生效中"绿色态与战斗提示共用）：
+ * - T05「狂热」`kuangre`：**你的前 3 个回合**内（`turnsTaken ≤ 3` 且轮到你自己）→ 攻击伤害 +1；
+ * - T06「残忍」`canren`：**对方生命 ≤ 13** 时 → 攻击伤害 +5。
+ * 其余战术牌（含 T04 末路等触发型）恒为 `null`。
+ */
+export function tacticActiveBonus(
+  g: GameState,
+  player: PlayerId,
+): { label: string; value: number } | null {
+  const key = TACTIC_BY_ID[g.players[player].tactic ?? '']?.key;
+  if (key === 'kuangre') {
+    const p = g.players[player];
+    if (g.activePlayer === player && p.turnsTaken >= 1 && p.turnsTaken <= 3) {
+      return { label: '狂热', value: 1 };
+    }
+  } else if (key === 'canren') {
+    const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    if (g.players[opp].life <= 13) return { label: '残忍', value: 5 };
+  }
+  return null;
 }
+
+/**
+ * T04「末路」：启动「必杀式」技能后 → 造成 / 回复 等同于**第三列神器充能需求**的
+ * 真实伤害 / 生命。仅当持有者选的是 T04 时生效（由 `case 'skill'` 与 018 强制必杀两处调用）。
+ */
+export function applyMolu(g: GameState, player: PlayerId): void {
+  if (TACTIC_BY_ID[g.players[player].tactic ?? '']?.key !== 'molu') return;
+  const req = g.players[player].artifacts.find((a) => a.column === 3)?.chargeReq ?? 0;
+  if (req <= 0) return;
+  const opp: PlayerId = player === 'A' ? 'B' : 'A';
+  logLine(g, `${pname(player)} 「末路」：启动必杀式 → 造成 ${req} 点真实伤害，回复 ${req} 点生命（第三列充能需求）`);
+  dealTrueDamage(g, opp, req, player);
+  if ((g.phase as string) !== 'gameOver') heal(g, player, req);
+}
+
+/**
+ * 战术牌 T14「赴火」：持有者**第一次受到「来源＝对方」的伤害**时 → 对造成者反弹**等量真实伤害**（整局 1 次）。
+ * 由"伤害来源已知"处调用：攻击落血（`settleAttack`）、`dealTrueDamage`、`applyDeferredTrueDamage`。
+ * - `source===target`（自伤）不算；在落血 + 死亡判定**之后**调用 → 若已 `gameOver`（持有者阵亡）则**跳过反弹**。
+ */
+export function noteFirstDamageFromOpponent(
+  g: GameState,
+  target: PlayerId,
+  amount: number,
+  source: PlayerId,
+): void {
+  if (amount <= 0 || source === target) return;
+  if ((g.phase as string) === 'gameOver') return;
+  const p = g.players[target];
+  if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'fuhuo') return;
+  if (p.tacticOnceUsed) return;
+  p.tacticOnceUsed = true;
+  logLine(g, `${pname(target)} 「赴火」：首次受到对方造成的 ${amount} 点伤害 → 对 ${pname(source)} 造成等量真实伤害`);
+  dealTrueDamage(g, source, amount, target);
+}
+
+/**
+ * 战术牌 T17「诱敌」：持有者**受到「来源＝对方」的伤害后** → 挂**可选**待决策（移动某区域最多 3 颗骰）。
+ * 由伤害来源已知处调用（同 T14）；`tacticOnceUsed` 只在**发动**时置位（"不发动"不消耗）。已有同待决策时不重复挂。
+ */
+export function noteYoudiAfterDamage(g: GameState, target: PlayerId, amount: number, source: PlayerId): void {
+  if (amount <= 0 || source === target) return;
+  if ((g.phase as string) === 'gameOver') return;
+  const p = g.players[target];
+  if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'youdi') return;
+  if (p.tacticOnceUsed) return;
+  const total = p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length;
+  if (total <= 0) return; // 无可移动的骰 → 不打扰
+  if (g.pending?.kind === 'youdiMove' || g.pendingQueue.some((x) => x.kind === 'youdiMove')) return;
+  queuePending(g, { kind: 'youdiMove', player: target });
+  pumpPending(g);
+}
+
+export function attackDamageBuff(g: GameState, player: PlayerId): number {
+  return attackDamageBonus(g, player).value;}
 
 /** 统一受伤入口：扣血 → 判胜负 → 018 至黑「每回合第一次受伤」计数。
  *  所有扣血点（物理伤害/真实伤害/延后真伤/锋芒取消）都必须走这里。 */
@@ -214,6 +305,11 @@ function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack)
 /** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
 export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], mods?: AttackMods): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
+  // 战术牌 T16「潜伏」：双方各自的第一个回合内，双方均不能进行攻击
+  if (attacksBanned(g)) {
+    logLine(g, `「潜伏」：双方各自的第一个回合内，${pname(player)} 不能进行攻击`);
+    return;
+  }
   // L07「无尽追猎」（持续）：**攻击时你的攻击骰区恰剩 1 颗**（＝"最后 1 个攻击骰"）→ 该次攻击不可抵挡。
   // 注意：必须在 paySlots 之前判定（支付会把该骰移出攻击骰区）；只作用于**用这颗骰打出的这一次攻击**，
   // 技能发起的虚拟攻击（013 电刑 / A01 不败之王 等）没有实体攻击骰 → 不受影响。
@@ -295,6 +391,11 @@ export function virtualAttack(
   baseValue: number,
   source?: { skill: string; owner: PlayerId },
 ): void {
+  // 战术牌 T16「潜伏」：双方各自的第一个回合内，双方均不能进行攻击（技能发起的虚拟攻击同样被禁）
+  if (attacksBanned(g)) {
+    logLine(g, `「潜伏」：双方各自的第一个回合内，${pname(player)} 不能进行攻击（技能发起的攻击同样被禁）`);
+    return;
+  }
   const base = attackDamageBonus(g, player);
   const point = applyWuguang(g.players[player], baseValue); // L06 无光领域：攻击点数 ±1
   g.pendingAttack = {
@@ -366,10 +467,51 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   finalizeAttackResolution(g, pa, false);
 }
 
+/**
+ * 一次攻击的**收尾**（落血 + 事件点 + 028×013 电刑 + 推进多段队列）。
+ * 抽出为独立导出：正常结算走它；T09「慈悲」待决策解决后也走它（`applyDamage=false` ＝ 取消伤害）。
+ */
+export function settleAttack(
+  g: GameState,
+  pa: PendingAttack,
+  o: { blocked: boolean; blockedForTriggers: boolean; damageDealt: number; applyDamage: boolean },
+): void {
+  const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defender = g.players[defenderId];
+  if (o.applyDamage && (o.damageDealt > 0 || !o.blocked)) {
+    // L11 永恒女王：若本次**攻击伤害**会致死 → 拦截（抛信号，由 applyAction 收尾"取消一切 + 开新回合"）
+    if (o.damageDealt > 0) tryYonghengQueen(g, defenderId, o.damageDealt);
+    const before = defender.life;
+    applyLifeLoss(g, defenderId, o.damageDealt);
+    logLine(
+      g,
+      o.blocked
+        ? `${pname(defenderId)} 被抵挡，但「野火燎原」仍造成 ${o.damageDealt} 点伤害（生命 ${before} → ${defender.life}）`
+        : `${pname(defenderId)} 未抵挡，受到 ${o.damageDealt} 点伤害（生命 ${before} → ${defender.life}）`,
+    );
+  }
+  // T14「赴火」：防守方首次受到"来源＝攻击方"的伤害 → 反弹等量真伤（钩子自守卫：gameOver 时跳过）
+  if (o.applyDamage) noteFirstDamageFromOpponent(g, defenderId, o.damageDealt, pa.attacker);
+  // T17「诱敌」：受到对方伤害后，可挂"移动最多 3 颗骰"的可选待决策
+  if (o.applyDamage) noteYoudiAfterDamage(g, defenderId, o.damageDealt, pa.attacker);
+  g.pendingAttack = null;
+  if (g.phase === 'gameOver') return;
+  afterAttackResolved(g, pa, { blocked: o.blockedForTriggers, damageDealt: o.damageDealt });
+  // FAQ 28.2.1：028「陨落」限制下，对方用**攻击骰**抵挡 = “使用攻击骰” → 可触发其「电刑」（在攻击方的回合反击）
+  // 注意：① 也要认 **A08「将至的电刑」**；② 点数必须传 `values`（013=1/2/3、A08=1/3/6）；③ 门槛走冥想池（含 034 存放骰）
+  if (o.blocked && pa.blockKind === 'attack') {
+    const dv = dianxingValuesOf(defender);
+    if (dv && meditationPoolCount(g, defenderId) >= 2) {
+      queuePending(g, { kind: 'dianxing', player: defenderId, values: dv });
+    }
+  }
+  // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
+  pumpAttackQueue(g);
+}
+
 /** 一次攻击的收尾（被抵挡/未抵挡皆可）：扣血、事件点、028×013 电刑、推进多段队列 */
 export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocked: boolean): void {
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
-  const defender = g.players[defenderId];
   let damageDealt = pa.value;
   // 「被抵挡」= 用了防御骰（一个事实）；与「伤害=0」是两回事。唯一例外：021 半伤为 0 时按 FAQ 21.1.7 不算被抵挡
   let blockedForTriggers = blocked;
@@ -378,31 +520,29 @@ export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocke
     damageDealt = r.damage;
     blockedForTriggers = !(r.halfApplied && damageDealt === 0);
   }
-  if (damageDealt > 0 || !blocked) {
-    // L11 永恒女王：若本次**攻击伤害**会致死 → 拦截（抛信号，由 applyAction 收尾"取消一切 + 开新回合"）
-    if (damageDealt > 0) tryYonghengQueen(g, defenderId, damageDealt);
-    const before = defender.life;
-    applyLifeLoss(g, defenderId, damageDealt);
-    logLine(
-      g,
-      blocked
-        ? `${pname(defenderId)} 被抵挡，但「野火燎原」仍造成 ${damageDealt} 点伤害（生命 ${before} → ${defender.life}）`
-        : `${pname(defenderId)} 未抵挡，受到 ${damageDealt} 点伤害（生命 ${before} → ${defender.life}）`,
-    );
+  // 战术牌 T09「慈悲」：**攻击方**可将"将造成的伤害"取消并改为回复等量生命（整局 1 次）
+  const ap = g.players[pa.attacker];
+  if (
+    damageDealt > 0 &&
+    g.pending === null &&
+    (g.phase as string) !== 'gameOver' &&
+    TACTIC_BY_ID[ap.tactic ?? '']?.key === 'cibei' &&
+    !ap.tacticOnceUsed
+  ) {
+    g.pendingAttack = null;
+    queuePending(g, {
+      kind: 'ciBei',
+      player: pa.attacker,
+      target: defenderId,
+      amount: damageDealt,
+      attack: pa,
+      blocked,
+      blockedForTriggers,
+    });
+    pumpPending(g);
+    return;
   }
-  g.pendingAttack = null;
-  if (g.phase === 'gameOver') return;
-  afterAttackResolved(g, pa, { blocked: blockedForTriggers, damageDealt });
-  // FAQ 28.2.1：028「陨落」限制下，对方用**攻击骰**抵挡 = “使用攻击骰” → 可触发其「电刑」（在攻击方的回合反击）
-  // 注意：① 也要认 **A08「将至的电刑」**；② 点数必须传 `values`（013=1/2/3、A08=1/3/6）；③ 门槛走冥想池（含 034 存放骰）
-  if (blocked && pa.blockKind === 'attack') {
-    const dv = dianxingValuesOf(defender);
-    if (dv && meditationPoolCount(g, defenderId) >= 2) {
-      queuePending(g, { kind: 'dianxing', player: defenderId, values: dv });
-    }
-  }
-  // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
-  pumpAttackQueue(g);
+  settleAttack(g, pa, { blocked, blockedForTriggers, damageDealt, applyDamage: true });
 }
 
 /** 021 决意「野火燎原」（持续·计数 5）：被抵挡时仍造成一半伤害（向下取整；同种削减不叠加）。
@@ -639,8 +779,28 @@ function onAttackDamage(g: GameState, attacker: PlayerId, value: number): void {
 
 /** 真实伤害：不可被防御骰抵挡，直接扣血（009 「高塔铁幕」触发可消耗防御骰取消）。
  *  `source` = 造成该真伤的**来源玩家**（009 只在「来自对方」即 source !== target 时挂起）。 */
-export function dealTrueDamage(g: GameState, target: PlayerId, amount: number, source: PlayerId): void {
+export function dealTrueDamage(
+  g: GameState,
+  target: PlayerId,
+  amount: number,
+  source: PlayerId,
+  opts?: { skipCibei?: boolean },
+): void {
   const p = g.players[target];
+  // 战术牌 T09「慈悲」：**造成者**可将"将造成的真实伤害"取消并改为回复等量生命（整局 1 次）；
+  //   `skipCibei` 用于"不发动"后按原路重走（避免再次挂起）。
+  if (
+    !opts?.skipCibei &&
+    source !== target &&
+    amount > 0 &&
+    g.pending === null &&
+    (g.phase as string) !== 'gameOver' &&
+    TACTIC_BY_ID[g.players[source].tactic ?? '']?.key === 'cibei' &&
+    !g.players[source].tacticOnceUsed
+  ) {
+    g.pending = { kind: 'ciBei', player: source, target, amount };
+    return; // 伤害延后到决策解决时结算
+  }
   // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
   if (
     source !== target &&
@@ -664,6 +824,10 @@ export function dealTrueDamage(g: GameState, target: PlayerId, amount: number, s
     tryYonghengQueen(g, target, amount); // L11 永恒女王：**真伤**致死者同样触发
     applyLifeLoss(g, target, amount);
   }
+  // T14「赴火」：受到"来源＝对方"的真实伤害 → 反弹等量真伤（自伤/游戏结束自动跳过）
+  noteFirstDamageFromOpponent(g, target, amount, source);
+  // T17「诱敌」：受到对方真伤后 → 可挂"移动最多 3 颗骰"的可选待决策
+  noteYoudiAfterDamage(g, target, amount, source);
   // L06 圆舞（持续）：**受到自己造成的伤害**后 → 强制将 1 个能力骰移动到另 1 个区域
   if (source === target) noteYuanwu(g, target);
 }
@@ -677,4 +841,8 @@ export function applyDeferredTrueDamage(g: GameState, target: PlayerId, amount: 
   tryYonghengQueen(g, target, amount); // L11 永恒女王：延后的真伤同样按"真实伤害"处理
   applyLifeLoss(g, target, amount);
   logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${p.life}）`);
+  // 009 延后的真伤恒为"来自对方" → T14 可反弹（source＝目标玩家）
+  noteFirstDamageFromOpponent(g, target, amount, target === 'A' ? 'B' : 'A');
+  // T17「诱敌」：同样可挂"移动最多 3 颗骰"的可选待决策
+  noteYoudiAfterDamage(g, target, amount, target === 'A' ? 'B' : 'A');
 }

@@ -2,6 +2,8 @@ import type { GameState, PlayerId } from '../model/types';
 import { withRngState } from './effects';
 import { fillInitialDice } from './setup';
 import { hasActiveSkill } from './skill-state';
+import { applyTacticStart } from './game';
+import { TACTIC_BY_ID } from '../content/tactics';
 
 const KINDS = ['attack', 'defense', 'meditation'] as const;
 
@@ -46,13 +48,21 @@ export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
     p.lifeTens = Math.floor(p.life / 10); // L05 复仇之灵：重开后按继承的生命重置基准
     p.wuguang = null; // L06 无光领域：重置为战斗开始时
     p.tiandanGainedThisTurn = 0; // L08 蛇蝎之泪
+    p.turnsTaken = 0; // 战术牌 T05「前 3 个回合」：重开一局回到第 0 个回合
+    p.tacticOnceUsed = false; // 战术牌「整局 1 次」（T07/T09）：重开一局可再次触发
+    p.tacticHeldDie = null; // 战术牌上的存放骰（T15）：重开一局清除
   }
 
-  // 2) 重投初始能力骰（按各自意志与第二列分布）
+  // 2) 重投初始能力骰（按各自意志与第二列分布；T01「谨慎」持有者改为由玩家自选 → 见第 5 步）
   withRngState(g, (rng) => {
-    // 与正常开局一致：L03「无敌」没有初始能力骰
-    if (!hasActiveSkill(g.players.A, 'batton.wudi')) fillInitialDice(g.players.A, rng);
-    if (!hasActiveSkill(g.players.B, 'batton.wudi')) fillInitialDice(g.players.B, rng);
+    for (const id of ['A', 'B'] as PlayerId[]) {
+      const p = g.players[id];
+      // L03「无敌」没有初始能力骰
+      if (hasActiveSkill(p, 'batton.wudi')) continue;
+      // T01「谨慎」：自选点数（挂待决策），不随机投
+      if (TACTIC_BY_ID[p.tactic ?? '']?.key === 'qingzhen') continue;
+      fillInitialDice(p, rng);
+    }
   });
 
   // 3) 尘印：本技能导致的重开**不发尘印标记**（按 2026-09-26 定；正常开局才会给后手）
@@ -88,6 +98,19 @@ export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
   // 5) 开局流程
   g.firstPlayer = firstPlayer;
   g.activePlayer = firstPlayer;
-  g.phase = 'initialReroll';
-  g.initialRerollQueue = [firstPlayer, second];
+  // L04 重开＝从「获得初始能力骰子」步骤重来，故只重跑**触发时点在该步骤或之后**的战术牌
+  // （`TacticDef.reOnReset`，如 T01「当你投掷初始能力骰子」）；T02「当你获得本战术后」不重跑。
+  // 无此类牌则直接进初始重掷。生命/上限与生命修正**一律不动**（属第 3 页初始设置）。
+  const reRun = (['A', 'B'] as PlayerId[]).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.reOnReset);
+  if (reRun) {
+    g.phase = 'tactics';
+    g.tacticQueue = [];
+    g.tacticHand = [];
+    for (const id of ['A', 'B'] as PlayerId[]) {
+      if (TACTIC_BY_ID[g.players[id].tactic ?? '']?.reOnReset) applyTacticStart(g, id);
+    }
+  } else {
+    g.phase = 'initialReroll';
+    g.initialRerollQueue = [firstPlayer, second];
+  }
 }

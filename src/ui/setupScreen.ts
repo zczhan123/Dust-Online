@@ -3,6 +3,7 @@ import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { LEGEND_TEXT } from '../core/content/legendText';
 import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact } from '../core/content/artifacts';
 import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/legends';
+import { TACTICS, TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 
@@ -42,12 +43,18 @@ export interface SetupOptions {
   heroA: [string, string, string];
   heroB: [string, string, string];
   firstPlayer: PlayerId;
-  /** 预选模式·带传奇：该方传奇英雄面板 id（L01–L12）；未开启传奇时为 undefined */
+  /** 预设模式·带传奇：该方传奇英雄面板 id（L01–L12）；未开启传奇时为 undefined */
   legendA?: string;
   legendB?: string;
+  /** 使用战术牌（预设/轮选）：进入战斗后「抽 2 留 1」 */
+  tactics?: boolean;
+  /** 战术牌·直接指定（构筑）：该方本场战术牌 id */
+  tacticA?: string;
+  tacticB?: string;
 }
 
 type Side = 'A' | 'B';
+// 内部 id 固定为 'yuxuan'（历史命名，勿改，仅内部标识）；该模式的界面文案一律为「预设模式」。
 type PickerMode = 'yuxuan' | 'gouzu';
 
 const COL_LABELS = ['第一列', '第二列', '第三列'];
@@ -80,18 +87,35 @@ function addSpecialBadge(slot: HTMLElement): void {
   b.title = '特典神器：不能在正式比赛中使用';
   slot.appendChild(b);
 }
-/** 「切换」按钮（卡槽右上角）＝ 原版 ↔ 异相。 */
-function addAltSwitch(slot: HTMLElement, onToggle: () => void): void {
+/** 「切换」按钮（卡槽右上角）＝ 原版 ↔ 异相。`disabled` 时保留按钮但不可点（用于"另一版已被对方选走、已自动切版"）。 */
+function addAltSwitch(slot: HTMLElement, onToggle: () => void, disabled = false): void {
   const t = el('span', 'pick-alt-switch');
   t.textContent = '切换';
-  t.addEventListener('click', (e) => { e.stopPropagation(); onToggle(); });
+  if (disabled) {
+    t.classList.add('is-disabled');
+  } else {
+    t.addEventListener('click', (e) => { e.stopPropagation(); onToggle(); });
+  }
   slot.appendChild(t);
+}
+
+/** 构筑「随机」每列的候选池＝每个英雄该列的**普通版**（异相开关开、且有异相映射时**并含异相版**），排除 excludeIds。 */
+export function randomColumnPool(column: number, anomaly: boolean, excludeIds: string[]): string[] {
+  const out: string[] = [];
+  for (const k of HERO_KEYS) {
+    const base = HEROES[k][column];
+    const variants = anomaly && ALT_OF[base] ? [base, ALT_OF[base]] : [base];
+    for (const id of variants) {
+      if (excludeIds.includes(id) || out.includes(id)) continue;
+      out.push(id);
+    }
+  }
+  return out;
 }
 
 /** 图鉴查询外链（新标签打开） */
 const MENU_EXTERNAL = 'http://www.dusttool.top/';
-
-/** 注入一次性的墨刷痕 SVG 滤镜（供首页菜单与预选/构筑页使用；仅 UI，不涉引擎） */
+/** 注入一次性的墨刷痕 SVG 滤镜（供首页菜单与预设/构筑页使用；仅 UI，不涉引擎） */
 function ensureInkFilter(): void {
   if (document.getElementById('dust-ink-svg')) return;
   const ns = 'http://www.w3.org/2000/svg';
@@ -132,7 +156,7 @@ function ensureInkFilter(): void {
 function createCardInspector(
   root: HTMLElement,
   signal: AbortSignal,
-  // legendText：`L0N` 图代表「传奇英雄面板」时（仅预选/构筑），显示 `LEGEND_TEXT` 技能；
+  // legendText：`L0N` 图代表「传奇英雄面板」时（仅预设/构筑），显示 `LEGEND_TEXT` 技能；
   // 否则（如挑战页的「昔日传奇」）只显示图，避免张冠李戴。
   opts?: { legendText?: boolean },
 ): { modal: HTMLElement; consumeLp: () => boolean; open: (id: string, x: number | null, y: number | null, soft: boolean) => void } {
@@ -196,11 +220,21 @@ function createCardInspector(
   function open(id: string, x: number | null, y: number | null, soft: boolean): void {
     box.innerHTML = '';
     const isLegend = /^L\d{2}$/.test(id);
+    const isTactic = isTacticId(id);
     const legendText = isLegend && opts?.legendText ? LEGEND_TEXT[id] : undefined;
     box.classList.toggle('legend', !!legendText);
+    box.classList.toggle('tactic', isTactic);
+    const tactic = isTactic ? TACTIC_BY_ID[id] : undefined;
     const img = document.createElement('img');
-    img.src = isLegend ? legendImageUrl(id) : cardUrl(id);
+    img.src = isTactic ? tacticImageUrl(id) : isLegend ? legendImageUrl(id) : cardUrl(id);
     img.alt = '';
+    img.addEventListener('error', () => {
+      const ph = el('div', 'pick-img-missing');
+      ph.textContent = '（卡图占位）';
+      img.replaceWith(ph);
+    });
+    // 图片异步加载：加载完再定位一次（否则按"尺寸未定"算位置 → 竖版大图会跑出屏幕）
+    img.addEventListener('load', () => { if (modal.classList.contains('on')) position(x, y); });
     if (legendText) {
       // 面板头像：黑底板（上下两条黑边；同 chip/战斗框规则），限宽居中，技能列表为主体
       const av = el('div', 'pick-modal-av');
@@ -209,7 +243,20 @@ function createCardInspector(
     } else {
       box.appendChild(img);
     }
-    const data = legendText ?? (isLegend ? undefined : ARTIFACT_TEXT[id]);
+    if (tactic) {
+      const row = el('div', 'pick-sk');
+      const t = el('div', 'pick-sk-t');
+      t.textContent = tactic.name;
+      const ty = el('span', 'pick-sk-type');
+      ty.textContent = '战术';
+      t.appendChild(ty);
+      const d = el('div', 'pick-sk-d');
+      d.textContent = tacticDisplayText(tactic) || '（效果文本待转写）';
+      row.appendChild(t);
+      row.appendChild(d);
+      box.appendChild(row);
+    }
+    const data = legendText ?? (isLegend || isTactic ? undefined : ARTIFACT_TEXT[id]);
     if (data) {
       for (const sk of data.skills) {
         const row = el('div', 'pick-sk');
@@ -319,7 +366,7 @@ function renderMenu(
 
     const three: Array<[string, 'lunxuan' | 'yuxuan' | 'gouzu']> = [
       ['轮选模式', 'lunxuan'],
-      ['预选模式', 'yuxuan'],
+      ['预设模式', 'yuxuan'],
       ['构筑模式', 'gouzu'],
     ];
     for (const [label, act] of three) {
@@ -328,7 +375,7 @@ function renderMenu(
       const word = el('span', 'word');
       word.textContent = label;
       item.appendChild(word);
-      // 预选 → renderHeroSetup；构筑 → renderBuildSetup；轮选暂无界面（点击无反应）
+      // 预设 → renderHeroSetup；构筑 → renderBuildSetup；轮选暂无界面（点击无反应）
       if (act === 'yuxuan') item.addEventListener('click', () => renderHeroSetup(root, onStart));
       if (act === 'gouzu') item.addEventListener('click', () => renderBuildSetup(root, onStart));
       if (act === 'lunxuan') item.addEventListener('click', () => renderRotationSetup(root, onStart));
@@ -386,7 +433,7 @@ function renderMenu(
   root.appendChild(surface);
 }
 
-/** 「左右互搏 · 预选模式」：3 栏（A 确认列 / 中栏名单 / B 确认列）。 */
+/** 「左右互搏 · 预设模式」：3 栏（A 确认列 / 中栏名单 / B 确认列）。 */
 export function renderHeroSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
   renderPicker(root, onStart, 'yuxuan');
 }
@@ -397,8 +444,65 @@ export function renderBuildSetup(root: HTMLElement, onStart: (opts: SetupOptions
 }
 
 /**
- * 预选 / 构筑共用的分栏选择器。
- * - 预选：点中栏某行的 `A`/`B`＝直接选定该英雄（互搏「开始游戏」即可开局）。
+ * 战斗牌（战术牌）选择块（预设/构筑/挑战共用）：
+ * 标题行（左）＝标题 +「随机」；右上角＝已选卡图；名牌自动流入 4 列网格（首名行 2 个 + 其后每行 4 个）。
+ * 右键/长按名牌 → 详情浮窗（靠全局 `data-card-id`）。
+ */
+function tacticSection(opts: {
+  title: string;
+  current: string | null;
+  /** 对方已选（该张显示「已选」、不可点；随机也避开） */
+  taken?: string[];
+  inspector: { consumeLp: () => boolean };
+  onPick: (id: string | null) => void;
+  onRandom: (id: string) => void;
+}): HTMLElement {
+  const taken = opts.taken ?? [];
+  const wrap = el('div', 'pick-tactic');
+  const head = el('div', 'pick-tactic-head');
+  const title = el('span', 'pick-tactic-title');
+  title.textContent = opts.title;
+  head.appendChild(title);
+  const rnd = button('pick-tactic-rand', '随机');
+  rnd.addEventListener('click', () => {
+    if (opts.inspector.consumeLp()) return;
+    const avail = TACTICS.filter((t) => !taken.includes(t.id)).map((t) => t.id);
+    if (avail.length === 0) return;
+    opts.onRandom(avail[Math.floor(Math.random() * avail.length)]);
+  });
+  head.appendChild(rnd);
+  wrap.appendChild(head);
+  const cur = opts.current;
+  const chip = el('span', `pick-tactic-chip${cur ? '' : ' empty'}`);
+  if (cur) {
+    chip.dataset.cardId = cur;
+    chip.title = TACTIC_BY_ID[cur]?.name ?? cur;
+    const img = document.createElement('img');
+    img.src = tacticImageUrl(cur);
+    img.alt = '';
+    img.draggable = false;
+    chip.appendChild(img);
+  }
+  wrap.appendChild(chip);
+  for (const t of TACTICS) {
+    const isTaken = taken.includes(t.id);
+    const b = el('div', 'pick-tactic-name' + (isTaken ? ' taken' : '') + (cur === t.id && !isTaken ? ' on' : ''));
+    b.dataset.cardId = t.id;
+    b.textContent = isTaken ? '已选' : t.name;
+    if (!isTaken) {
+      b.addEventListener('click', () => {
+        if (opts.inspector.consumeLp()) return;
+        opts.onPick(cur === t.id ? null : t.id);
+      });
+    }
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+/**
+ * 预设 / 构筑共用的分栏选择器。
+ * - 预设：点中栏某行的 `A`/`B`＝直接选定该英雄（互搏「开始游戏」即可开局）。
  * - 构筑：点 `A`/`B`＝把该英雄 3 件放进对应「候选列」；选中一件→`确定`→按列号落入「确认列」；
  *   双击候选卡＝选中并确定；任一方已确定的神器在候选里显示「已被选取」。
  * - 关联的附加模组（传奇/异相/战术）**暂未接引擎** → 显示但禁用（横线）。
@@ -412,14 +516,16 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   const ac = new AbortController();
   const signal = ac.signal;
 
-  const owner: Record<number, Side> = {}; // 预选：heroIdx -> side
+  const owner: Record<number, Side> = {}; // 预设：heroIdx -> side
   const cand: Record<Side, number | null> = { A: null, B: null }; // 构筑：候选区英雄 idx
   const pick: Record<Side, string | null> = { A: null, B: null }; // 构筑：候选区选中神器
   const slots: Record<Side, (string | null)[]> = { A: [null, null, null], B: [null, null, null] }; // 构筑：按列固定格
   const confirmed: Record<Side, boolean> = { A: false, B: false };
   let first: 'A' | 'B' | 'random' = 'random';
   let anomaly = false; // 「使用异相神器」开关
-  let legendOn = false; // 「使用传奇英雄面板」开关（仅预选模式）
+  let legendOn = false; // 「使用传奇英雄面板」开关（仅预设模式）
+  let tacticOn = false; // 「使用战术牌」开关（构筑；预设/轮选后续接入）
+  const tacticPick: Record<Side, string | null> = { A: null, B: null }; // 已选战斗牌 id
   const candAlt: Record<Side, boolean[]> = { A: [false, false, false], B: [false, false, false] };
   let anim: { side: Side; ids: string[] } | null = null;
   let ANIM: { side: Side; ids: string[] } | null = null;
@@ -475,7 +581,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     top.appendChild(back);
 
     const ttl = el('span', 'pick-ttl');
-    ttl.textContent = mode === 'yuxuan' ? '预选模式' : '构筑模式';
+    ttl.textContent = mode === 'yuxuan' ? '预设模式' : '构筑模式';
     top.appendChild(ttl);
 
     const g1 = el('span', 'pick-grp');
@@ -517,9 +623,11 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       g2.appendChild(w);
     }
     {
-      const w = el('span', 'pick-sw is-disabled');
+      // 战术牌：预设＝进战斗后抽 2 留 1（本开关只表示"启用"）；构筑＝在确认列直接选
+      const w = el('span', 'pick-sw' + (tacticOn ? ' on' : ''));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab'); lab.textContent = '使用战术牌'; w.appendChild(lab);
+      w.addEventListener('click', () => { tacticOn = !tacticOn; render(); });
       g2.appendChild(w);
     }
     top.appendChild(g2);
@@ -529,11 +637,23 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       ac.abort();
       startGame();
     });
+    // 「开始游戏」门槛：**仅构筑**——双方都"确定"神器（战术牌开关开时还需都选战术牌）才能开始；
+    // 预设模式保持原状（未选的一方随机补足）。
+    const bothPicked = confirmed.A && confirmed.B;
+    const needTactic = mode === 'gouzu' && tacticOn;
+    const tacticReady = !needTactic || (!!tacticPick.A && !!tacticPick.B);
+    const canStart = mode !== 'gouzu' || (bothPicked && tacticReady);
+    start.disabled = !canStart;
     top.appendChild(start);
+    if (!canStart) {
+      const hint = el('span', 'pick-start-hint');
+      hint.textContent = !bothPicked ? '双方都选好 3 件神器才能开始' : '双方都选好战术牌才能开始';
+      top.appendChild(hint);
+    }
   }
 
   // ── 卡槽 ──
-  function cardSlot(id: string, opts: { side?: Side; ink?: boolean; clickable?: boolean; locked?: boolean; picked?: boolean; onClick?: () => void; onDblClick?: () => void; altSwitch?: (() => void) | null } = {}): HTMLElement {
+  function cardSlot(id: string, opts: { side?: Side; ink?: boolean; clickable?: boolean; locked?: boolean; picked?: boolean; onClick?: () => void; onDblClick?: () => void; altSwitch?: (() => void) | null; altSwitchDisabled?: boolean } = {}): HTMLElement {
     const s = el('div', 'pick-slot');
     if (opts.ink) s.classList.add('ink');
     if (ANIM && opts.side === ANIM.side && ANIM.ids.includes(id)) s.classList.add('pop');
@@ -548,7 +668,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     s.dataset.cardId = id;
     if (isAltArtifact(id)) addAltBadge(inner);
       if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
-    if (opts.altSwitch) addAltSwitch(inner, opts.altSwitch);
+    if (opts.altSwitch) addAltSwitch(inner, opts.altSwitch, opts.altSwitchDisabled === true);
     if (opts.clickable && !opts.locked) {
       s.classList.add('clickable');
       if (opts.picked) s.classList.add('picked');
@@ -632,8 +752,8 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     av.appendChild(img);
     const lab = el('span', 'pick-legend-lab');
     lab.textContent = '传奇英雄技能';
-    chip.appendChild(av);
-    chip.appendChild(lab);
+    chip.appendChild(lab); // 先文字
+    chip.appendChild(av); // 后图案
     const pop = (x: number, y: number): void => { inspector.open(legendId, x, y, false); };
     chip.addEventListener('click', (e) => { e.preventDefault(); pop(e.clientX, e.clientY); });
     let t: number | null = null;
@@ -674,8 +794,22 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     }
     col.appendChild(cards);
     col.appendChild(confirmFoot(side, false));
+    if (mode === 'gouzu' && tacticOn) col.appendChild(tacticBlock(side));
     if (confirmed[side]) col.appendChild(seal());
     return col;
+  }
+
+  // ── 战斗牌（战术牌）选择：就地「战策榜」（共用 tacticSection）──
+  function tacticBlock(side: Side): HTMLElement {
+    const oppPick = tacticPick[other(side)];
+    return tacticSection({
+      title: `玩家${side} 战术牌`,
+      current: tacticPick[side],
+      taken: oppPick ? [oppPick] : [],
+      inspector,
+      onPick: (id) => { tacticPick[side] = id; render(); },
+      onRandom: (id) => { tacticPick[side] = id; render(); },
+    });
   }
 
   // ── 候选列（构筑）──
@@ -690,8 +824,17 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       const ids = heroIds(ci);
       for (let i = 0; i < 3; i++) {
         const baseId = ids[i];
-        const alt = anomaly && candAlt[side][i] && !!ALT_OF[baseId];
-        const id = alt ? ALT_OF[baseId] : baseId;
+        const altId = ALT_OF[baseId]; // 该列的异相版（无则 undefined）
+        let id = anomaly && candAlt[side][i] && altId ? altId : baseId;
+        // 修复：普通 / 异相是"两件"。若"当前偏好的那版"已被对方选走、而另一版空闲 → 自动切到空闲那版
+        let forced = false;
+        if (anomaly && altId) {
+          const otherId = id === baseId ? altId : baseId;
+          if (takenAnywhere(id) && !takenAnywhere(otherId)) {
+            id = otherId;
+            forced = true;
+          }
+        }
         if (takenAnywhere(id)) { cards.appendChild(takenSlot()); continue; }
         const locked = confirmed[side];
         const slot = cardSlot(id, {
@@ -709,9 +852,10 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
             pick[side] = id;
             confirmPickYi(side);
           },
-          altSwitch: anomaly && !locked && ALT_OF[baseId]
+          altSwitch: anomaly && !locked && altId
             ? () => { candAlt[side][i] = !candAlt[side][i]; pick[side] = null; anim = null; render(); }
             : null,
+          altSwitchDisabled: forced,
         });
         cards.appendChild(slot);
       }
@@ -796,9 +940,11 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     } else {
       const o = other(side);
       const next: (string | null)[] = [null, null, null];
+      const chosen: string[] = [];
       for (let c = 0; c < 3; c++) {
-        const pool = HERO_KEYS.map((k) => HEROES[k][c]).filter((id) => slots[o][c] !== id && !next.includes(id));
-        next[c] = pool[Math.floor(Math.random() * pool.length)];
+        const pool = randomColumnPool(c, anomaly, [slots[o][c] ?? '', ...chosen]);
+        next[c] = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+        if (next[c]) chosen.push(next[c]!);
       }
       slots[side] = next;
       confirmed[side] = true;
@@ -876,6 +1022,11 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       firstPlayer,
       legendA: withLegend ? legendOfTrio(trioA) : undefined,
       legendB: withLegend ? legendOfTrio(trioB) : undefined,
+      tactics: mode === 'yuxuan' && tacticOn,
+      // 构筑：直接选定的战术牌 → 带进开局（预设/轮选走"抽 2 留 1"，此处不带）；
+      //   **仅当"使用战术牌"开关开启时**才带，避免关掉开关后仍把旧选择带进去。
+      tacticA: mode === 'gouzu' && tacticOn ? tacticPick.A ?? undefined : undefined,
+      tacticB: mode === 'gouzu' && tacticOn ? tacticPick.B ?? undefined : undefined,
     });
   }
 
@@ -922,6 +1073,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
   let phase: 'prep' | 'draft' = 'prep';
   let firstPlayer: Side = 'A';
   let anomaly = false; // 「使用异相神器」开关
+  let tacticOn = false; // 「使用战术牌」开关（轮选：进战斗后抽 2 留 1）
   let pieces: Array<{ col: number; id: string; baseId: string }> = [];
   let removed: boolean[] = [];
   let taken: Record<Side, (string | null)[]> = { A: [null, null, null], B: [null, null, null] };
@@ -1046,13 +1198,14 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     l2.textContent = '附加模组';
     g2.appendChild(l2);
     for (const label of ['使用异相神器', '使用战术牌']) {
-      const enabled = label === '使用异相神器';
-      const w = el('span', 'pick-sw' + (enabled ? (anomaly ? ' on' : '') : ' is-disabled'));
+      const on = label === '使用异相神器' ? anomaly : tacticOn;
+      const w = el('span', 'pick-sw' + (on ? ' on' : ''));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab');
       lab.textContent = label;
       w.appendChild(lab);
-      if (enabled) w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      if (label === '使用异相神器') w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      else w.addEventListener('click', () => { tacticOn = !tacticOn; render(); });
       g2.appendChild(w);
     }
     top.appendChild(g2);
@@ -1067,6 +1220,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
           heroA: taken.A as [string, string, string],
           heroB: taken.B as [string, string, string],
           firstPlayer,
+          tactics: tacticOn,
         });
       });
       top.appendChild(start);
@@ -1276,6 +1430,8 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
   let pickHeroIdx = 0;
   let autoResolve: 'favor' | 'against' = 'favor';
   let anomaly = false; // 「使用异相神器」开关
+  let tacticOn = false; // 「使用战术牌」开关（挑战者；昔日传奇不配战术牌）
+  let tacticPick: string | null = null; // 挑战者已选战斗牌 id
   const candAlt = [false, false, false];
   const slots: (string | null)[] = [null, null, null]; // 挑战者，按列
 
@@ -1328,12 +1484,13 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     const g2 = el('span', 'pick-grp');
     const l2 = el('span', 'pick-lab'); l2.textContent = '附加模组'; g2.appendChild(l2);
     for (const label of ['使用异相神器', '使用战术牌']) {
-      const enabled = label === '使用异相神器';
-      const w = el('span', 'pick-sw' + (enabled ? (anomaly ? ' on' : '') : ' is-disabled'));
+      const on = label === '使用异相神器' ? anomaly : tacticOn;
+      const w = el('span', 'pick-sw' + (on ? ' on' : ''));
       w.appendChild(el('span', 'pick-dot'));
       const lab = el('span', 'pick-swlab'); lab.textContent = label;
       w.appendChild(lab);
-      if (enabled) w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      if (label === '使用异相神器') w.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      else w.addEventListener('click', () => { tacticOn = !tacticOn; render(); });
       g2.appendChild(w);
     }
     top.appendChild(g2);
@@ -1356,6 +1513,15 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     cancel.addEventListener('click', () => { slots[0] = slots[1] = slots[2] = null; render(); });
     foot.appendChild(cancel);
     col.appendChild(foot);
+    if (tacticOn) {
+      col.appendChild(tacticSection({
+        title: '挑战者 战术牌',
+        current: tacticPick,
+        inspector,
+        onPick: (id) => { tacticPick = id; render(); },
+        onRandom: (id) => { tacticPick = id; render(); },
+      }));
+    }
     if (confirmed) {
       const seal = el('div', 'pick-seal');
       seal.textContent = '已确认';

@@ -13,6 +13,7 @@ import { logLine, pname } from './log';
 import { hasActiveSkill, skillActive } from './skill-state';
 import { emptyDistribution } from './derive';
 import { dealTrueDamage } from './combat';
+import { TACTIC_BY_ID } from '../content/tactics';
 // 注意：与 pending.ts 是**循环引用**（pending → effects 的 gainRandomAbilityDice/withRngState）；
 // 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
 import { queuePending, pumpPending } from './pending';
@@ -172,6 +173,33 @@ export function checkLifeTens(g: GameState, player: PlayerId): void {
  */
 export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): void {
   if (amount <= 0) return;
+  // T13「远见」：**第一个**仍存活、且生命降为 ≤20 的玩家 → 全局只记一次；猜对者排队发奖。
+  //   死亡（生命 ≤0 → 游戏结束）不计入、不发奖（用户裁定）；L04 重开不清除（生命继承）。
+  if (
+    g.tacticLowFirst === null &&
+    (g.phase as string) !== 'gameOver' &&
+    g.players[player].life > 0 &&
+    g.players[player].life <= 20
+  ) {
+    g.tacticLowFirst = player;
+    const life = g.players[player].life;
+    for (const id of ['A', 'B'] as PlayerId[]) {
+      const p = g.players[id];
+      if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'yuanjian') continue;
+      if (p.tacticGuess === player) {
+        queuePending(g, { kind: 'yuanjianGain', player: id });
+        logLine(
+          g,
+          `「远见」：${pname(player)} 最先降至 20 点或以下（${life}）· ${pname(id)} 猜测正确 → 获得 1 个任意点数能力骰`,
+        );
+      } else if (p.tacticGuess !== null) {
+        logLine(
+          g,
+          `「远见」：${pname(player)} 最先降至 20 点或以下（${life}）· ${pname(id)} 猜测错误（猜的是 ${pname(p.tacticGuess)}），本效果结束`,
+        );
+      }
+    }
+  }
   for (const id of ['A', 'B'] as PlayerId[]) {
     const lg = g.players[id].legend;
     if (!lg || lg.id !== 'L11') continue;
@@ -435,6 +463,28 @@ export function paySlots(
       if (a.heldDice) a.heldDice = a.heldDice.filter((h) => h.id !== id);
     }
   }
+  // 战术牌 T15「影子」：**使用**（攻击/抵挡/尘起支付；不含「消耗」）与存放骰同点数的能力骰后 →
+  //   立即把存放骰移入"该点数对应的区域"（整局 1 次）。存放骰本身不属于任何区域。
+  if (reason === 'attack' || reason === 'defense' || reason === 'dustRise') {
+    const pl = g.players[player];
+    const held = pl.tacticHeldDie;
+    if (
+      held &&
+      TACTIC_BY_ID[pl.tactic ?? '']?.key === 'yingzi' &&
+      !pl.tacticOnceUsed &&
+      effective.some((e) => e.value === held.value)
+    ) {
+      const dist = pl.artifacts.find((a) => a.column === 2)?.distribution;
+      if (dist) {
+        pl.tacticOnceUsed = true;
+        const kind = areaOf(held.value, dist);
+        pl.areas[kind].push(createDie(held.id, held.value, kind));
+        pl.tacticHeldDie = null;
+        const cn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
+        logLine(g, `${pname(player)} 「影子」：使用 ${held.value} 点能力骰 → 存放骰移入${cn}骰区`);
+      }
+    }
+  }
   // 「真实之剑」置换留痕（战报）
   if (converted.length > 0) {
     const kindCn = kindCnOf(converted[0].kind);
@@ -509,6 +559,7 @@ export function gainRandomDice(
     p.areas[kind].push(die);
     out.push(die);
   }
+  offerAdapt(g, player, out, false); // 固定类型骰：改点保留原区域
   return out;
 }
 
@@ -531,7 +582,38 @@ export function gainRandomAbilityDice(
     placeDieByDistribution(p.areas, die, dist);
     out.push(die);
   }
+  offerAdapt(g, player, out, true); // 按分布落区：改点后需重新落区
   return out;
+}
+
+/**
+ * 战术牌 T18「适应」：在"掷/获得随机骰"后提供**可选**决策——把其中 1 颗的点数改为任意 1–6（整局 1 次）。
+ * `replaceByDist`＝true → 改点后按「骰点分布」**重新落区**（用于按分布落区的掷骰）；false → 保留原区域（固定类型骰）。
+ * **合并多批**：同一事件内"分多次获得随机骰"（如 潜行 2 防 + 1 冥、寰宇飞升 3 攻 + 3 防、保守 1 防 + 1 冥、
+ *   陷阵 另两类各 1）应合为**一个候选池**——已有未决 `shipeiPick` 时**并入**其 `dieIds`（而非丢弃），
+ *   玩家可从全部骰中任选 1 颗。由各"掷骰/获得随机骰"入口调用。
+ *   注：现有多批场景 `replaceByDist` 一律相同（皆为 `gainRandomDice`＝false）；若将来出现"多批且落区方式不同"，
+ *   需升级为**逐骰**记录落区方式（当前仅按批取"或"，见此处 `||=`）。
+ */
+export function offerAdapt(g: GameState, player: PlayerId, dice: Die[], replaceByDist: boolean): void {
+  if (dice.length === 0) return;
+  if ((g.phase as string) === 'gameOver') return;
+  const p = g.players[player];
+  if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'shipei') return;
+  if (p.tacticOnceUsed) return;
+  const ids = dice.map((d) => d.id);
+  // 已有未决的「适应」待决策（可能在 g.pending，也可能还在队列里，如 026 陷阵）→ 并入候选
+  const existing =
+    g.pending?.kind === 'shipeiPick'
+      ? g.pending
+      : g.pendingQueue.find((x) => x.kind === 'shipeiPick');
+  if (existing && existing.kind === 'shipeiPick') {
+    for (const id of ids) if (!existing.dieIds.includes(id)) existing.dieIds.push(id);
+    existing.replaceByDist = existing.replaceByDist || replaceByDist;
+    return;
+  }
+  queuePending(g, { kind: 'shipeiPick', player, dieIds: ids, replaceByDist });
+  pumpPending(g);
 }
 
 /** 用玩家/游戏里的 rngState 执行一段需要随机数的逻辑（供引擎各处复用） */

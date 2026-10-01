@@ -3,6 +3,7 @@ export type DiceKind = 'attack' | 'defense' | 'meditation';
 export type Column = 1 | 2 | 3;
 export type Phase =
   | 'setup'
+  | 'tactics'
   | 'initialReroll'
   | 'refill'
   | 'reroll'
@@ -79,6 +80,26 @@ export type Action =
   | { t: 'nudengzuiren'; accept: boolean }
   /** L12 传奇面板·闻我名者断恶行：不发动 / 弃置对方 1 个**攻击骰**（接受时必带 dieId） */
   | { t: 'duanexing'; accept: boolean; dieId?: string }
+  /** 战术牌（战斗牌）抽 2 留 1：选择本张作为本场战术（id 必须属于当前选者抽到的 2 张） */
+  | { t: 'tacticPick'; id: string }
+  /** T01「谨慎」：逐颗指定初始能力骰点数（values.length＝意志） */
+  | { t: 'tacticDice'; values: number[] }
+  /** T02「先机」：指定一位玩家成为先手玩家（尘印归另一位） */
+  | { t: 'tacticFirst'; who: PlayerId }
+  /** T13「远见」：战斗开始时猜测"生命最先降为 20 点或以下"的玩家 */
+  | { t: 'tacticGuess'; who: PlayerId }
+  /** T10「迂回」：把 2 个 1 点能力骰放置到任意区域（areas 长度＝2，每颗一个区域） */
+  | { t: 'yuhuiPlace'; areas: DiceKind[] }
+  /** T15「影子」：第一个回合开始时，为自己战术上的存放骰选定 1 个点数（1–6） */
+  | { t: 'yingziPick'; value: number }
+  /** T13「远见」·奖励：猜测正确时获得 1 个任意点数能力骰并放入任意区域 */
+  | { t: 'yuanjianGain'; value: number; area: DiceKind }
+  /** T17「诱敌」：把来源区域的最多 3 颗能力骰移到目标区域（保留点数）；`cancel`＝不发动 */
+  | { t: 'youdiMove'; cancel?: boolean; from?: DiceKind; to?: DiceKind; dieIds?: string[] }
+  /** T18「适应」：把本次掷出/获得的其中 1 颗骰改为任意点数；`cancel`＝不发动 */
+  | { t: 'shipeiPick'; cancel?: boolean; dieId?: string; value?: number }
+  /** T09「慈悲」：将造成的伤害 → 取消并回复等量生命（accept=true）／照常造成（accept=false） */
+  | { t: 'ciBei'; accept: boolean }
   /** 022 死契·处刑通牒：使用攻击骰前的强制决定（不发动 / ①伤害+1且不可抵挡 / ②伤害+5） */
   | { t: 'chuxingPick'; pick: 'none' | 'unblockable' | 'bonus5' }
   /** 023 蛇蝎·畏惧：对方被迫消耗他选择的那颗能力骰（可用 010 置换：costSlots 2 颗顶 1） */
@@ -208,7 +229,35 @@ export type Pending =
   /** L10 传奇面板·汝等罪人（触发）：将要回复生命时，由持有者决定是否改为对对方造成等量真实伤害（`amount`＝实际回复量） */
   | { kind: 'nudengzuiren'; player: PlayerId; amount: number }
   /** L12 传奇面板·闻我名者断恶行：受到伤害后，可弃置对方 1 个攻击骰（每回合最多 1 次） */
-  | { kind: 'duanexing'; player: PlayerId };
+  | { kind: 'duanexing'; player: PlayerId }
+  /** T01「谨慎」：逐颗指定初始能力骰点数（战前） */
+  | { kind: 'tacticDice'; player: PlayerId }
+  /** T02「先机」：指定一位玩家成为先手（战前；尘印归另一位） */
+  | { kind: 'tacticFirst'; player: PlayerId }
+  /** T13「远见」：战斗开始时，猜测"生命最先降为 20 点或以下"的玩家（战前） */
+  | { kind: 'tacticGuess'; player: PlayerId }
+  /** T10「迂回」：获得 2 个 1 点能力骰，由玩家放置到任意区域 */
+  | { kind: 'yuhuiPlace'; player: PlayerId }
+  /** T15「影子」：第一个回合开始时，为存放骰选定点数（1–6） */
+  | { kind: 'yingziPick'; player: PlayerId }
+  /** T13「远见」·奖励：猜测正确时获得 1 个任意点数能力骰并放入任意区域（一次） */
+  | { kind: 'yuanjianGain'; player: PlayerId }
+  /** T17「诱敌」：受到对方伤害后，可把某区域最多 3 颗骰移到另一区域（整局 1 次） */
+  | { kind: 'youdiMove'; player: PlayerId }
+  /** T18「适应」：把本次掷出/获得的其中 1 颗骰改为任意点数（整局 1 次） */
+  | { kind: 'shipeiPick'; player: PlayerId; dieIds: string[]; replaceByDist: boolean }
+  /** T09「慈悲」：将造成的那次伤害可由造成者选择"取消并回复等量生命"（整局 1 次） */
+  | {
+      kind: 'ciBei';
+      player: PlayerId;
+      target: PlayerId;
+      amount: number;
+      /** 攻击伤害时携带（解决后走 `settleAttack`）；真实伤害时为 undefined */
+      attack?: PendingAttack;
+      /** 攻击是否被抵挡（用于解决后的「被抵挡后」判定） */
+      blocked?: boolean;
+      blockedForTriggers?: boolean;
+    };
 
 export interface Distribution {
   defense: number[];
@@ -271,7 +320,7 @@ export interface Artifact {
   skills: SkillDef[];
 }
 
-/** 传奇英雄面板（仅预选模式·带传奇）：与英雄一一绑定，≈"第 4 件神器"；技能开局即可用（无需激活）。 */
+/** 传奇英雄面板（仅预设模式·带传奇）：与英雄一一绑定，≈"第 4 件神器"；技能开局即可用（无需激活）。 */
 export interface LegendPanel {
   id: string; // 'L01'
   heroKey: string; // 绑定的英雄 key
@@ -291,7 +340,7 @@ export interface PlayerState {
   id: PlayerId;
   areas: Record<DiceKind, Die[]>;
   artifacts: Artifact[];
-  /** 传奇英雄面板（仅预选模式·带传奇时存在，否则为 undefined） */
+  /** 传奇英雄面板（仅预设模式·带传奇时存在，否则为 undefined） */
   legend?: LegendPanel | null;
   life: number;
   lifeMax: number;
@@ -312,6 +361,16 @@ export interface PlayerState {
   wuguang?: 'up' | 'down' | null;
   /** L08 蛇蝎之泪：本回合内由「填弹」**实际叠加**的计数累计（回合开始清零；X 取其平方） */
   tiandanGainedThisTurn: number;
+  /** 该玩家**自己的**回合计数（回合开始 +1，封顶 4；L04 重开清零）——供 T05「前 3 个回合」判定 */
+  turnsTaken: number;
+  /** 战术牌「整局最多 1 次」类的标记（T07 保守 / T09 慈悲；L04 重开清零） */
+  tacticOnceUsed: boolean;
+  /** 战术牌上存放的骰（T15 影子：置于本战术上；使用同点数骰后移入对应区域） */
+  tacticHeldDie: { id: string; value: number } | null;
+  /** T13「远见」：战斗开始时猜测"生命最先降为 20 点或以下"的玩家（未猜/非本牌=null） */
+  tacticGuess: PlayerId | null;
+  /** 战术牌（战斗牌）：本场选定的 1 张 id（战前抽 2 留 1 / 构筑·挑战直接选）；未选=null */
+  tactic?: string | null;
 }
 
 export interface LogEntry {
@@ -354,6 +413,16 @@ export interface GameState {
   virtualQueue: { attacker: PlayerId; value: number; label: string; owner: PlayerId }[] | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;
+  /** 战术牌·战前「抽 2 留 1」：剩余可抽池（抽走的会移出 → 双方天然不同名） */
+  tacticPool: string[];
+  /** 战术牌·战前「抽 2 留 1」：剩余待选者（按先后手） */
+  tacticQueue: PlayerId[];
+  /** 战术牌·战前「抽 2 留 1」：当前选者抽到的 2 张（选完即清） */
+  tacticHand: string[];
+  /** 战术牌·"战斗开始时"效果是否已结算（生命修正等只跑一次；进入初始重掷前收口） */
+  tacticStartDone: boolean;
+  /** T13「远见」：**第一个**生命降为 ≤20 的玩家（只记一次，全局；无=null）。L04 重开不清除（生命继承）。 */
+  tacticLowFirst: PlayerId | null;
   /** 待弹出的待决策队列（多个触发同时排队时按序弹出，避免互相覆盖） */
   pendingQueue: Pending[];
   /** 019 尘哀·尘起：本回合该玩家是否已触发过（每回合最多 1 次） */

@@ -4,7 +4,7 @@ import { createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { effectiveSpeed, effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 import { dealTrueDamage } from './combat';
-import { noteYuluoDiceConsumed } from './effects';
+import { noteYuluoDiceConsumed, offerAdapt } from './effects';
 
 /** 补充阶段：补充 min(速度, 意志 - 现有骰数) 颗随机骰，按分布落区 */
 export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
@@ -13,15 +13,18 @@ export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
   if (!dist) throw new Error(`player ${player} has no distribution`);
   const room = Math.max(0, effectiveWill(p) - totalDice(p));
   const count = Math.min(effectiveSpeed(p), room);
+  const rolled: Die[] = [];
   for (let i = 0; i < count; i++) {
     const die = createDie(newDieId(`${player}-`), rng.rollDie());
     placeDieByDistribution(p.areas, die, dist);
+    rolled.push(die);
   }
   logLine(
     g,
     count > 0 ? `${pname(player)} 补充 ${count} 颗能力骰` : `${pname(player)} 无需补充能力骰`,
     'refill',
   );
+  offerAdapt(g, player, rolled, true); // T18「适应」
   return count;
 }
 
@@ -50,6 +53,7 @@ export function rerollPhase(g: GameState, player: PlayerId, dieIds: string[], rn
     newDice.push(die);
   }
   logLine(g, `${pname(player)} 重掷 ${dieIds.length} 颗能力骰（新点数：${vals(newDice)}）`, 'reroll');
+  offerAdapt(g, player, newDice, true); // T18「适应」
 }
 
 /**

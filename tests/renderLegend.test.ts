@@ -53,7 +53,7 @@ const render = (state: GameState, prefs?: Partial<UiState['prefs']>): HTMLElemen
 const kinds = (panel: Element): (string | undefined)[] =>
   Array.from(panel.querySelectorAll('.areas .area')).map((a) => (a as HTMLElement).dataset.kind);
 
-describe('renderGame · 传奇模式布局（预选·带传奇）', () => {
+describe('renderGame · 传奇模式布局（预设·带传奇）', () => {
   it('带传奇：无左侧栏；中段出现战报格；传奇框是面板直接子节点（不在神器行内）', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
     const root = render(g);
