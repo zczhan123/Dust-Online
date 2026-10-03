@@ -148,6 +148,24 @@ describe('renderGame (read-only snapshot)', () => {
     );
     expect(boxes.length).toBe(1);
     expect(boxes[0].querySelectorAll('.skill-part').length).toBe(3);
+    // 009 全为 only 侧 → 隐藏描述时归入「一行居中」容器
+    expect(card.querySelector('.skills--inline--only')).not.toBeNull();
+  });
+
+  it('隐藏描述：左右技能分两列（左列=左侧、右列=右侧），011 顺序正确', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '012'] });
+    renderGame(state, root, hooksFor());
+    const card = root.querySelector('.player--self .card[data-artifact="011"]')!;
+    const left = card.querySelector('.skill--left')!;
+    const right = card.querySelector('.skill--right')!;
+    const names = (el: Element): string[] =>
+      Array.from(el.querySelectorAll<HTMLElement>('.skill-part')).map(
+        (p) =>
+          `${p.querySelector('.skill-type')?.textContent ?? ''}${p.querySelector('.skill-name')?.textContent ?? ''}`,
+      );
+    expect(names(left)).toEqual(['启动灵能屏障', '触发灵能屏障']);
+    expect(names(right)).toEqual(['启动灵能脉冲', '触发灵能脉冲']);
+    expect(card.querySelector('.skills--inline--only')).toBeNull();
   });
 
   it('renders the 006 零时枭首 ultimate as a clickable part when active', () => {
@@ -179,35 +197,55 @@ describe('renderGame (read-only snapshot)', () => {
     expect(root.textContent ?? '').toContain('雨切（武士刀）');
   });
 
-  it('shows both players life in the merged vitals bar, colored by player', () => {
+  it('shows each player life as a progress bar inside their own panel, colored by player', () => {
     renderGame(setupGame({ seed: 1, firstPlayer: 'A' }), root, hooksFor());
-    const lifeA = root.querySelector('.centerband .vitals-life.life-A');
-    const lifeB = root.querySelector('.centerband .vitals-life.life-B');
-    expect(lifeA).not.toBeNull();
-    expect(lifeB).not.toBeNull();
-    expect(lifeA!.textContent).toContain('生命');
-    // 原来的玩家头部生命显示已移除
+    // 中段不再有合并生命栏；但保留原占地的右槽（现放「设置」）
+    expect(root.querySelector('.vitals')).toBeNull();
+    expect(root.querySelector('.centerband-right')).not.toBeNull();
+    expect(root.querySelector('.centerband-right .btn-settings')).not.toBeNull();
+    // 每个面板各一条生命条，显示本方生命
+    expect(root.querySelectorAll('.lifeline')).toHaveLength(2);
+    const self = root.querySelector('.player--self .lifeline')!;
+    const enemy = root.querySelector('.player--enemy .lifeline')!;
+    expect(self.querySelector('.lifeline-hp')!.textContent).toMatch(/^生命 \d+\/\d+$/);
+    expect(enemy.querySelector('.lifeline-hp')!.textContent).toMatch(/^生命 \d+\/\d+$/);
+    // 进度条按玩家配色
+    expect(self.querySelector('.lifeline-fill')!.classList.contains('bg-A')).toBe(true);
+    expect(enemy.querySelector('.lifeline-fill')!.classList.contains('bg-B')).toBe(true);
+    // 玩家头部/归属标签仍不存在
     expect(root.querySelector('.player-life')).toBeNull();
-    // 颜色圆圈：从玩家头部移到生命值栏（头部已整体移除）
     expect(root.querySelector('.player-header')).toBeNull();
-    expect(root.querySelector('.vitals .dot-A')).not.toBeNull();
-    expect(root.querySelector('.vitals .dot-B')).not.toBeNull();
   });
 
-  it('orders the two life rows as [enemy, self] so they flip with the active player', () => {
-    const state = createGame({ seed: 1, firstPlayer: 'A' });
-    const rowIds = () =>
-      Array.from(root.querySelectorAll<HTMLElement>('.vitals .vitals-item')).map((e) =>
-        e.classList.contains('vitals-A') ? 'A' : 'B',
-      );
-
+  it('places the tactic bar under the 1st artifact and the life bar under the 3rd (band)', () => {
+    const state = setupGame({ seed: 1, firstPlayer: 'A' });
+    state.players.A.tactic = 'T02';
+    state.players.B.tactic = 'T02';
     renderGame(state, root, hooksFor());
-    // A 行动 → 自己=A 在下、敌人=B 在上
-    expect(rowIds()).toEqual(['B', 'A']);
+    for (const role of ['self', 'enemy'] as const) {
+      const band = root.querySelector(`.player--${role} .playband`)!;
+      expect(band).not.toBeNull();
+      const bar = band.querySelector<HTMLElement>(':scope > .tactic-bar')!;
+      const life = band.querySelector<HTMLElement>(':scope > .lifeline')!;
+      expect(bar).not.toBeNull();
+      expect(life).not.toBeNull();
+      // 网格列：战术条＝前 2 列（2 个神器宽），生命条＝第 3 列（镜像关闭时）
+      expect(bar.style.gridColumn).toBe('1 / span 2');
+      expect(life.style.gridColumn).toBe('3');
+    }
+  });
 
-    state.activePlayer = 'B';
+  it('shows the life bonus as a player-colored pill on the 3rd-column artifact title', () => {
+    const state = setupGame({ seed: 1, firstPlayer: 'A' });
+    state.players.A.lifeMax = 56; // 生命 50 + 6
     renderGame(state, root, hooksFor());
-    expect(rowIds()).toEqual(['A', 'B']);
+    const c3 = Array.from(root.querySelectorAll<HTMLElement>('.player--self .card')).find((c) =>
+      c.textContent?.includes('第3列'),
+    );
+    expect(c3).not.toBeUndefined();
+    const pill = c3!.querySelector('.card-sub .sub-delta.player-A');
+    expect(pill).not.toBeNull();
+    expect(pill!.textContent).toBe('+6');
   });
 
   it('highlights the pending skill name in the hint with the acting player color', () => {
@@ -268,7 +306,7 @@ describe('renderGame (read-only snapshot)', () => {
     expect(tag('.player--enemy')).toBe('A');
   });
 
-  it('collapses the log into an edge-button drawer when 战报栏 = 收起', () => {
+  it('collapses the log into a left-edge tab drawer when 战报栏 = 收起', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     const ui = freshUi({ logCollapsed: true });
     let hooks: RenderHooks;
@@ -282,20 +320,15 @@ describe('renderGame (read-only snapshot)', () => {
     renderGame(state, root, hooks);
 
     expect(root.querySelector('.app')!.classList.contains('log-collapsed')).toBe(true);
-    expect(root.querySelector('.edge-bar [data-act="edgeSettingsOpen"]')).not.toBeNull();
+    // 左上角不再有「设置/战报」按钮组；改为左中贴边拉手
+    expect(root.querySelector('.edge-bar')).toBeNull();
+    expect(root.querySelector('.log-tab')).not.toBeNull();
+    // 设置入口仍在中段右槽
+    expect(root.querySelector('.centerband-right .btn-settings')).not.toBeNull();
     expect(root.querySelector('.log-drawer')).toBeNull();
 
-    // 贴边按钮组里有「设置」入口（避免收起战报后无法进设置）
-    const edgeSettings = root.querySelector<HTMLButtonElement>(
-      '.edge-bar [data-act="edgeSettingsOpen"]',
-    )!;
-    expect(edgeSettings).not.toBeNull();
-    edgeSettings.click();
-    expect(ui.settingsOpen).toBe(true);
-    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
-    expect(ui.settingsOpen).toBe(false);
-
-    root.querySelector<HTMLButtonElement>('.edge-bar [data-act="logOpen"]')!.click();
+    // 点贴边拉手 → 打开战报抽屉
+    root.querySelector<HTMLButtonElement>('.log-tab[data-act="logOpen"]')!.click();
     expect(ui.logOpen).toBe(true);
     expect(root.querySelector('.log-drawer .log')).not.toBeNull();
 
@@ -306,10 +339,23 @@ describe('renderGame (read-only snapshot)', () => {
     root.querySelector<HTMLButtonElement>('.settings-close')!.click();
 
     // 重新打开抽屉后，点空白处关闭
-    root.querySelector<HTMLButtonElement>('.edge-bar [data-act="logOpen"]')!.click();
+    root.querySelector<HTMLButtonElement>('.log-tab[data-act="logOpen"]')!.click();
     root.querySelector<HTMLElement>('.log-overlay')!.click();
     expect(ui.logOpen).toBe(false);
     expect(root.querySelector('.log-drawer')).toBeNull();
+  });
+
+  it('传奇模式：设置里「战报栏」置灰禁用（非传奇可用）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
+    const { ui, hooks } = mount(g, root);
+    ui.settingsOpen = true;
+    renderGame(g, root, hooks);
+    const row = Array.from(root.querySelectorAll('.settings-row')).find(
+      (r) => r.querySelector('.settings-label')?.textContent === '战报栏',
+    )!;
+    const btns = Array.from(row.querySelectorAll<HTMLButtonElement>('.settings-opt'));
+    expect(btns).toHaveLength(2);
+    expect(btns.every((b) => b.disabled)).toBe(true);
   });
 
   it('applies preset combos and switches to 自定义 when a single item is changed', () => {
@@ -406,7 +452,7 @@ describe('renderGame (read-only snapshot)', () => {
       const { ui } = mount(state, root);
       root
         .querySelector<HTMLElement>('.player--self .card[data-artifact="001"] .card-art')!
-        .click();
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       expect(ui.detail).not.toBeNull();
       const pop = root.querySelector<HTMLElement>('.detail-popover')!;
       expect(pop.classList.contains('detail-popover--sheet')).toBe(true);
@@ -637,7 +683,8 @@ describe('renderGame (read-only snapshot)', () => {
     applyAction(state, { t: 'zhihaiReroll', dieIds: [] });
     renderGame(state, root, hooksFor());
     expect(root.querySelector(rowSel)!.classList.contains('skill-part--disabled')).toBe(true);
-    expect(root.querySelector(rowSel)!.textContent).toContain('已使用');
+    expect(root.querySelector(rowSel)!.classList.contains('skill-part--used')).toBe(true);
+    expect(root.querySelector(rowSel)!.textContent).not.toContain('已使用');
     expect((root.querySelector('.hint-phase')!.textContent ?? '').includes('强制发动')).toBe(false);
   });
 
@@ -838,7 +885,7 @@ describe('renderGame (read-only snapshot)', () => {
     // 持续行 → 深灰；必杀行 → 已使用灰
     expect(root.querySelector(durSel)!.classList.contains('skill-part--disabled')).toBe(true);
     expect(root.querySelector(durSel)!.classList.contains('skill-part--on')).toBe(false);
-    expect(root.querySelector(ultSel)!.textContent).toContain('已使用');
+    expect(root.querySelector(ultSel)!.classList.contains('skill-part--used')).toBe(true);
     // 已激活徽标 → 同样转灰（文案不变、不加文字）
     const act = root.querySelector(`${sel} .badge-active`)!;
     expect(act.classList.contains('badge-active--spent')).toBe(true);
@@ -1301,7 +1348,11 @@ describe('renderGame (interaction)', () => {
     expect(zone.querySelector('.actionlist')).not.toBeNull();
     // 尘落在操作栏提示行右上角
     expect(zone.querySelector('.hint .hint-dust')?.textContent).toContain('尘落');
-    expect(band.querySelector('.centerband-right .vitals')).not.toBeNull();
+    // 中段不再有独立生命栏（生命改为面板内进度条）；右槽保留并放「设置」
+    expect(band.querySelector('.vitals')).toBeNull();
+    expect(band.querySelector('.centerband-right .btn-settings')).not.toBeNull();
+    // 左栏顶部不再有设置行（设置已移到右槽）
+    expect(root.querySelector('.sidebar-head')).toBeNull();
   });
 
   it('orders dice areas as 防御/攻击/冥想 so the attack area sits in the middle', () => {
@@ -1334,7 +1385,7 @@ describe('renderGame (interaction)', () => {
     expect((root.textContent ?? '').length).toBeGreaterThan(0);
   });
 
-  it('opens a read-only skill detail popover by clicking the card art', () => {
+  it('opens a read-only skill detail popover by right-clicking the card art (not left-click)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'] });
     const { ui } = mount(state, root);
     expect(root.querySelector('.detail-popover')).toBeNull();
@@ -1343,7 +1394,11 @@ describe('renderGame (interaction)', () => {
       '.player--self .card[data-artifact="001"] .card-art',
     )!;
     expect(art.classList.contains('detail-trigger')).toBe(true);
+    // 左键不再打开详情
     art.click();
+    expect(ui.detail).toBeNull();
+    // 右键打开
+    art.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(ui.detail!.artifactId).toBe('001');
 
     const pop = root.querySelector<HTMLElement>('.detail-popover')!;
@@ -1666,14 +1721,15 @@ describe('renderGame (interaction)', () => {
     expect(lines[2].textContent).toContain('第一条');
   });
 
-  it('marks a used ultimate with a 已使用 badge and disables it', () => {
+  it('marks a used ultimate via the --used colour state (no 已使用 badge) and disables it', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     state.ultimatesUsed.push('A:mingjing.ultimate');
     state.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
     const used = root.querySelectorAll<HTMLElement>('.player--self .skill-part--used');
     expect(used.length).toBe(1);
-    expect(used[0].textContent).toContain('已使用');
+    expect(used[0].querySelector('.badge-used')).toBeNull();
+    expect(used[0].textContent).not.toContain('已使用');
     expect(used[0].classList.contains('clickable')).toBe(false);
   });
 

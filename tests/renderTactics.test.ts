@@ -97,12 +97,23 @@ describe('战斗界面·战术牌横条', () => {
     const g = played();
     const { root, ui } = mount(g);
     const nameBtn = root.querySelector<HTMLElement>('.tactic-bar-name')!;
+    expect(nameBtn.dataset.tactic).toBeTruthy(); // 供"连续右键"遮罩转发识别
     nameBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(ui.detail?.artifactId).toBeTruthy();
     const pop = root.querySelector('.detail-popover--tactic');
     expect(pop).not.toBeNull();
     expect(pop!.querySelector('img')!.getAttribute('src')).toMatch(/^\.\/tactics\/T0[0-9]\.jpg$/);
     expect(pop!.querySelector('.detail-tactic-eff')!.textContent!.length).toBeGreaterThan(0);
+  });
+
+  it('「战术」药丸常显：隐藏技能描述时仍保留（复用 .skill-type 外观）', () => {
+    const g = played();
+    const { root } = mount(g); // showSkillText=false
+    const bar = root.querySelector('.tactic-bar')!;
+    const kind = bar.querySelector('.tactic-bar-kind')!;
+    expect(kind.textContent).toBe('战术');
+    expect(kind.classList.contains('skill-type')).toBe(true);
+    expect(bar.querySelector('.tactic-bar-eff')).toBeNull();
   });
 
   it('无战术牌 → 不渲染横条', () => {
@@ -341,7 +352,9 @@ describe('战术牌横条三态（生效中/已用尽/普通）', () => {
     const { root: root2 } = mount(g);
     const hd = barOf(root2, 'A').querySelector('.tactic-held-die')!;
     expect(hd.textContent).toBe('5');
-    expect(hd.previousElementSibling!.classList.contains('tactic-bar-name')).toBe(true);
+    // 顺序：名字 → 「战术｜」→ 存放骰
+    expect(hd.previousElementSibling!.classList.contains('tactic-bar-kind')).toBe(true);
+    expect(hd.previousElementSibling!.previousElementSibling!.classList.contains('tactic-bar-name')).toBe(true);
     g.players.A.tacticOnceUsed = true;
     const { root: root3 } = mount(g);
     expect(barOf(root3, 'A').classList.contains('tactic-bar--spent')).toBe(true);

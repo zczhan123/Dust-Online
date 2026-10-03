@@ -59,22 +59,30 @@ describe('renderGame · 传奇模式布局（预设·带传奇）', () => {
     const root = render(g);
     expect(root.querySelectorAll('.sidebar')).toHaveLength(0);
     expect(root.querySelectorAll('.centerband-log')).toHaveLength(1);
+    // 设置按钮移到中段右侧空槽（战报格顶部不再放设置）
+    expect(root.querySelector('.centerband-right .btn-settings')).not.toBeNull();
     expect(root.querySelectorAll('.card-legend')).toHaveLength(2);
     expect(root.querySelectorAll('.player--legend')).toHaveLength(2);
     expect(root.querySelectorAll('.area-spacer')).toHaveLength(0);
-    // 面板直接子节点 = [传奇框, 神器行, 骰区行]；传奇框不在神器行里
+    // 面板直接子节点 = [传奇列, 右列]；传奇框在传奇列里、右列 = 神器/band/骰区
     const selfPanel = root.querySelector('.player--self')!;
-    expect(selfPanel.children).toHaveLength(3);
-    expect(Array.from(selfPanel.children).some((c) => c.classList.contains('card-legend'))).toBe(true);
+    expect(selfPanel.children).toHaveLength(2);
+    expect(selfPanel.querySelector('.legend-col > .card-legend')).not.toBeNull();
+    expect(selfPanel.querySelector('.right-col > .cards')).not.toBeNull();
     expect(selfPanel.querySelector('.cards > .card-legend')).toBeNull();
     expect(selfPanel.querySelectorAll('.cards > .card')).toHaveLength(3);
+    expect(selfPanel.querySelectorAll('.playband > .lifeline')).toHaveLength(1);
     expect(root.querySelector('.player--self .card-legend')!.getAttribute('data-legend')).toBe('L01');
     expect(root.querySelector('.player--self .card-legend .card-name')!.textContent).toBe('雨中剑圣 空');
+    // 名字后跟「传奇英雄」小字（.card-sub）
+    expect(root.querySelector('.player--self .card-legend .card-head .card-sub')!.textContent).toBe('传奇英雄');
+    // 传奇模式：无战报贴边拉手（战报常驻中段战报格）
+    expect(root.querySelector('.log-tab')).toBeNull();
   });
 
   it('传奇框面板图＝黑底板（无「传奇」徽标）', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
-    const root = render(g);
+    const root = render(g, { cardArt: 'full' });
     const self = root.querySelector('.player--self .card-legend')!;
     expect(self.querySelectorAll('.card-legend-badge')).toHaveLength(0);
     const art = self.querySelector('.card-legend-art')!;
@@ -111,10 +119,42 @@ describe('renderGame · 传奇模式布局（预设·带传奇）', () => {
     // 敌方神器行整行反序（B 默认 004/005/006 → 006/005/004）
     expect(Array.from(enemy.querySelectorAll('.cards > .card')).map((c) => (c as HTMLElement).dataset.artifact))
       .toEqual(['006', '005', '004']);
-    // 传奇框仍在面板直接子节点（不在神器行内）
-    expect(Array.from(enemy.children).some((c) => c.classList.contains('card-legend'))).toBe(true);
+    // 传奇框在传奇列里（不在神器行内）
+    expect(enemy.querySelector('.legend-col > .card-legend')).not.toBeNull();
     // 骰区顺序仍恒镜像
     expect(kinds(enemy)).toEqual(['meditation', 'attack', 'defense']);
+  });
+
+  it('传奇卡图「缩略」：统一横条 + 按眼睛锚定（--legend-eye-y 已写入）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
+    const root = render(g, { cardArt: 'thumb' });
+    expect(root.querySelectorAll('.player--legend-thumb')).toHaveLength(2);
+    const art = root.querySelector('.player--self .card-legend-art')!;
+    expect(art.classList.contains('card-legend-art--thumb')).toBe(true);
+    const style = (art.getAttribute('style') ?? '').replace(/\s/g, '');
+    expect(style).toContain('aspect-ratio');
+    expect(style).toContain('--legend-eye-y');
+    const img = art.querySelector('img') as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute('src')).toBe('./legend/L01.jpg');
+  });
+
+  it('传奇卡图「完整」：用整图、面板走顶部对齐（player--legend-full）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
+    const root = render(g, { cardArt: 'full' });
+    expect(root.querySelectorAll('.player--legend-full')).toHaveLength(2);
+    expect(root.querySelectorAll('.player--legend-thumb')).toHaveLength(0);
+    const art = root.querySelector('.player--self .card-legend-art')!;
+    expect(art.classList.contains('card-legend-art--thumb')).toBe(false);
+  });
+
+  it('传奇面板·隐藏描述：用独立的 .skills--inline-legend（不受神器「两列/居中」改动影响）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L01', legendB: 'L02' });
+    const root = render(g, { showSkillText: false });
+    const skills = root.querySelector('.player--self .card-legend .skills')!;
+    expect(skills.classList.contains('skills--inline-legend')).toBe(true);
+    expect(skills.classList.contains('skills--inline')).toBe(false);
+    expect(skills.classList.contains('skills--inline--only')).toBe(false);
   });
 });
 

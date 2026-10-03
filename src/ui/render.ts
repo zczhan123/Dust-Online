@@ -622,7 +622,12 @@ function metaParts(art: Artifact, player: PlayerState | null): (string | HTMLEle
     const d = player ? effectiveWill(player) - art.will : 0;
     if (player && d !== 0) parts.push(deltaSpan(player, d));
   }
-  if (art.life !== undefined) parts.push(`生命 ${art.life}`);
+  if (art.life !== undefined) {
+    parts.push(`生命 ${art.life}`);
+    // 生命上限加成：与其他属性（速度/意志）同款「玩家色药丸」；无加成不显示
+    const d = player ? player.lifeMax - art.life : 0;
+    if (player && d !== 0) parts.push(deltaSpan(player, d));
+  }
   if (art.chargeReq !== undefined) {
     // 「充能」为纯文本（与「生命」同样式）；y/x 用旧黄色药丸（`充能 ` 末尾保留半角空格 → 文案仍是「充能 0/1」）
     parts.push('充能 ');
@@ -755,81 +760,93 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
 
   const text = ARTIFACT_TEXT[a.id];
   if (text) {
-    const skills = el('div', `skills${ctx.prefs.showSkillText ? '' : ' skills--inline'}`);
-    const groups = new Map<string, typeof text.skills>();
-    for (const s of text.skills) {
-      const existing = groups.get(s.name);
-      if (existing) existing.push(s);
-      else groups.set(s.name, [s]);
-    }
-    for (const [groupName, parts] of groups) {
-      const box = el('div', 'skill');
-      for (const s of parts) {
-        const pstate = skillPartState(ctx, a, s);
-        const pcls =
-          pstate === 'on'
-            ? 'skill-part--on'
-            : pstate === 'disabled'
-              ? 'skill-part--disabled'
-              : pstate === 'spent'
-                ? 'skill-part--spent'
-                : 'skill-part--off';
-        const part = el('div', `skill-part ${pcls}`);
-        part.dataset.side = s.side;
-        const key = findSkillKey(a, s.side, s.type);
-        if (key) part.dataset.key = key;
+    const showText = ctx.prefs.showSkillText;
+    const skills = el('div', `skills${showText ? '' : ' skills--inline'}`);
 
-        const isUsedUltimate =
-          key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(skillUseKey(player.id, key));
-        if (isUsedUltimate) part.classList.add('skill-part--used');
-        const isForcedNow = zhihaiForcedFrame(ctx, a, s);
+    // 单个技能条目 → `.skill-part`（类型徽标 + 技能名 + 状态/强制徽标；描述仅在「显示」时加入）
+    const buildPart = (s: (typeof text.skills)[number], label: string): HTMLElement => {
+      const pstate = skillPartState(ctx, a, s);
+      const pcls =
+        pstate === 'on'
+          ? 'skill-part--on'
+          : pstate === 'disabled'
+            ? 'skill-part--disabled'
+            : pstate === 'spent'
+              ? 'skill-part--spent'
+              : 'skill-part--off';
+      const part = el('div', `skill-part ${pcls}`);
+      part.dataset.side = s.side;
+      const key = findSkillKey(a, s.side, s.type);
+      if (key) part.dataset.key = key;
 
-        const pHead = el('div', 'skill-part-head');
-        const badge = el('span', 'skill-type');
-        badge.textContent = s.type;
-        pHead.appendChild(badge);
-        // 技能名与类型徽标同行（隐藏描述时这就是那一行的主体，也是点击发动的目标）
-        const nameEl = el('span', 'skill-name');
-        nameEl.textContent = groupName;
-        pHead.appendChild(nameEl);
-        if (isForcedNow) {
-          const forced = el('span', 'badge badge-forced');
-          forced.textContent = '强制发动';
-          pHead.appendChild(forced);
-        } else if (isUsedUltimate) {
-          const used = el('span', 'badge badge-used');
-          used.textContent = '已使用';
-          pHead.appendChild(used);
-        }
-        if (ctx.prefs.showSkillText) {
-          const body = el('div', 'skill-text');
-          body.textContent = s.text;
-          pHead.appendChild(body);
-        }
-        part.appendChild(pHead);
+      const isUsedUltimate =
+        key != null && s.type.includes('必杀') && ctx.state.ultimatesUsed.includes(skillUseKey(player.id, key));
+      if (isUsedUltimate) part.classList.add('skill-part--used');
+      const isForcedNow = zhihaiForcedFrame(ctx, a, s);
 
-        const skillAction = ctx.legal.find(
-          (x): x is SkillAction =>
-            x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
-        );
-        if (skillAction && isActivatableType(s.type) && !isUsedUltimate) {
-          part.classList.add('clickable');
-          part.dataset.act = 'skill';
-          part.title = '点击启动技能';
-          const skillKey = key;
-          part.addEventListener('click', () => {
-            if (skillKey && SKILL_SELECTION[skillKey]) {
-              startSkillSelection(ctx, skillAction, skillKey);
-            } else {
-              ctx.hooks.propose(skillAction, `启动技能：${skillName(ctx.state, skillAction)}`);
-            }
-          });
-        }
-
-        box.appendChild(part);
+      const pHead = el('div', 'skill-part-head');
+      const badge = el('span', 'skill-type');
+      badge.textContent = s.type;
+      pHead.appendChild(badge);
+      // 技能名与类型徽标同行（隐藏描述时这就是那一行的主体，也是点击发动的目标）
+      const nameEl = el('span', 'skill-name');
+      nameEl.textContent = label;
+      pHead.appendChild(nameEl);
+      if (isForcedNow) {
+        const forced = el('span', 'badge badge-forced');
+        forced.textContent = '强制发动';
+        pHead.appendChild(forced);
       }
+      if (showText) {
+        const body = el('div', 'skill-text');
+        body.textContent = s.text;
+        pHead.appendChild(body);
+      }
+      part.appendChild(pHead);
 
-      skills.appendChild(box);
+      const skillAction = ctx.legal.find(
+        (x): x is SkillAction => x.t === 'skill' && x.artifactId === a.id && x.side === s.side,
+      );
+      if (skillAction && isActivatableType(s.type) && !isUsedUltimate) {
+        part.classList.add('clickable');
+        part.dataset.act = 'skill';
+        part.title = '点击启动技能';
+        const skillKey = key;
+        part.addEventListener('click', () => {
+          if (skillKey && SKILL_SELECTION[skillKey]) {
+            startSkillSelection(ctx, skillAction, skillKey);
+          } else {
+            ctx.hooks.propose(skillAction, `启动技能：${skillName(ctx.state, skillAction)}`);
+          }
+        });
+      }
+      return part;
+    };
+
+    if (showText) {
+      // 显示描述：按技能名分组（同一技能名的多个条目收在一个盒子里）
+      const groups = new Map<string, typeof text.skills>();
+      for (const s of text.skills) {
+        const existing = groups.get(s.name);
+        if (existing) existing.push(s);
+        else groups.set(s.name, [s]);
+      }
+      for (const [groupName, parts] of groups) {
+        const box = el('div', 'skill');
+        for (const s of parts) box.appendChild(buildPart(s, groupName));
+        skills.appendChild(box);
+      }
+    } else {
+      // 隐藏描述：按「侧」分组 —— 左列（左对齐）/ 右列（右对齐）；全是 only 则一行居中
+      const hasOnly = text.skills.every((s) => s.side === 'only');
+      for (const side of ['left', 'right', 'only'] as const) {
+        const parts = text.skills.filter((s) => s.side === side);
+        if (!parts.length) continue;
+        const box = el('div', `skill skill--${side}`);
+        for (const s of parts) box.appendChild(buildPart(s, s.name));
+        skills.appendChild(box);
+      }
+      if (hasOnly) skills.classList.add('skills--inline--only');
     }
     card.appendChild(skills);
   }
@@ -873,6 +890,42 @@ function legendSkillState(
 }
 
 /**
+ * 传奇卡图「缩略」＝统一横条（锚定人物眼睛）。
+ * 逐图给出**眼睛纵向位置（占图高比例 y）**与**图高 h(px)**；12 张均宽 787。
+ * 微调横条高度：只改 `LEGEND_THUMB_H`（比例由此处内联写入 `aspect-ratio`）。
+ * 第一阶段：卡图区先留空（占位块），把统一尺寸定死；第二阶段再上眼睛裁切图。
+ */
+const LEGEND_ART_W = 787;
+const LEGEND_THUMB_H = 220; // ← 横条高度（在 787 宽下的像素高）；调高度改这一个数
+const LEGEND_EYE: Record<string, { y: number; h: number }> = {
+  L01: { y: 0.42, h: 647 },
+  L02: { y: 0.47, h: 676 },
+  L03: { y: 0.68, h: 680 },
+  L04: { y: 0.6, h: 740 },
+  L05: { y: 0.62, h: 678 },
+  L06: { y: 0.68, h: 619 },
+  L07: { y: 0.58, h: 686 },
+  L08: { y: 0.62, h: 645 },
+  L09: { y: 0.67, h: 685 },
+  L10: { y: 0.59, h: 680 },
+  L11: { y: 0.64, h: 658 },
+  L12: { y: 0.71, h: 647 },
+};
+
+/** 缩略：写入统一横条比例，并算好「眼睛居中」的 object-position 的 Y%（存为 CSS 变量 `--legend-eye-y`，第二阶段供图片使用）。 */
+function applyLegendThumbAspect(art: HTMLElement, id: string): void {
+  art.style.aspectRatio = `${LEGEND_ART_W} / ${LEGEND_THUMB_H}`;
+  const eye = LEGEND_EYE[id];
+  let y = 0.5;
+  if (eye && eye.h > LEGEND_THUMB_H) {
+    // boxH(在 787 宽下) = LEGEND_THUMB_H → 让眼睛位于横条中央：Y = (eyeH - boxH/2) / (h - boxH)
+    const boxH = LEGEND_THUMB_H;
+    y = Math.max(0, Math.min(1, (eye.y * eye.h - boxH / 2) / (eye.h - boxH)));
+  }
+  art.style.setProperty('--legend-eye-y', `${(y * 100).toFixed(1)}%`);
+}
+
+/**
  * 传奇英雄面板（预设·带传奇）：外形沿用神器卡（`.card`）。
  * 技能区与神器卡同款（技能名＋类型徽标；描述跟随「显示技能描述」）。
  */
@@ -885,6 +938,10 @@ function legendBox(player: PlayerState, ctx: Ctx): HTMLElement {
   const name = el('span', 'card-name');
   name.textContent = lg.name;
   head.appendChild(name);
+  // 「传奇英雄」小字（与神器标题小字同款）；位于名字之后、计数之前
+  const kind = el('span', 'card-sub');
+  kind.textContent = '传奇英雄';
+  head.appendChild(kind);
   if (lg.count > 0 || lg.countCap !== undefined) {
     const count = el('span', 'badge badge-count');
     count.textContent = lg.countCap ? `计数 ${lg.count}/${lg.countCap}` : `计数 ${lg.count}`;
@@ -892,8 +949,10 @@ function legendBox(player: PlayerState, ctx: Ctx): HTMLElement {
   }
   box.appendChild(head);
 
-  // 面板图＝黑底板（同选择界面迷你头像规则：底色 #000、显示框 787:756＝满高740+上下各8px、图垂直居中、超出裁掉、无圆角）
-  const art = el('div', 'card-legend-art');
+  // 缩略＝统一横条（按眼睛锚定裁切）；完整＝现整图（787:756 黑底板、图垂直居中）
+  const thumb = ctx.prefs.cardArt === 'thumb';
+  const art = el('div', `card-legend-art${thumb ? ' card-legend-art--thumb' : ''}`);
+  if (thumb) applyLegendThumbAspect(art, lg.id);
   const img = document.createElement('img');
   img.src = legendImageUrl(lg.id);
   img.alt = lg.name;
@@ -910,55 +969,77 @@ function legendBox(player: PlayerState, ctx: Ctx): HTMLElement {
 
   const text = LEGEND_TEXT[lg.id];
   if (text && text.skills.length) {
-    const skills = el('div', `skills${ctx.prefs.showSkillText ? '' : ' skills--inline'}`);
-    const groups = new Map<string, typeof text.skills>();
-    for (const s of text.skills) {
-      const g = groups.get(s.name);
-      if (g) g.push(s);
-      else groups.set(s.name, [s]);
-    }
-    for (const [groupName, parts] of groups) {
-      const skillBox = el('div', 'skill');
-      for (const s of parts) {
-        const state = legendSkillState(ctx, player, lg, s);
-        const cls =
-          state === 'on' ? 'skill-part--on' : state === 'disabled' ? 'skill-part--disabled' : 'skill-part--off';
-        const part = el('div', `skill-part ${cls}`);
-        const key = legendFindKey(lg, s);
-        if (key) part.dataset.key = key;
-        const pHead = el('div', 'skill-part-head');
-        const badge = el('span', 'skill-type');
-        badge.textContent = s.type;
-        pHead.appendChild(badge);
-        const nameEl = el('span', 'skill-name');
-        nameEl.textContent = groupName;
-        pHead.appendChild(nameEl);
-        if (ctx.prefs.showSkillText) {
-          const body = el('div', 'skill-text');
-          body.textContent = s.text;
-          pHead.appendChild(body);
-        }
-        part.appendChild(pHead);
-        // 可发动（启动 / 激活 / 必杀，与神器卡一致）：点击 → 发动（面板动作带 legendKey，按 key 精确匹配）
-        const action = ctx.legal.find(
-          (x): x is SkillAction =>
-            x.t === 'skill' &&
-            x.artifactId === lg.id &&
-            (((x.params?.legendKey as string | undefined) ?? key) === key || x.side === s.side),
-        );
-        if (action && isActivatableType(s.type) && state === 'on') {
-          part.classList.add('clickable');
-          part.dataset.act = 'skill';
-          part.title = '点击发动技能';
-          const k2 = key;
-          part.addEventListener('click', () => {
-            if (k2 && SKILL_SELECTION[k2]) startSkillSelection(ctx, action, k2);
-            else ctx.hooks.propose(action, `发动「${groupName}」`);
-          });
-        }
-        skillBox.appendChild(part);
+    const showText = ctx.prefs.showSkillText;
+    const skills = el('div', `skills${showText ? '' : ' skills--inline-legend'}`);
+
+    // 单个技能条目 → `.skill-part`（类型徽标 + 技能名 + 状态；描述仅在「显示」时加入）
+    const buildPart = (s: (typeof text.skills)[number], label: string): HTMLElement => {
+      const state = legendSkillState(ctx, player, lg, s);
+      const cls =
+        state === 'on' ? 'skill-part--on' : state === 'disabled' ? 'skill-part--disabled' : 'skill-part--off';
+      const part = el('div', `skill-part ${cls}`);
+      const key = legendFindKey(lg, s);
+      if (key) part.dataset.key = key;
+      const pHead = el('div', 'skill-part-head');
+      const badge = el('span', 'skill-type');
+      badge.textContent = s.type;
+      pHead.appendChild(badge);
+      const nameEl = el('span', 'skill-name');
+      nameEl.textContent = label;
+      pHead.appendChild(nameEl);
+      if (showText) {
+        const body = el('div', 'skill-text');
+        body.textContent = s.text;
+        pHead.appendChild(body);
       }
-      skills.appendChild(skillBox);
+      part.appendChild(pHead);
+      // 可发动（启动 / 激活 / 必杀，与神器卡一致）：点击 → 发动（面板动作带 legendKey，按 key 精确匹配）
+      const action = ctx.legal.find(
+        (x): x is SkillAction =>
+          x.t === 'skill' &&
+          x.artifactId === lg.id &&
+          (((x.params?.legendKey as string | undefined) ?? key) === key || x.side === s.side),
+      );
+      if (action && isActivatableType(s.type) && state === 'on') {
+        part.classList.add('clickable');
+        part.dataset.act = 'skill';
+        part.title = '点击发动技能';
+        const k2 = key;
+        part.addEventListener('click', () => {
+          if (k2 && SKILL_SELECTION[k2]) startSkillSelection(ctx, action, k2);
+          else ctx.hooks.propose(action, `发动「${label}」`);
+        });
+      }
+      return part;
+    };
+
+    if (showText) {
+      // 显示描述：按技能名分组
+      const groups = new Map<string, typeof text.skills>();
+      for (const s of text.skills) {
+        const g = groups.get(s.name);
+        if (g) g.push(s);
+        else groups.set(s.name, [s]);
+      }
+      for (const [groupName, parts] of groups) {
+        const skillBox = el('div', 'skill');
+        for (const s of parts) skillBox.appendChild(buildPart(s, groupName));
+        skills.appendChild(skillBox);
+      }
+    } else {
+      // 隐藏描述：**维持原样**（按技能名分组、横向换行）——用独立类 `.skills--inline-legend`，
+      // 避免吃到神器那套「两列 / only 一行居中」的新样式。
+      const groups = new Map<string, typeof text.skills>();
+      for (const s of text.skills) {
+        const g = groups.get(s.name);
+        if (g) g.push(s);
+        else groups.set(s.name, [s]);
+      }
+      for (const [groupName, parts] of groups) {
+        const skillBox = el('div', 'skill');
+        for (const s of parts) skillBox.appendChild(buildPart(s, groupName));
+        skills.appendChild(skillBox);
+      }
     }
     box.appendChild(skills);
   }
@@ -1072,6 +1153,7 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
   name.type = 'button';
   name.className = 'tactic-bar-name';
   name.textContent = def?.name ?? id;
+  name.dataset.tactic = id; // 供「连续右键」的遮罩转发识别战术
   const open = (): void => {
     const r = name.getBoundingClientRect();
     ctx.hooks.ui.detail = {
@@ -1080,7 +1162,7 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
     };
     ctx.hooks.requestRender();
   };
-  name.addEventListener('click', open);
+  // 查看卡图：右键（长按可等价）——技能行左键发动不受影响
   name.addEventListener('contextmenu', (e) => { e.preventDefault(); open(); });
   let lp: number | null = null;
   const clearLp = (): void => { if (lp != null) { window.clearTimeout(lp); lp = null; } };
@@ -1091,6 +1173,10 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
   name.addEventListener('pointerleave', clearLp);
   name.addEventListener('pointercancel', clearLp);
   bar.appendChild(name);
+  // 「战术」标签：做成小药丸（复用 .skill-type 外观，如「启动」那样）；位于名字之后、存放骰/猜测之前
+  const kind = el('span', 'skill-type tactic-bar-kind');
+  kind.textContent = '战术';
+  bar.appendChild(kind);
   // T15「影子」：战术上的存放骰 → 显示在**战术标题之后、技能描述之前**（仿 034 存放骰）
   if (player.tacticHeldDie) {
     const hd = el('span', 'tactic-held-die');
@@ -1134,25 +1220,60 @@ function playerPanel(
   const order = mirrored ? AREA_ORDER_MIRRORED : AREA_ORDER;
   for (const k of order) areas.appendChild(areaBox(k, player, ctx));
 
-  // 战术牌横条（黄框：神器与骰区之间）；无战术牌则不渲染该条
-  const bar = player.tactic ? tacticBar(player, ctx) : null;
-  if (bar) panel.classList.add('player--tactic');
+  // 中央侧的一行 band：一端＝战术条（占 2 个神器宽），另一端＝生命条
+  // （镜像神器摆放时，两者随视觉位置左右交换；无战术牌则只放生命条）
+  const band = el('div', 'playband');
+  if (player.tactic) {
+    const bar = tacticBar(player, ctx);
+    bar.style.gridColumn = flip ? '2 / span 2' : '1 / span 2';
+    band.appendChild(bar);
+  }
+  const life = lifeBar(player);
+  life.style.gridColumn = flip ? '1' : '3';
+  band.appendChild(life);
 
-  // 传奇英雄面板（预设·带传奇）：作为面板**直接子节点**、占第 1 列并纵跨两行
-  // （我方顶端＝骰区行顶；敌方＝神器行顶，维持现状）；镜像神器摆放开启时翻到第 4 列
+  const seq = role === 'enemy' ? [cards, band, areas] : [areas, band, cards];
+
+  // 传奇英雄面板（预设·带传奇）：两列 —— 传奇列 + 右列（神器/band/骰区堆叠）。
+  // 缩略模式：传奇列"绝对填充"到右列高度（面板高度＝三行）；完整模式：顶部对齐（右列下方留白）。
   if (player.legend) {
     panel.classList.add('player--legend');
     if (flip) panel.classList.add('player--legend-right');
-    panel.appendChild(legendBox(player, ctx));
+    panel.classList.add(ctx.prefs.cardArt === 'thumb' ? 'player--legend-thumb' : 'player--legend-full');
+    const legendCol = el('div', 'legend-col');
+    legendCol.appendChild(legendBox(player, ctx));
+    const rightCol = el('div', 'right-col');
+    for (const node of seq) rightCol.appendChild(node);
+    // 镜像神器摆放：传奇列与右列左右对调
+    for (const n of flip ? [rightCol, legendCol] : [legendCol, rightCol]) panel.appendChild(n);
+  } else {
+    for (const node of seq) panel.appendChild(node);
   }
 
-  // 骰子区域贴近中央战场：敌人放在最下、自己放在最上（行序由 CSS 网格按角色指定）
-  const seq = (role === 'enemy' ? [cards, bar, areas] : [areas, bar, cards]).filter(
-    (n): n is HTMLElement => !!n,
-  );
-  for (const node of seq) panel.appendChild(node);
-
   return panel;
+}
+
+/** 单方生命：一行的 `玩家X  [进度条]  生命 cur/max`（A 蓝 / B 红）；放该玩家第三列神器朝中央的一侧，
+ *  高度由同一行 band 拉伸到与战术条一致。 */
+function lifeBar(player: PlayerState): HTMLElement {
+  const wrap = el('div', 'lifeline');
+  wrap.dataset.player = player.id;
+  const who = el('span', `lifeline-who player-${player.id}`);
+  who.textContent = `玩家${player.id}`;
+  wrap.appendChild(who);
+  const track = el('div', 'lifeline-track');
+  const fill = el('i', `lifeline-fill bg-${player.id}`);
+  const pct =
+    player.lifeMax > 0
+      ? Math.max(0, Math.min(100, Math.round((player.life / player.lifeMax) * 100)))
+      : 0;
+  fill.style.width = `${pct}%`;
+  track.appendChild(fill);
+  wrap.appendChild(track);
+  const hp = el('span', `lifeline-hp life-${player.id}`);
+  hp.textContent = `生命 ${player.life}/${player.lifeMax}`;
+  wrap.appendChild(hp);
+  return wrap;
 }
 
 /** 提示栏分段：color = 用该玩家配色高亮（用于技能名） */
@@ -1623,29 +1744,6 @@ function actionZone(ctx: Ctx): HTMLElement {
     }
   }
   return zone;
-}
-
-/** 双方生命（两行；顺序与面板一致：上=敌方、下=自己 → 回合切换时上下掉转） */
-function vitalsBar(ctx: Ctx): HTMLElement {
-  const { state } = ctx;
-  // 与玩家面板一致：以「现在轮到谁」（actorOf：待决策玩家优先）为"自己"的视角 → 上下顺序随之一致
-  const selfId: PlayerId = actorOf(state);
-  const enemyId: PlayerId = selfId === 'A' ? 'B' : 'A';
-  const bar = el('div', 'vitals');
-  for (const pid of [enemyId, selfId]) {
-    const p = state.players[pid];
-    const item = el('div', `vitals-item vitals-${pid}`);
-    const dot = el('span', `dot dot-${pid}`);
-    item.appendChild(dot);
-    const who = el('span', 'vitals-who');
-    who.textContent = `玩家${pid}`;
-    item.appendChild(who);
-    const hp = el('span', `vitals-life life-${pid}`);
-    hp.textContent = `生命 ${p.life}/${p.lifeMax}`;
-    item.appendChild(hp);
-    bar.appendChild(item);
-  }
-  return bar;
 }
 
 function confirmRow(ctx: Ctx): HTMLElement | null {
@@ -3795,7 +3893,7 @@ function findArtifactAnywhere(state: GameState, id: string): { art: Artifact; ow
 /** 卡图上的“查看技能详情”触发：点击 或 长按（手机友好） */
 function attachDetailTrigger(node: HTMLElement, ctx: Ctx, artifactId: string): void {
   node.classList.add('detail-trigger');
-  node.title = '点击 / 长按查看技能详情';
+  node.title = '右键 / 长按查看技能详情';
   const open = (): void => {
     const r = node.getBoundingClientRect();
     ctx.hooks.ui.detail = {
@@ -3811,7 +3909,10 @@ function attachDetailTrigger(node: HTMLElement, ctx: Ctx, artifactId: string): v
       timer = null;
     }
   };
-  node.addEventListener('click', open);
+  node.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    open();
+  });
   node.addEventListener('pointerdown', () => {
     cancel();
     timer = window.setTimeout(() => {
@@ -3865,7 +3966,10 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   head.appendChild(close);
   box.appendChild(head);
 
-  const row = (label: string, opts: { text: string; on: boolean; onClick: () => void }[]): void => {
+  const row = (
+    label: string,
+    opts: { text: string; on: boolean; onClick: () => void; disabled?: boolean }[],
+  ): void => {
     const r = el('div', 'settings-row');
     const lab = el('span', 'settings-label');
     lab.textContent = label;
@@ -3876,12 +3980,16 @@ function settingsPanel(ctx: Ctx): HTMLElement {
       b.type = 'button';
       b.className = `btn settings-opt${o.on ? ' settings-opt--on' : ''}`;
       b.textContent = o.text;
+      b.disabled = !!o.disabled;
       b.addEventListener('click', o.onClick);
       wrap.appendChild(b);
     }
     r.appendChild(wrap);
     box.appendChild(r);
   };
+
+  // 传奇模式：战报常驻中段战报格（无"收起"概念）→ 战报栏设置无效
+  const legendMode = !!(ctx.state.players.A.legend || ctx.state.players.B.legend);
 
   row('显示技能描述', [
     { text: '隐藏', on: !ui.prefs.showSkillText, onClick: () => setPref(ctx, 'showSkillText', false) },
@@ -3909,8 +4017,8 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   }
   row('预设组合', presetOpts);
   row('战报栏', [
-    { text: '显示', on: !ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', false) },
-    { text: '收起', on: ui.prefs.logCollapsed, onClick: () => setPref(ctx, 'logCollapsed', true) },
+    { text: '显示', on: !ui.prefs.logCollapsed, disabled: legendMode, onClick: () => setPref(ctx, 'logCollapsed', false) },
+    { text: '收起', on: ui.prefs.logCollapsed, disabled: legendMode, onClick: () => setPref(ctx, 'logCollapsed', true) },
   ]);
   row('整屏缩放', [
     { text: '关', on: ui.prefs.zoomMode === 'off', onClick: () => setPref(ctx, 'zoomMode', 'off') },
@@ -4056,7 +4164,7 @@ function layoutDetailBox(box: HTMLElement, rect: { left: number; top: number; wi
     box.classList.add('detail-popover--sheet');
     return;
   }
-  const W = Math.min(340, Math.max(220, vw - 24));
+  const W = Math.min(vw >= 1024 ? 420 : 340, Math.max(220, vw - 24));
   let left = rect.left + rect.width + 8;
   if (left + W > vw - 8) left = rect.left - W - 8;
   left = Math.max(8, Math.min(left, vw - W - 8));
@@ -4065,6 +4173,42 @@ function layoutDetailBox(box: HTMLElement, rect: { left: number; top: number; wi
   box.style.top = `${top}px`;
   box.style.width = `${W}px`;
   box.style.maxHeight = `${Math.max(160, vh - top - 16)}px`;
+}
+
+/**
+ * 详情遮罩上的右键「转发」：临时让遮罩不接收指针 → `elementFromPoint` 取指针下方的触发区
+ * （战术名 / 传奇卡 / 神器卡）→ 直接切换详情。做法同选择界面（`setupScreen` 的 elementFromPoint 手法），
+ * 目的是**连续右键**在多个详情间切换，无需先左键关闭。左键点遮罩仍关闭（保留原行为）。
+ */
+function attachDetailOverlayForward(overlay: HTMLElement, ctx: Ctx): void {
+  overlay.addEventListener('contextmenu', (e) => {
+    const efp = typeof document.elementFromPoint === 'function' ? document.elementFromPoint : null;
+    if (!efp) return;
+    const prev = overlay.style.pointerEvents;
+    overlay.style.pointerEvents = 'none';
+    let hit: Element | null = null;
+    try {
+      hit = efp.call(document, e.clientX, e.clientY);
+    } catch {
+      hit = null; // jsdom 等未实现 elementFromPoint 时静默跳过（仅真机生效）
+    } finally {
+      overlay.style.pointerEvents = prev;
+    }
+    if (!hit) return;
+    const tacticBtn = (hit.closest?.('.tactic-bar-name[data-tactic]') as HTMLElement | null) ?? null;
+    const legendCard = (hit.closest?.('.card-legend[data-legend]') as HTMLElement | null) ?? null;
+    const artCard = (hit.closest?.('.card[data-artifact]') as HTMLElement | null) ?? null;
+    const id = tacticBtn?.dataset.tactic ?? legendCard?.dataset.legend ?? artCard?.dataset.artifact;
+    if (!id) return;
+    e.preventDefault();
+    const trigger = tacticBtn ?? legendCard ?? artCard!;
+    const r = trigger.getBoundingClientRect();
+    ctx.hooks.ui.detail = {
+      artifactId: id,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+    };
+    ctx.hooks.requestRender();
+  });
 }
 
 /** 战术牌详情浮窗：裁切卡图 + 名字 + 效果全文（与神器浮窗不同——此处含卡图） */
@@ -4110,6 +4254,7 @@ function tacticDetailPopover(
     }
   });
   overlay.appendChild(box);
+  attachDetailOverlayForward(overlay, ctx);
   return overlay;
 }
 
@@ -4172,6 +4317,7 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
     }
   });
   overlay.appendChild(box);
+  attachDetailOverlayForward(overlay, ctx);
   return overlay;
 }
 
@@ -4957,29 +5103,20 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     `app density-${hooks.ui.prefs.density}${hooks.ui.prefs.logCollapsed ? ' log-collapsed' : ''}${legendMode ? ' legend-mode' : ''}`,
   );
 
-  // 贴边按钮组（战报栏收起 / 窄屏时可见）：设置 + 战报
-  const edgeBar = el('div', 'edge-bar');
-  const edgeSettings = document.createElement('button');
-  edgeSettings.type = 'button';
-  edgeSettings.className = 'btn edge-btn';
-  edgeSettings.dataset.act = 'edgeSettingsOpen';
-  edgeSettings.textContent = '设置';
-  edgeSettings.addEventListener('click', () => {
-    hooks.ui.settingsOpen = true;
-    hooks.requestRender();
-  });
-  edgeBar.appendChild(edgeSettings);
-  const edgeLog = document.createElement('button');
-  edgeLog.type = 'button';
-  edgeLog.className = 'btn edge-btn';
-  edgeLog.dataset.act = 'logOpen';
-  edgeLog.textContent = '战报';
-  edgeLog.addEventListener('click', () => {
+  // 战报抽屉的贴边拉手（仅非传奇：侧栏收起 / 窄屏时显示）——左中细长竖条 + 小三角
+  const logTab = document.createElement('button');
+  logTab.type = 'button';
+  logTab.className = 'log-tab';
+  logTab.dataset.act = 'logOpen';
+  logTab.title = '战报';
+  const logTabTri = el('span', 'log-tab-tri');
+  logTab.appendChild(logTabTri);
+  logTab.addEventListener('click', () => {
     hooks.ui.logOpen = true;
     hooks.requestRender();
   });
-  edgeBar.appendChild(edgeLog);
-  app.appendChild(edgeBar);
+  // 仅非传奇模式：传奇的战报常驻中段战报格，无需此拉手
+  if (!legendMode) app.appendChild(logTab);
 
   // 设置按钮（左栏顶部 / 传奇模式中段战报栏顶部 共用）
   const settingsBtn = document.createElement('button');
@@ -4992,12 +5129,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     hooks.requestRender();
   });
 
-  // 左栏（非传奇模式）：设置 + 战报
+  // 左栏（非传奇模式）：战报（设置按钮已移到中段右侧空槽）
   if (!legendMode) {
     const sidebar = el('div', 'sidebar');
-    const sidebarHead = el('div', 'sidebar-head');
-    sidebarHead.appendChild(settingsBtn);
-    sidebar.appendChild(sidebarHead);
     sidebar.appendChild(logPanel(ctx, true));
     app.appendChild(sidebar);
   }
@@ -5007,12 +5141,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   main.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
 
   const centerband = el('div', 'centerband');
-  // 传奇模式：中段最左格 = 设置 + 战报（内置滚动）
+  // 传奇模式：中段最左格 = 战报（内置滚动；设置按钮已移到中段右侧空槽）
   if (legendMode) {
     const logcell = el('div', 'centerband-log');
-    const logHead = el('div', 'centerband-log-head');
-    logHead.appendChild(settingsBtn);
-    logcell.appendChild(logHead);
     logcell.appendChild(logPanel(ctx, true));
     centerband.appendChild(logcell);
   }
@@ -5020,8 +5151,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   left.appendChild(actionZone(ctx));
   centerband.appendChild(left);
 
+  // 中段右侧槽：保留原先"双方生命"的占地（留空），放置「设置」按钮；高度随 stretch 与操作栏齐平
   const right = el('div', 'centerband-right');
-  right.appendChild(vitalsBar(ctx));
+  right.appendChild(settingsBtn);
   centerband.appendChild(right);
 
   main.appendChild(centerband);

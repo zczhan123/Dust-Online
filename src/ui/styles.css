@@ -73,11 +73,13 @@ body {
   gap: 8px;
 }
 .centerband-right {
-  flex: 0 0 auto;
+  /* 保留原先"双方生命"的占地（留空），用于放置「设置」；高度随 .centerband 的 stretch 与操作栏齐平 */
+  flex: 0 0 168px;
+  width: 168px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .player {
@@ -116,15 +118,22 @@ body {
 .dot-B { background: #dc2626; }
 
 .cards {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  flex-wrap: wrap;
+}
+/* 三列网格：卡片不再用 flex 基线，也不设 min-width（避免窄屏把列顶宽、错位 band/骰区） */
+.cards > .card {
+  min-width: 0;
 }
 
 /* ── 战术牌横条（战斗界面·黄框：神器与骰区之间）· 细长形 ── */
 .tactic-bar { display: flex; align-items: stretch; gap: 6px; min-width: 0; background: #fbf9f4; border: 1px dashed #cfc8ba; border-radius: 8px; padding: 1px 6px; margin: 4px 0; }
 .tactic-bar-name { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; padding: 1px 9px; min-height: 20px; border: 1px solid #33333a; border-radius: 5px; background: #0a0a0b; color: #f5f4f0; font: inherit; font-weight: 700; font-size: 12px; cursor: pointer; }
-.tactic-bar-eff { flex: 1 1 auto; min-width: 0; align-self: center; font-size: 12px; line-height: 1.45; color: #4b5563; overflow-wrap: anywhere; }
+.tactic-bar-eff { flex: 1 1 auto; min-width: 0; align-self: center; font-size: 12px; line-height: 1.45; color: #4b5563; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
+/* 「战术｜」标签：常显（与「显示技能描述」无关），小字加粗以区别于正文描述 */
+/* 「战术」标签：复用类型药丸（.skill-type）外观；本体只留布局 */
+.tactic-bar-kind { flex: 0 0 auto; align-self: center; white-space: nowrap; }
 /* T15「影子」战术上的存放骰：显示在战术标题之后、技能描述之前（中性灰骰片，同 034 存放骰口径） */
 .tactic-held-die { flex: 0 0 auto; align-self: center; min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: #64748b; color: #f5f4f0; font-size: 12px; font-weight: 700; }
 /* T13「远见」猜测的玩家：同样显示在战术标题之后、技能描述之前（外观同存放骰） */
@@ -135,7 +144,6 @@ body {
 /* 战术牌横条三态：生效中（绿）/ 已用尽·已结束（灰）/ 普通（默认） */
 .tactic-bar--active { background: #eaf7ee; border: 1px solid #1d6b43; }
 .tactic-bar--spent { background: #cfd4db; border: 1px solid #6b7280; }
-.tactic-bar--spent .tactic-bar-name { background: #d1d5db; border-color: #9ca3af; color: #4b5563; }
 .tactic-bar--spent .tactic-bar-eff { color: #6b7280; }
 
 .card {
@@ -155,6 +163,8 @@ body {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px;
+  padding: 3px 8px; /* 背景盒与卡图等宽；文字内缩，避免顶到小圆角处 */
+  border-radius: 4px; /* 小圆角：不再"直角突兀"，且不挤到靠边的状态药丸/骰片 */
 }
 .card-name { font-weight: 700; font-size: 17px; }
 .card-sub { font-size: 12px; color: var(--muted); }
@@ -281,6 +291,45 @@ body {
 }
 .die-A { background: #2563eb; }
 .die-B { background: #dc2626; }
+
+/* ── 中央侧的一行 band：一端＝战术条（2 个神器宽），另一端＝生命条（三列对齐神器卡，镜像时交换） ── */
+.playband {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 10px;
+  align-items: stretch;
+  margin: 4px 0;
+}
+.playband > .tactic-bar { grid-column: 1 / span 2; grid-row: 1; margin: 0; }
+.playband > .lifeline { grid-column: 3; grid-row: 1; }
+
+/* 生命（一行：玩家X  [进度条]  生命 cur/max；深色底板 + 玩家色进度条；撑满整行=与战术条等高） */
+.lifeline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  background: rgba(0, 0, 0, .28);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.lifeline-who { flex: 0 0 auto; font-weight: 700; font-size: 13px; }
+.lifeline-hp { flex: 0 0 auto; font-weight: 700; font-size: 13px; color: #f3f0e8; white-space: nowrap; }
+.lifeline-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 12px;
+  border-radius: 999px;
+  background: #6b6f76;
+  border: 1px solid rgba(255, 255, 255, .14);
+  overflow: hidden;
+}
+.lifeline-fill { display: block; height: 100%; border-radius: 999px; }
+.lifeline-fill.bg-A { background: #2563eb; }
+.lifeline-fill.bg-B { background: #dc2626; }
 
 /* 尘落计数器 */
 .dustfall {
@@ -568,7 +617,11 @@ button.pay-die {
   line-height: 1.6;
   max-height: 160px;
   overflow-y: auto;
+  /* 滚动条隐藏式（仍可滚动） */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.log::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .log-line {
   white-space: pre-wrap;
 }
@@ -1099,8 +1152,8 @@ button.pay-die {
   justify-content: space-between;
   gap: 8px;
 }
-.detail-title { font-weight: 700; font-size: 15px; }
-.detail-sub { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+.detail-title { font-weight: 700; font-size: 17px; }
+.detail-sub { font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
 
 /* ===== 中央操作区：提示栏 + 操作栏合并 ===== */
 .actionzone {
@@ -1152,38 +1205,45 @@ button.pay-die {
 /* 尘印标记：冥想骰区标签右侧，仅展示 */
 .area-seal { flex: 0 0 auto; font-size: 11px; }
 
-/* 隐藏描述时：技能左右排列（同名技能在同一组内） */
-.skills--inline { flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* 隐藏描述时：按「侧」分两列 —— 左列（左侧技能，左对齐）/ 右列（右侧技能，右对齐） */
+.skills--inline { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; align-items: start; }
 .skills--inline .skill {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
-  align-items: center;
   padding: 3px 6px;
 }
+.skills--inline .skill--left { align-items: flex-start; }
+.skills--inline .skill--right { align-items: flex-end; }
+/* 只有 only 侧（第三列神器）：一行居中、不换行 */
+.skills--inline--only { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: center; gap: 4px; }
+.skills--inline--only .skill { flex-direction: row; }
+/* 传奇面板·隐藏描述：维持原样（按技能名分组、横向换行），与神器「两列/居中」改动隔离 */
+.skills--inline-legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
+.skills--inline-legend .skill { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center; padding: 3px 6px; }
 
 /* 详情浮窗：字号放大以便阅读 */
-.detail-popover .skill-name { font-size: 14px; }
-.detail-popover .skill-type { font-size: 12px; }
-.detail-popover .skill-text { font-size: 13px; line-height: 1.65; color: #374151; }
+.detail-popover .skill-name { font-size: 16px; }
+.detail-popover .skill-type { font-size: 13px; }
+.detail-popover .skill-text { font-size: 15px; line-height: 1.65; color: #374151; }
 .detail-title { font-size: 16px; }
 
 /* 战术牌详情浮窗：裁切卡图（496:423）+ 效果全文 */
 .detail-popover--tactic { overflow: hidden auto; } /* 横向永不滚；纵向仅在内容真的放不下时出现 */
-.detail-popover--tactic .detail-tactic-img { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 496 / 423; max-height: 46vh; object-fit: contain; display: block; border-radius: 6px; background: #000; border: 1px solid var(--line); margin-bottom: 8px; }
+.detail-popover--tactic .detail-tactic-img { box-sizing: border-box; width: 60%; max-width: 210px; margin: 0 auto 8px; height: auto; aspect-ratio: 496 / 423; max-height: 30vh; object-fit: contain; display: block; border-radius: 6px; background: #000; border: 1px solid var(--line); }
 .detail-popover--tactic .detail-tactic-eff { font-size: 13px; line-height: 1.65; color: #374151; overflow-wrap: anywhere; }
 
 /* 整屏缩放容器（transform 施加在 .stage 上；浮层不受影响） */
 .stage { width: 100%; }
 
 /* ===== 二期：响应式 + 战报抽屉 ===== */
-/* 贴边按钮：战报收起 / 窄屏时可见 */
-.edge-bar { display: none; flex-direction: column; gap: 6px; align-self: flex-start; position: sticky; top: 8px; }
-.edge-btn { white-space: nowrap; }
+/* 战报抽屉拉手：左中细长竖条 + 小三角（仅非传奇：侧栏收起 / 窄屏时显示） */
+.log-tab { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 30; width: 16px; height: 64px; padding: 0; border: 1px solid rgba(0, 0, 0, .25); border-left: 0; border-radius: 0 7px 7px 0; background: rgba(0, 0, 0, .45); color: #f3f0e8; cursor: pointer; align-items: center; justify-content: center; }
+.log-tab:hover { background: rgba(0, 0, 0, .62); }
+.log-tab-tri { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid currentColor; }
+.app:not(.legend-mode).log-collapsed .log-tab { display: flex; }
 .log-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .app.log-collapsed .sidebar { display: none; }
-.app.log-collapsed .edge-bar { display: flex; }
 
 .log-overlay { position: fixed; inset: 0; background: rgba(20, 24, 30, 0.35); z-index: 45; }
 .log-drawer {
@@ -1213,10 +1273,10 @@ button.pay-die {
   max-height: 70vh;
 }
 
-/* 中屏（720–1279）：战报栏默认收起（改由贴边按钮拉出）；卡片允许换行 */
+/* 中屏（720–1279）：战报栏默认收起（改由贴边拉手拉出）；卡片允许换行 */
 @media (max-width: 1279px) {
   .sidebar { display: none; }
-  .edge-bar { display: flex; }
+  .app:not(.legend-mode) .log-tab { display: flex; }
   .card { min-width: 180px; }
 }
 
@@ -1684,36 +1744,30 @@ button.pay-die {
 .card-alt-badge { position: absolute; left: 4px; top: 4px; z-index: 4; padding: 0 6px; border-radius: 3px; background: #111014; color: #f5f4f0; border: 1px solid #f5f4f0; font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
 .card-special-badge { position: absolute; left: 4px; top: 24px; z-index: 4; padding: 0 6px; border-radius: 3px; background: #6d4c1a; color: #f7eccf; border: 1px solid #f5f4f0; font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
 
-/* ── 传奇英雄面板（预设·带传奇） ── */
-/* 四列网格：传奇占第 1 列并纵跨两行；神器行/骰区行各占第 2–4 列。
-   列宽由同一网格决定 → 3 骰区与 3 神器必然逐列对齐（不再需要"留空格"元素）。 */
-.player--legend { display: grid; grid-template-columns: var(--legend-w) 1fr 1fr 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 6px; align-items: stretch; }
-.player--legend .card-legend { grid-column: 1; grid-row: 1 / span 2; min-width: 0; }
-.player--legend .cards,
-.player--legend .areas,
-.player--legend .tactic-bar { grid-column: 2 / 5; }
+/* ── 传奇英雄面板（预设·带传奇）──
+   两列 flex：传奇列 + 右列（神器 / band / 骰区堆叠；三者各自 3 列网格 → 逐列对齐）。
+   缩略模式：传奇列"绝对填充"到右列高度（面板高度＝三行），卡内顶部对齐、下方留空（无滚动条）。
+   完整模式：顶部对齐（右列不被拉伸，右列下方留白）。
+   镜像神器摆放：由 DOM 顺序对调（`.player--legend-right` 仅保留作标记/测试）。 */
+.player--legend { display: flex; gap: 10px; }
+.player--legend .legend-col { flex: 0 0 var(--legend-w); min-width: 0; }
+.player--legend .right-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .player--legend .areas { gap: 10px; margin: 0; }
-.player--legend .tactic-bar { margin: 0; }
-.player--legend.player--self .areas { grid-row: 1; }
-.player--legend.player--self .cards { grid-row: 2; }
-.player--legend.player--enemy .cards { grid-row: 1; }
-.player--legend.player--enemy .areas { grid-row: 2; }
-/* 有战术牌：扩成 3 行，横条居第 2 行（神器与骰区之间），传奇跨 3 行 */
-.player--legend.player--tactic { grid-template-rows: auto auto auto; }
-.player--legend.player--tactic .card-legend { grid-row: 1 / span 3; }
-.player--legend.player--tactic .tactic-bar { grid-row: 2; }
-.player--legend.player--tactic.player--self .cards { grid-row: 3; }
-.player--legend.player--tactic.player--enemy .areas { grid-row: 3; }
-/* 镜像神器摆放（敌方）：传奇翻到第 4 列，神器/骰区/横条占第 1–3 列 */
-.player--legend-right { grid-template-columns: 1fr 1fr 1fr var(--legend-w); }
-.player--legend-right .card-legend { grid-column: 4; }
-.player--legend-right .cards,
-.player--legend-right .areas,
-.player--legend-right .tactic-bar { grid-column: 1 / 4; }
-.density-compact .player--legend { row-gap: 3px; }
+.player--legend .playband { margin: 0; }
+/* 缩略：传奇卡填满右列高度；内容顶部对齐、下方留空 */
+.player--legend-thumb { align-items: stretch; }
+.player--legend-thumb .legend-col { position: relative; }
+.player--legend-thumb .legend-col > .card-legend { position: absolute; inset: 0; overflow: hidden; min-width: 0; }
+.player--legend-thumb .card-legend > .card-legend-art,
+.player--legend-thumb .card-legend > .skills { flex: 0 0 auto; }
+/* 完整：顶部对齐 */
+.player--legend-full { align-items: flex-start; }
+.density-compact .player--legend { gap: 6px; }
 /* 面板图＝黑底板（同选择界面迷你头像规则：底色 #000、显示框 787:756＝满高740+上下各8px、图垂直居中、超出裁掉、无圆角） */
 .card-legend-art { background: #000; aspect-ratio: 787 / 756; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .card-legend-art img { width: 100%; height: auto; display: block; }
+/* 缩略：统一横条（aspect-ratio 由 render 内联按 LEGEND_THUMB_H 写入）＋按眼睛锚定裁切 */
+.card-legend-art--thumb img { width: 100%; height: 100%; object-fit: cover; object-position: 50% var(--legend-eye-y, 50%); }
 .card-legend-art.card-art--missing { color: #f5f4f0; font-size: 12px; }
 /* 传奇模式中段：最左格 = 设置 + 战报（内置滚动；高度与快捷操作栏一致，保持整屏布局不变） */
 .centerband-log { flex: 0 0 var(--legend-w); min-width: 0; height: var(--actionzone-min-h, 104px); display: flex; flex-direction: column; gap: 6px; }
@@ -1760,3 +1814,174 @@ button.pay-die {
 #app.setup-page .pick-modal-box.tactic { width: min(430px, 92vw); }
 #app.setup-page .pick-modal-box.tactic img { width: 100%; height: auto; aspect-ratio: 496 / 423; }
 #app.setup-page .pick-img-missing { padding: 26px; text-align: center; color: var(--t2); border: 2px dashed #3a3a40; border-radius: var(--r-sm); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   战斗界面配色：只用「黑白模式」（真·中性灰）
+   ───────────────────────────────────────────────────────────────────
+   `<html data-theme="mono">` 固定写在 index.html；下方 `html[data-theme] .xxx`
+   规则按 `--tb-*` 变量上色（只此一套，含全部浮层，浮层挂在 #app 下）。
+   仅作用于对战界面；首页 #app.setup-page 用独立的 .pick-* / .menu-* 命名空间。
+   ═══════════════════════════════════════════════════════════════════ */
+/* 黑白模式（真·中性灰，去黄）：灰白底 + 卡片「浅色标题条 + 黑色卡身」；仅骰子/生命/玩家名保留彩色点缀 */
+html[data-theme="mono"] {
+  color-scheme: light;
+  --tb-page: #f1f1f1;
+  --tb-mat: rgba(0, 0, 0, .035);
+  --tb-mat-line: rgba(0, 0, 0, .12);
+  --tb-panel-ink: #232323;
+  --tb-panel-muted: #6f6f6f;
+  --tb-card: #111111;
+  --tb-card-line: #111111;
+  --tb-card-bw: 1px;
+  --tb-card-shadow: 0 1px 6px rgba(0, 0, 0, .10);
+  --tb-card-head: #f7f7f7;
+  --tb-head-ink: #1b1b1b;
+  --tb-head-sub: #6f6f6f;
+  --tb-chip: #f6f6f6;
+  --tb-chip-on: #e9f2ec;
+  --tb-chip-off: #f0f0f0;
+  --tb-chip-line: rgba(0, 0, 0, .16);
+  --tb-chip-ink: #232323;
+  --tb-chip-muted: #6f6f6f;
+  --tb-cell: #ffffff;
+  --tb-cell-ink: #232323;
+  --tb-cell-muted: #6f6f6f;
+  --tb-art-line: rgba(255, 255, 255, .14);
+  --tb-skillbox: rgba(255, 255, 255, .10);
+  --tb-off-bg: #f5f5f5;
+  --tb-off-line: #d6d6d6;
+  --tb-off-op: 1;
+  --tb-dis-bg: #bdbdbd;
+  --tb-dis-line: #8f8f8f;
+  --tb-dis-ink: #5a5a5a;
+  --tb-soft: #ffffff;
+  --tb-soft-ink: #232323;
+  --tb-soft-line: rgba(0, 0, 0, .18);
+  --muted: #6f6f6f;
+  --line: rgba(0, 0, 0, .18);
+}
+
+/* 页面底色 */
+html[data-theme] body { background: var(--tb-page); color: var(--tb-head-ink); }
+
+/* 玩家面板 / 生命栏：灰垫上的半透明板（保留上/下玩家色边线） */
+html[data-theme] .player { background: var(--tb-mat); }
+html[data-theme] .player--enemy {
+  border-top-color: var(--pc, #b75b5b);
+  border-right-color: var(--tb-mat-line);
+  border-bottom-color: var(--tb-mat-line);
+  border-left-color: var(--tb-mat-line);
+}
+html[data-theme] .player--self {
+  border-bottom-color: var(--pc, #3f7fa6);
+  border-top-color: var(--tb-mat-line);
+  border-right-color: var(--tb-mat-line);
+  border-left-color: var(--tb-mat-line);
+}
+html[data-theme] .player-header { color: var(--tb-panel-ink); }
+html[data-theme] .vitals { background: var(--tb-mat); border-color: var(--tb-mat-line); color: var(--tb-panel-ink); }
+html[data-theme] .vitals-who { color: var(--tb-panel-muted); }
+html[data-theme] .log-title { color: var(--tb-panel-muted); }
+
+/* 神器卡（含传奇面板卡） */
+html[data-theme] .card {
+  background: var(--tb-card);
+  border: var(--tb-card-bw) solid var(--tb-card-line);
+  box-shadow: var(--tb-card-shadow);
+}
+html[data-theme] .card-head { background: var(--tb-card-head); color: var(--tb-head-ink); border-bottom: 1px solid var(--tb-card-line); }
+html[data-theme] .card-name { color: var(--tb-head-ink); }
+html[data-theme] .card-sub { color: var(--tb-head-sub); }
+html[data-theme] .card-art-img { border-color: var(--tb-art-line); }
+html[data-theme] .card-art--missing {
+  background: repeating-linear-gradient(45deg, var(--tb-chip), var(--tb-chip) 8px, var(--tb-chip-off) 8px, var(--tb-chip-off) 16px);
+  border-color: var(--tb-chip-line);
+  color: var(--tb-chip-muted);
+}
+
+/* 技能：外框线随卡面；贴片保持浅色 → 技能文字一律深色，保证可读 */
+html[data-theme] .skill { border-color: var(--tb-skillbox); }
+html[data-theme] .skill-part--off { background: var(--tb-off-bg); border-left-color: var(--tb-off-line); opacity: var(--tb-off-op); }
+html[data-theme] .skill-part--on { background: var(--tb-chip-on); border-left-color: var(--on, #1d7a4d); }
+/* 生效/可用时：类型药丸由灰变浅绿（字不设＝沿用普通药丸深色；未开启/已用完/不能用仍为灰） */
+html[data-theme] .skill-part--on .skill-type { background: #cfe9d6; }
+/* 战术"生效中"时：战术药丸同样变浅绿（沿用同一套） */
+html[data-theme] .tactic-bar--active .skill-type { background: #cfe9d6; }
+/* 禁用态（不能再激活/已用完）与战术栏「已用完」共用同一套灰，两种模式都对齐 */
+html[data-theme] .skill-part--disabled { background: var(--tb-dis-bg); border-left-color: var(--tb-dis-line); opacity: 1; }
+html[data-theme] .skill-part--used { background: var(--tb-dis-bg); opacity: 1; }
+html[data-theme] .skill-part--spent { background: var(--tb-dis-bg); opacity: 1; }
+html[data-theme] .skill-name { color: var(--tb-chip-ink); }
+html[data-theme] .skill-part--disabled .skill-name,
+html[data-theme] .skill-part--used .skill-name,
+html[data-theme] .skill-part--spent .skill-name { color: var(--tb-dis-ink); }
+html[data-theme] .skill-text { color: #4b5563; }
+
+/* 骰区贴片 */
+html[data-theme] .area { background: var(--tb-chip); border-color: var(--tb-chip-line); }
+html[data-theme] .area-label { color: var(--tb-chip-muted); }
+
+/* 战术横条：普通=浅贴片；三态（生效中绿 / 已用完灰）用更高优先级压回，避免被上面这条覆盖 */
+html[data-theme] .tactic-bar { background: var(--tb-chip); border-color: var(--tb-chip-line); }
+html[data-theme] .tactic-bar-eff { color: var(--tb-chip-muted); }
+html[data-theme] .tactic-bar.tactic-bar--active { background: #eaf7ee; border-color: #1d6b43; }
+html[data-theme] .tactic-bar.tactic-bar--spent { background: var(--tb-dis-bg); border-color: var(--tb-dis-line); }
+html[data-theme] .tactic-bar.tactic-bar--spent .tactic-bar-eff { color: var(--tb-dis-ink); }
+
+/* 中央操作区（单层框） */
+html[data-theme] .actionzone { background: var(--tb-cell); border-color: var(--tb-card-line); color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .hint { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .hint-notes { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .chip-label { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .actionlist-empty { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .selector-title { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .selector-info { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .selector-hint { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .paypanel-title { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .slot-name { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .slot-summary { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .confirm-label { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .convertpick-title { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .convertpick-hint { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .dustflow-title,
+html[data-theme] .actionzone .dustflow-hint,
+html[data-theme] .actionzone .dustflow-label { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .dustflow-sep { color: var(--tb-cell-muted); }
+html[data-theme] .actionzone .hint-dust { color: var(--tb-cell-ink); }
+
+/* 浮层：设置 / 技能详情 / 战报抽屉 / 战报放大 / 终局 / 战术选择·猜先 */
+html[data-theme] .settings-panel { background: var(--tb-soft); border-color: var(--tb-soft-line); color: var(--tb-soft-ink); }
+html[data-theme] .settings-title { color: var(--tb-soft-ink); }
+html[data-theme] .settings-label { color: var(--tb-soft-ink); }
+html[data-theme] .settings-row { border-top-color: var(--tb-soft-line); }
+html[data-theme] .detail-popover { background: var(--tb-soft); border-color: var(--tb-soft-line); color: var(--tb-soft-ink); }
+html[data-theme] .detail-popover .skill-name { color: var(--tb-soft-ink); }
+html[data-theme] .detail-popover .detail-tactic-eff { color: var(--tb-soft-ink); }
+html[data-theme] .log-drawer { background: var(--tb-soft); border-color: var(--tb-soft-line); }
+html[data-theme] .logpop-modal { background: var(--tb-soft); border-color: var(--tb-soft-line); color: var(--tb-soft-ink); }
+html[data-theme] .gameover-modal { background: var(--tb-soft); border-color: var(--tb-soft-line); color: var(--tb-soft-ink); }
+html[data-theme] .tactic-choose-modal { background: var(--tb-soft); border-color: var(--tb-soft-line); color: var(--tb-soft-ink); }
+html[data-theme] .tactic-choose-title { color: var(--tb-soft-ink); }
+html[data-theme] .tactic-dice-map,
+html[data-theme] .tactic-dice-idx,
+html[data-theme] .tactic-dice-dist,
+html[data-theme] .tactic-dice-dist-label,
+html[data-theme] .tactic-dice-dist-k,
+html[data-theme] .tactic-dice-err { color: var(--tb-soft-ink); }
+
+/* 黑白模式：要读的"正文/提醒"提为墨黑（次级信息保持淡；不碰按钮/药丸/玩家色）。
+   放在通用规则之后 → 同优先级由它生效；`.tactic-bar--spent .tactic-bar-eff`（更高优先级）仍保持灰。 */
+html[data-theme="mono"] .skill-text { color: #1b1b17; }
+html[data-theme="mono"] .tactic-bar-eff { color: #1b1b17; }
+html[data-theme="mono"] .tactic-bar-kind { color: #1b1b17; }
+html[data-theme="mono"] .actionzone .hint { color: #1b1b1b; }
+html[data-theme="mono"] .actionzone .hint-notes { color: #1b1b1b; }
+
+/* 黑白模式：把原先偏冷的中性元素一并中性化（避免"冷暖混"显脏） */
+html[data-theme="mono"] .skill-type { background: #e6e6e6; color: #333333; }
+html[data-theme="mono"] .log { background: #242424; color: #e4e4e4; }
+html[data-theme="mono"] .tactic-held-die,
+html[data-theme="mono"] .tactic-guess,
+html[data-theme="mono"] .pay-die--held { background: #6f6f6f; }
+html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
+
