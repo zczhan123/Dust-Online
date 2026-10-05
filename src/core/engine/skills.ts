@@ -3,8 +3,9 @@ import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
-import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
+import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
+import { fxPush, fxSkillFired } from './fx';
 import { pumpPending, queuePending } from './pending';
 import { resetToBattleStart } from './reset';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
@@ -126,6 +127,7 @@ export function applyTurnStartEffects(g: GameState, player: PlayerId): void {
   if (hasActiveSkill(g.players[player], 'tiebi.chariot') && g.players[player].areas.defense.length >= 1) {
     g.players[player].areas.attack.push({ id: newDieId(`${player}-`), value: 5, kind: 'attack' });
     logLine(g, `${pname(player)} 「战车」：回合开始，获得 1 个 5 点攻击骰`);
+    fxSkillFired(g, player, 'tiebi.chariot');
   }
 }
 
@@ -332,6 +334,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           p.areas.defense.push(d);
         }
       }
+      // T18「适应」：本次掷出的 4 颗随机骰可择 1 颗改点（落区方式为"最大/最小"自定义 → replaceByDist=false，只改点不重落）
+      offerAdapt(g, player, dice, false);
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '龙腾万丈' });
       logLine(
         g,
@@ -578,6 +582,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       consumeDice(g, o, 'defense', wanted);
       for (const id of ['A', 'B'] as PlayerId[]) {
         for (const a of g.players[id].artifacts) a.continuousLostThisTurn = true;
+        // 传奇面板的持续技能同样失效（否则界面上只有神器持续转灰、传奇持续仍是绿的）
+        if (g.players[id].legend) g.players[id].legend!.continuousLostThisTurn = true;
       }
       logLine(
         g,
@@ -980,6 +986,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           g,
           `${pname(player)} 「蛇蝎之泪」：本回合「填弹」已叠加 ${p.tiandanGainedThisTurn} 点 → 受到 ${x} 点真实伤害`,
         );
+        fxSkillFired(g, player, 'xiva.shexiezhilei'); // 与「填弹」同帧一起弹技能名
         dealTrueDamage(g, player, x, player); // 自伤：source=自己
       }
     },
@@ -1004,6 +1011,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         g,
         `${pname(player)} 发动「畏惧」：消耗 1 颗${kindCn}骰（${mine}点），对方必须消耗 1 颗能力骰`,
       );
+      // 动效旁路：发起方骰停中间等对方响应（界面建"响应池"）
+      fxPush({ kind: 'weiju', player, mode: 'initiate', dieIds: ids, value: mine });
       g.pending = { kind: 'weijuPay', player: opp, initiator: player, initiatorValue: mine };
     },
   },

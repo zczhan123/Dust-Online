@@ -225,19 +225,16 @@ describe('C01 极之境·裁雨流（触发）：造成伤害后重掷该攻击�
   });
 });
 
-describe('C01 战斗提示：不作主阶段攻击修正登记', () => {
-  it('C01 无「突破 / 裁雨流 / 极之境」提示', () => {
+describe('C01 战斗提示：主阶段攻击修正登记', () => {
+  it('C01 激活右 → 出现「裁雨流」提示；「突破 / 极之境」不出现', () => {
     const g = mk();
     toMain(g);
     arm(g, 'A', 'C01', 'right');
-    const labels = battleNotes(g, 'A').map((n) => `${n.label}${n.text}`);
-    for (const s of labels) {
-      expect(s).not.toContain('突破');
-      expect(s).not.toContain('裁雨流');
-      expect(s).not.toContain('极之境');
-    }
-    expect(labels.join('｜')).not.toContain('突破');
-    expect(labels.join('｜')).not.toContain('裁雨流');
-    expect(labels.join('｜')).not.toContain('极之境');
+    const joined = battleNotes(g, 'A')
+      .map((n) => `${n.label}${n.text}`)
+      .join('｜');
+    expect(joined).toContain('裁雨流');
+    expect(joined).not.toContain('突破');
+    expect(joined).not.toContain('极之境');
   });
 });

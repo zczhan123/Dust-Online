@@ -1,6 +1,7 @@
 import type { GameState, PlayerId } from '../model/types';
 import { SKILL_HANDLERS } from './skills';
 import { withRngState } from './effects';
+import { fxPush } from './fx';
 import { pumpPending, queuePending } from './pending';
 
 /**
@@ -36,5 +37,7 @@ export function runChargeSkill(
         reportConsumed: () => {},
       }),
     );
+    // 动效旁路："充能"发动其技能 → 第二条气泡（技能名）；先由 rise 弹「充能」。
+    fxPush({ kind: 'skillFired', player, artifactId, side: cs.side, skillKey: cs.key, auto: false });
   }
 }

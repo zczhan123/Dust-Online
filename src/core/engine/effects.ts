@@ -17,6 +17,7 @@ import { TACTIC_BY_ID } from '../content/tactics';
 // 注意：与 pending.ts 是**循环引用**（pending → effects 的 gainRandomAbilityDice/withRngState）；
 // 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
 import { queuePending, pumpPending } from './pending';
+import { fxPush, fxTacticFired, fxSkillFired } from './fx';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
@@ -78,6 +79,7 @@ export function transferDice(g: GameState, from: PlayerId, dieIds: string[], to:
     found.die.kind = toKind;
     g.players[to].areas[toKind].push(found.die);
   }
+  if (dieIds.length > 0) fxPush({ kind: 'move', player: from, dieIds: [...dieIds] });
 }
 
 /** 把指定骰移动到目标区域（保留点数） */
@@ -90,6 +92,7 @@ export function moveDice(g: GameState, player: PlayerId, dieIds: string[], to: D
     found.die.kind = to;
     p.areas[to].push(found.die);
   }
+  if (dieIds.length > 0) fxPush({ kind: 'move', player, dieIds: [...dieIds] });
 }
 
 /** 实际回复生命（不做任何"将要回复"的前置询问）；仅供**已经决定要回复**的结算使用。返回实际回复量 */
@@ -98,6 +101,7 @@ export function applyHeal(g: GameState, player: PlayerId, amount: number): numbe
   const before = p.life;
   p.life = Math.min(p.lifeMax, p.life + amount);
   const healed = p.life - before;
+  fxPush({ kind: 'heal', player, actual: healed }); // 满血时 healed=0 → UI 显示 +0
   if (healed > 0) checkLifeTens(g, player);
   return healed;
 }
@@ -128,6 +132,7 @@ export function heal(g: GameState, player: PlayerId, amount: number): number {
       if (x > 0) {
         amount += x;
         logLine(g, `${pname(player)} 「见我身者菩提心」：对方有 ${x} 个空骰区 → 额外回复 ${x} 点生命`);
+        fxSkillFired(g, player, 'miyun.putixin');
       }
     }
   }
@@ -160,6 +165,7 @@ export function checkLifeTens(g: GameState, player: PlayerId): void {
   if (!hasTarget) return;
   g.pendingQueue.push({ kind: 'fuchouRise', player });
   logLine(g, `${pname(player)} 「复仇之灵」：生命十位数变化 → 立即进行 1 次无需冥想骰的额外尘起行动`);
+  fxSkillFired(g, player, 'zoray.fuchouzhiling');
 }
 
 /**
@@ -188,6 +194,7 @@ export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): vo
       if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'yuanjian') continue;
       if (p.tacticGuess === player) {
         queuePending(g, { kind: 'yuanjianGain', player: id });
+        fxTacticFired(g, id);
         logLine(
           g,
           `「远见」：${pname(player)} 最先降至 20 点或以下（${life}）· ${pname(id)} 猜测正确 → 获得 1 个任意点数能力骰`,
@@ -212,6 +219,7 @@ export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): vo
         g,
         `「邪灵序曲」：${pname(player)} 的生命下降 ${amount} → 计数 ${before} → ${lg.count}/${cap}`,
       );
+      fxSkillFired(g, id, 'aiwa.xielingxuqu');
     }
   }
 }
@@ -348,6 +356,7 @@ export function xuyuYouhunTrigger(g: GameState, player: PlayerId, count: number)
     g,
     `${pname(player)} 「幽魂不散」：防御/冥想骰被使用或弃置 ${count} 个 → 获得 ${n} 个 ${x} 点攻击骰（本回合已获得 ${g.hunhunGained[player]}/2）`,
   );
+  fxSkillFired(g, player, 'xuyu.alt.youhun');
 }
 
 /**
@@ -362,6 +371,7 @@ export function noteYuanwu(g: GameState, player: PlayerId): void {
   if (total <= 0) return;
   g.pendingQueue.push({ kind: 'yuanwu', player });
   logLine(g, `${pname(player)} 「圆舞」：受到自己造成的伤害 → 必须将 1 个能力骰移动到另 1 个区域`);
+  fxSkillFired(g, player, 'xiu.yuanwu');
 }
 
 /** 该骰是否「不符合骰点分布」＝其**点数**不在持有者**第二列分布**中、其所在区域对应的点数集里。 */
@@ -390,6 +400,7 @@ export function noteYuluoDiceConsumed(
   if (!dice.some((d) => nonConforming(g, owner, d.kind, d.value))) return;
   lg.count += 1;
   logLine(g, `${pname(owner)} 「雨落狂流」：使用/消耗/弃置了不符合骰点分布的能力骰 → 计数 +1（${lg.count}/3）`);
+  fxSkillFired(g, owner, 'kong.yuluo');
   if (lg.count >= 3) {
     lg.count = 0;
     logLine(g, `${pname(owner)} 「雨落狂流」计数达到 3 → 重设为 0，请选择 1 项执行`);
@@ -412,7 +423,7 @@ export function paySlots(
   const used = new Set<string>();
   const effective: EffectiveDie[] = [];
   const toRemove: string[] = [];
-  const converted: { kind: DiceKind; values: number[] }[] = [];
+  const converted: { kind: DiceKind; values: number[]; dieIds: string[] }[] = [];
   // L01 传奇面板·雨落狂流：记录本次支付「实际用到」的区域骰（区域 + 点数），供"不符合骰点分布"判定
   const paidDice: { kind: DiceKind; value: number }[] = [];
   for (let i = 0; i < spec.length; i++) {
@@ -445,7 +456,7 @@ export function paySlots(
         );
       }
     } else {
-      converted.push({ kind, values: ids.map((id) => abilityDieInfo(g, player, id)?.value ?? 0) });
+      converted.push({ kind, values: ids.map((id) => abilityDieInfo(g, player, id)?.value ?? 0), dieIds: [...ids] });
       for (const id of ids) {
         const f = findDieOf(g, player, id);
         if (f) paidDice.push({ kind: f.kind, value: f.die.value });
@@ -454,6 +465,10 @@ export function paySlots(
     }
     toRemove.push(...ids);
   }
+  // 记录"来自卡头存放骰"的支付骰（在移除前判定）
+  const heldIdSet = new Set<string>();
+  for (const a of g.players[player].artifacts) for (const h of a.heldDice ?? []) heldIdSet.add(h.id);
+  const fromCard = toRemove.filter((id) => heldIdSet.has(id));
   // 移除并返还供应堆（按当前所在区域移除；034 破障的神器骰从 heldDice 移除）
   for (const id of toRemove) {
     for (const k of KINDS) {
@@ -462,6 +477,16 @@ export function paySlots(
     for (const a of g.players[player].artifacts) {
       if (a.heldDice) a.heldDice = a.heldDice.filter((h) => h.id !== id);
     }
+  }
+  // 动效旁路：把"本次支付"整包报给界面（有置换 或 用到存放骰时）→ 供"支付整体动画"
+  if (converted.length > 0 || fromCard.length > 0) {
+    fxPush({
+      kind: 'pay',
+      player,
+      removedIds: [...toRemove],
+      groups: converted.map((c) => [...c.dieIds]),
+      ...(fromCard.length > 0 ? { fromCard } : {}),
+    });
   }
   // 战术牌 T15「影子」：**使用**（攻击/抵挡/尘起支付；不含「消耗」）与存放骰同点数的能力骰后 →
   //   立即把存放骰移入"该点数对应的区域"（整局 1 次）。存放骰本身不属于任何区域。
@@ -480,6 +505,8 @@ export function paySlots(
         const kind = areaOf(held.value, dist);
         pl.areas[kind].push(createDie(held.id, held.value, kind));
         pl.tacticHeldDie = null;
+        fxPush({ kind: 'move', player, dieIds: [held.id], fromCard: [held.id] }); // 动效：战术栏 → 中间 → 对应区
+        fxTacticFired(g, player);
         const cn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
         logLine(g, `${pname(player)} 「影子」：使用 ${held.value} 点能力骰 → 存放骰移入${cn}骰区`);
       }
@@ -531,6 +558,7 @@ export function paySlots(
   if ((reason === 'attack' || reason === 'defense') && hasActiveSkill(g.players[player], 'tata.wushangjianshu')) {
     const five = effective.filter((e) => e.kind === reason && e.value === 5).length;
     if (five > 0) {
+      fxSkillFired(g, player, 'tata.wushangjianshu');
       if (reason === 'attack') {
         const healed = heal(g, player, five);
         logLine(g, `${pname(player)} 「无上剑术」：使用 ${five} 个 5 点攻击骰 → 回复 ${healed} 点生命`);

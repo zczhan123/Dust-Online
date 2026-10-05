@@ -6,6 +6,7 @@ import { TACTIC_BY_ID } from '../content/tactics';
 import { effectiveWill, initialLife, emptyDistribution } from './derive';
 import { hasActiveSkill } from './skill-state';
 import { logLine, pname } from './log';
+import { fxSkillFired } from './fx';
 import type { GameState, PlayerId, PlayerState } from '../model/types';
 
 export interface SetupOptions {
@@ -146,6 +147,9 @@ export function setupGame(opts: SetupOptions): GameState {
         g,
         `${pname(id)} 「无敌」：没有初始能力骰；初始生命 +20（生命 ${p.life} / 上限 ${p.lifeMax}）`,
       );
+      // 动效旁路：开局首帧（"双方第一骰子上屏"）在 L03 传奇面板弹一次「无敌」。
+      // 建局后到首次 renderGame 之间没有 applyAction（不会被 fxReset 清），故首帧可取到。
+      fxSkillFired(g, id, 'batton.wudi');
     }
     // 战术牌（构筑直接指定）：写战报
     if (p.tactic) {

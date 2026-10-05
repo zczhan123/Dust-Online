@@ -16,11 +16,15 @@ export interface Prefs {
   zoomMode: 'off' | 'auto' | 'manual';
   /** 手动缩放百分比（80–100） */
   zoomPercent: number;
+  /** 动画速度：正常 / 快（时长减半）。可省略＝正常；不参与「预设组合」 */
+  animSpeed?: AnimSpeed;
 }
+
+export type AnimSpeed = 'normal' | 'fast';
 
 export type PresetId = 'desktop' | 'touch' | 'custom';
 
-type PresetValues = Omit<Prefs, 'preset'>;
+type PresetValues = Omit<Prefs, 'preset' | 'animSpeed'>;
 
 /** 电脑模式建议组合：紧凑 + 战报显示 + 完整卡图 + 技能显示 */
 export const DESKTOP_PRESET: PresetValues = {
@@ -56,6 +60,7 @@ export function clonePrefs(p: Prefs): Prefs {
     logCollapsed: p.logCollapsed,
     zoomMode: p.zoomMode,
     zoomPercent: p.zoomPercent,
+    animSpeed: p.animSpeed,
   };
 }
 
@@ -103,6 +108,9 @@ export function loadPrefs(): Prefs {
     if (typeof data?.zoomPercent === 'number') {
       out.zoomPercent = Math.min(100, Math.max(50, Math.round(data.zoomPercent)));
     }
+    if (data?.animSpeed === 'normal' || data?.animSpeed === 'fast') {
+      out.animSpeed = data.animSpeed;
+    }
     if (data?.preset === 'desktop' || data?.preset === 'touch' || data?.preset === 'custom') {
       out.preset = data.preset;
     }
@@ -118,4 +126,9 @@ export function savePrefs(p: Prefs): void {
   } catch {
     // localStorage 不可用（无痕/受限）时静默忽略：仅本次会话生效
   }
+}
+
+/** 动画速度 → 时长倍率（>1 = 更快；时长 = base / 倍率）。 */
+export function speedOf(speed: AnimSpeed | undefined): number {
+  return speed === 'fast' ? 2 : 1;
 }

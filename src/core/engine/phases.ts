@@ -5,6 +5,7 @@ import { effectiveSpeed, effectiveWill, emptyDistribution, totalDice } from './d
 import { logLine, pname, vals } from './log';
 import { dealTrueDamage } from './combat';
 import { noteYuluoDiceConsumed, offerAdapt } from './effects';
+import { fxPush, fxSkillFired } from './fx';
 
 /** 补充阶段：补充 min(速度, 意志 - 现有骰数) 颗随机骰，按分布落区 */
 export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
@@ -64,6 +65,8 @@ export function rerollPhase(g: GameState, player: PlayerId, dieIds: string[], rn
 export function doReroll(g: GameState, player: PlayerId, dieIds: string[], rng: Rng): void {
   rerollPhase(g, player, dieIds, rng);
   if (dieIds.length === 0) return;
+  // 动效旁路：把"本次重掷了哪几颗"报给界面（无论点数是否变化，一律播翻滚动画）
+  fxPush({ kind: 'reroll', player, dieIds: [...dieIds] });
   // 027 寒光·凛冽之音（充能）：持有者的下个尘起阶段开始前，任何人重掷都会使「被重掷方」受伤
   const holders = (['A', 'B'] as PlayerId[]).filter((id) => g.rerollPunish[id]);
   if (holders.length === 0) return;
@@ -75,6 +78,7 @@ export function doReroll(g: GameState, player: PlayerId, dieIds: string[], rng: 
     g,
     `${pname(player)} 因「凛冽之音」受到 ${dieIds.length} 点真实伤害（被重掷 ${dieIds.length} 颗能力骰）`,
   );
+  fxSkillFired(g, source, 'hanguang.charge');
 }
 
 /** 结束阶段：弃置多余能力骰至意志上限。

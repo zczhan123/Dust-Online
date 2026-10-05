@@ -478,6 +478,7 @@ describe('战斗提示 · 传奇英雄面板（L01–L03）', () => {
     putDie(g, 'A', 'attack', 3);
     putDie(g, 'B', 'defense', 3);
     expect(notes(g, 'A')).toEqual([
+      { label: '复仇之灵', text: '你的生命十位数变化后，立即进行 1 次无需冥想骰的额外「尘起行动」' },
       { label: '无法饶恕', text: '攻击造成伤害后，可弃置对方 1 个与该攻击点数相同的防御骰' },
     ]);
     // 对方没有同点数防御骰 → 不出现
@@ -555,5 +556,78 @@ describe('战斗提示·战术牌（T04 末路 / T05 狂热 / T06 残忍）', ()
     ]);
     g.players.A.tacticOnceUsed = true;
     expect(notes(g, 'A').some((n) => n.label === '慈悲')).toBe(false);
+  });
+});
+
+describe('战斗提示 · 本轮新增（019 / 013·A08 电刑 / A08 雷暴 / 001·C01 裁雨流 / A06 勾魂 / L05 复仇之灵）', () => {
+  it('019 尘起（触发）：主要阶段提醒额外尘起；用过后不再出现', () => {
+    const g = mk(['019', '020', '021']);
+    arm(g, 'A', '019', 'left');
+    expect(notes(g, 'A')).toEqual([
+      { label: '尘起', text: '攻击造成伤害后，可立即进行 1 次无需冥想骰的额外「尘起行动」（每回合 1 次）' },
+    ]);
+    g.chenaiUsed.A = true;
+    expect(notes(g, 'A').some((n) => n.label === '尘起')).toBe(false);
+  });
+
+  it('013 电刑 / A08 将至的电刑：需 2 冥想骰才提醒', () => {
+    const g1 = mk(['013', '002', '003']);
+    arm(g1, 'A', '013', 'left');
+    expect(notes(g1, 'A').some((n) => n.label === '电刑')).toBe(false); // 无冥想骰
+    putDie(g1, 'A', 'meditation', 1);
+    putDie(g1, 'A', 'meditation', 2);
+    expect(notes(g1, 'A')).toEqual([
+      { label: '电刑', text: '使用攻击骰后，可消耗 2 冥想骰，视为以 1、2、3 点依次各攻击一次' },
+    ]);
+
+    const g2 = mk(['A08', '002', '003']);
+    arm(g2, 'A', 'A08', 'left');
+    putDie(g2, 'A', 'meditation', 1);
+    putDie(g2, 'A', 'meditation', 2);
+    expect(notes(g2, 'A')).toEqual([
+      { label: '将至的电刑', text: '使用攻击骰后，可消耗 2 冥想骰，视为以 1、3、6 点依次各攻击一次' },
+    ]);
+  });
+
+  it('A08 将至的雷暴（与 013 共用 key）：需 1 冥想骰才提醒（被抵挡时），按神器取卡面名', () => {
+    const g = mk(['A08', '002', '003']);
+    arm(g, 'A', 'A08', 'right');
+    expect(notes(g, 'A').some((n) => n.label === '将至的雷暴')).toBe(false);
+    putDie(g, 'A', 'meditation', 4);
+    expect(notes(g, 'A')).toEqual([
+      { label: '将至的雷暴', text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区' },
+    ]);
+  });
+
+  it('001 裁雨流：造成伤害后提示（每回合 3 次）；用满 3 次后消失', () => {
+    const g = mk(['001', '002', '003']);
+    arm(g, 'A', '001', 'right');
+    expect(notes(g, 'A').some((n) => n.label === '裁雨流')).toBe(true);
+    g.caiyuliuUsed = 3;
+    expect(notes(g, 'A').some((n) => n.label === '裁雨流')).toBe(false);
+  });
+
+  it('C01 极之境·裁雨流 / A06 勾魂：造成伤害后提示', () => {
+    const g1 = mk(['C01', '002', '003']);
+    arm(g1, 'A', 'C01', 'right');
+    expect(notes(g1, 'A').some((n) => n.label === '裁雨流')).toBe(true);
+
+    const g2 = mk(['A06', '002', '003']);
+    arm(g2, 'A', 'A06', 'left');
+    expect(notes(g2, 'A').some((n) => n.label === '勾魂')).toBe(true);
+  });
+
+  it('L05 复仇之灵：常驻提醒', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['010', '011', '012'], legendA: 'L05' });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g.players[who].areas.attack = [];
+      g.players[who].areas.defense = [];
+      g.players[who].areas.meditation = [];
+    }
+    expect(notes(g, 'A')).toEqual([
+      { label: '复仇之灵', text: '你的生命十位数变化后，立即进行 1 次无需冥想骰的额外「尘起行动」' },
+    ]);
   });
 });

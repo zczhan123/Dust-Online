@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
+import { fxTake } from '../src/core/engine/fx';
 import type { GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 034/002/003（034 第 1 列，002 第 2 列提供分布），B 持 004/005/006 */
@@ -112,6 +113,46 @@ describe('034 金刚·不动菩提（触发：取消对方使用防御/攻击骰
     applyAction(g, { t: 'putiResolve', accept: true });
     expect(g.players.B.life).toBe(lifeB - 4);
     expect(a.heldDice?.length ?? 0).toBe(0);
+  });
+
+  it('取消攻击 → attackJoin(cancel)；且攻击骰先"停中间"(pendingAttack 保留)', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034');
+    a.activeMarkerSide = 'right';
+    a.armedSide = 'right';
+    a.armedTurn = g.turnIndex;
+    a.heldDice = [{ id: 'hv', value: 3 }];
+    g.activePlayer = 'B';
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.B.areas.attack = [{ id: 'b1', value: 3, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['b1'] }] });
+    expect(g.pending?.kind).toBe('putiPick');
+    expect(g.pendingAttack).not.toBeNull(); // 攻击骰已停中间（供 034 并排）
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(fxTake()).toContainEqual({ kind: 'attackJoin', player: 'A', mode: 'cancel', dieIds: ['hv'], value: 3 });
+  });
+
+  it('取消防御 → 抵挡先"停住"(block.park) + 发动 attackJoin(cancel)', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034');
+    a.activeMarkerSide = 'right';
+    a.armedSide = 'right';
+    a.armedTurn = g.turnIndex;
+    a.heldDice = [{ id: 'hv', value: 2 }];
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a1', value: 4, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'bd', value: 2, kind: 'defense' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    applyAction(g, { t: 'block', costSlots: [{ dieIds: ['bd'] }] });
+    expect(g.pending?.kind).toBe('putiPick');
+    expect(g.pendingAttack).not.toBeNull(); // 攻击骰保留（停中间）等 034
+    expect(fxTake()).toContainEqual({ kind: 'block', player: 'B', dieIds: ['bd'], park: true });
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(fxTake()).toContainEqual({ kind: 'attackJoin', player: 'A', mode: 'cancel', dieIds: ['hv'], value: 2 });
   });
 
   it('不动菩提·不发动 → 抵挡照常生效（伤害 0）', () => {

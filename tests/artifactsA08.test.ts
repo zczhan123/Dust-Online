@@ -259,18 +259,18 @@ describe('A08「将至的雷暴·持续」：速度 +2（去掉基础 013 的额
 });
 
 describe('A08 战斗提示（battleNotes）登记', () => {
-  it('激活右侧且可支付 → 含「雷暴」条目；无速度类条目；未激活时不含', () => {
+  it('激活右侧且可支付 → 含「将至的雷暴」条目（与 013 共用 key、按神器取卡面名）；无速度类条目；未激活时不含', () => {
     const g = gA08();
     toMain(g);
     // 未激活：不出现雷暴提示
-    expect(battleNotes(g, 'A').some((n) => n.label === '雷暴')).toBe(false);
+    expect(battleNotes(g, 'A').some((n) => n.label === '将至的雷暴')).toBe(false);
 
     armA08(g, 'right');
     g.players.A.areas.meditation.push({ id: 'm-note', value: 3, kind: 'meditation' });
 
     const notes = battleNotes(g, 'A');
     expect(notes).toContainEqual({
-      label: '雷暴',
+      label: '将至的雷暴',
       text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区',
     });
     // 「速度 +2」是持续加成，不属于攻击提示，不应出现

@@ -4,6 +4,7 @@ import { pumpPending, queuePending } from './pending';
 import { runChargeSkill } from './charge';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
+import { fxPush, fxTacticFired, fxSkillFired } from './fx';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -144,6 +145,7 @@ export function applyMolu(g: GameState, player: PlayerId): void {
   if (req <= 0) return;
   const opp: PlayerId = player === 'A' ? 'B' : 'A';
   logLine(g, `${pname(player)} 「末路」：启动必杀式 → 造成 ${req} 点真实伤害，回复 ${req} 点生命（第三列充能需求）`);
+  fxTacticFired(g, player);
   dealTrueDamage(g, opp, req, player);
   if ((g.phase as string) !== 'gameOver') heal(g, player, req);
 }
@@ -166,6 +168,7 @@ export function noteFirstDamageFromOpponent(
   if (p.tacticOnceUsed) return;
   p.tacticOnceUsed = true;
   logLine(g, `${pname(target)} 「赴火」：首次受到对方造成的 ${amount} 点伤害 → 对 ${pname(source)} 造成等量真实伤害`);
+  fxTacticFired(g, target);
   dealTrueDamage(g, source, amount, target);
 }
 
@@ -234,6 +237,7 @@ function noteDamageTaken(g: GameState, target: PlayerId): void {
   const before = card.count;
   card.count = Math.min(5, card.count + 1);
   logLine(g, `「${card.name}」：本回合首次受到伤害，计数 ${before} → ${card.count}`);
+  fxSkillFired(g, target, 'zhihai.bloom');
 }
 
 /**
@@ -299,6 +303,7 @@ function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack)
   if (!g.players[player].attackHalvedNextTurn) return;
   if (halveAttackDamage(pa, '畏惧')) {
     logLine(g, `${pname(player)} 处于「畏惧」影响中：本次攻击伤害减半为 ${pa.value}`);
+    fxSkillFired(g, player === 'A' ? 'B' : 'A', 'shexie.weiju'); // 023 由对方持有 → 弹在其卡上
   }
 }
 
@@ -355,6 +360,8 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
     g.pendingQueue.length === 0 &&
     (puti.heldDice ?? []).some((h) => h.value === effDie.value)
   ) {
+    // 攻击骰先停到中间（供 034 与攻击骰"并排"）；011 的追问推迟到"不发动 034"之后（保持 034 优先）
+    parkAttack(g, pa);
     queuePending(g, {
       kind: 'putiPick',
       player: defender,
@@ -369,12 +376,15 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   commitAttack(g, pa);
 }
 
-/** 正式提交一次攻击为「待结算」（设置 pendingAttack；011 灵能屏障触发） */
-export function commitAttack(g: GameState, pa: PendingAttack): void {
+/** 把攻击"停到中间"（设置 `pendingAttack`）；**不含** 011 的追问。 */
+function parkAttack(g: GameState, pa: PendingAttack): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   g.pendingAttack = pa;
+}
+
+/** 攻击已停住后：011 顿悟·灵能屏障 触发（对方可消耗 1 冥想骰使伤害减半）。 */
+export function maybeBarrier(g: GameState, pa: PendingAttack): void {
   const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
-  // 011 顿悟·灵能屏障 触发：当对方使用 1 个攻击骰后，可消耗 1 个冥想骰使伤害减半
   if (
     g.pending === null &&
     hasActiveSkill(g.players[defender], 'dunwu.barrier.trigger') &&
@@ -382,6 +392,12 @@ export function commitAttack(g: GameState, pa: PendingAttack): void {
   ) {
     g.pending = { kind: 'dunwuHalve', player: defender };
   }
+}
+
+/** 正式提交一次攻击为「待结算」（设置 pendingAttack；011 灵能屏障触发） */
+export function commitAttack(g: GameState, pa: PendingAttack): void {
+  parkAttack(g, pa);
+  maybeBarrier(g, pa);
 }
 
 /** 技能发起的“虚拟”攻击（非实体攻击骰）。`source` = 来源技能名 + 效果拥有者（供提示栏显示） */
@@ -432,14 +448,21 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
     logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点${kindCn}骰抵挡了攻击`);
     // 034 金刚·不动菩提（触发）：攻击方可用「神器上同点数存放骰」取消对方这次抵挡
     const puti = artifactWithSkill(g.players[pa.attacker], 'jingang.puti.trigger');
-    if (
-      puti &&
+    const willPark =
+      !!puti &&
       hasActiveSkill(g.players[pa.attacker], 'jingang.puti.trigger') &&
       g.pending === null &&
       g.pendingQueue.length === 0 &&
-      (puti.heldDice ?? []).some((h) => h.value === eff[0].value)
-    ) {
-      g.pendingAttack = null;
+      (puti.heldDice ?? []).some((h) => h.value === eff[0].value);
+    // 动效旁路：这次抵挡**实际消耗**的骰子（`park`＝先停中间等 034 决定，不立即结算）
+    fxPush({
+      kind: 'block',
+      player: defenderId,
+      dieIds: costSlots.flatMap((f) => f.dieIds),
+      ...(willPark ? { park: true } : {}),
+    });
+    if (willPark) {
+      // **保留 pendingAttack**：攻击骰 + 防御骰都停在中间，等 034 决定（不发动才走正常抵挡）
       queuePending(g, {
         kind: 'putiPick',
         player: pa.attacker,
@@ -638,6 +661,7 @@ export function afterAttackResolved(
             g,
             `${pname(defenderId)} 「统御战场」：受到攻击伤害 → 「${guwang.name}」充能 +1（${guwang.chargeLayer}/${cap}）`,
           );
+          fxSkillFired(g, defenderId, 'batton.tongyuzhancang');
           // 连锁执行该神器的「充能效果」（009「高塔铁幕」→ 把对方 1 个攻击骰点数变为 1）
           runChargeSkill(g, defenderId, guwang.id);
         }
@@ -672,6 +696,7 @@ export function afterAttackResolved(
       if (!held.some((h) => h.value === pa.sourceValue)) {
         held.push({ id: `${pa.attacker}-${gou.id}-held-${pa.sourceValue}`, value: pa.sourceValue as number });
         logLine(g, `${pname(pa.attacker)} 「勾魂」：将本次攻击骰（${pa.sourceValue} 点）置于「${gou.name}」上`);
+        fxSkillFired(g, pa.attacker, 'xuyu.alt.gouhun');
       }
     }
   }
@@ -731,6 +756,7 @@ export function afterAttackResolved(
     const xueji = artifactWithSkill(atk, 'ezhao.xueji');
     if (xueji && hasActiveSkill(atk, 'ezhao.xueji') && res.damageDealt > 0 && (g.phase as string) !== 'gameOver') {
       logLine(g, `${pname(pa.attacker)} 「血祭」：攻击造成伤害，受到 ${xueji.count} 点真实伤害`);
+      fxSkillFired(g, pa.attacker, 'ezhao.xueji');
       dealTrueDamage(g, pa.attacker, xueji.count, pa.attacker);
     }
   }
@@ -763,6 +789,7 @@ export function pumpAttackQueue(g: GameState): void {
 function onAttackDamage(g: GameState, attacker: PlayerId, value: number): void {
   const atk = g.players[attacker];
   if (!hasActiveSkill(atk, 'youming.mingjie.continuous')) return;
+  fxSkillFired(g, attacker, 'youming.mingjie.continuous');
   if (value === 6) {
     logLine(g, `${pname(attacker)} 「冥界行走」：攻击点数为 6，受到 3 点真实伤害`);
     dealTrueDamage(g, attacker, 3, attacker);
@@ -799,6 +826,7 @@ export function dealTrueDamage(
     !g.players[source].tacticOnceUsed
   ) {
     g.pending = { kind: 'ciBei', player: source, target, amount };
+    fxTacticFired(g, source);
     return; // 伤害延后到决策解决时结算
   }
   // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
@@ -816,6 +844,7 @@ export function dealTrueDamage(
   if (source === target && hasActiveSkill(p, 'xiu.sijixinsheng') && p.life - amount <= 0) {
     g.players[target].life = 13;
     logLine(g, `${pname(target)} 「死即新生」：因自己造成的伤害将死亡 → 生命重设为 13`);
+    fxSkillFired(g, target, 'xiu.sijixinsheng');
     noteDamageTaken(g, target);
     checkLifeTens(g, target);
   } else {

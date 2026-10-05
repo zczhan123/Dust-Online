@@ -947,20 +947,26 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: () => ({}),
   },
-  // L06 传奇面板·圆舞（待决策）：选 1 颗能力骰 → 选目标区域（另一个）
+  // L06 传奇面板·圆舞（待决策）：选 1 颗能力骰 → 选目标区域（**排除该骰所在的区**，只列另外两个）
   '@yuanwu': {
-    steps: () => [
-      { kind: 'dice' as const, label: '选择要移动的 1 个能力骰', owner: 'self' as const, areas: KINDS, min: 1, max: 1 },
-      {
-        kind: 'option' as const,
-        label: '移动到哪个区域',
-        options: [
-          { value: 'attack', label: '攻击骰区' },
-          { value: 'defense', label: '防御骰区' },
-          { value: 'meditation', label: '冥想骰区' },
-        ],
-      },
-    ],
+    steps: ({ state, player, chosenDice }) => {
+      const first = chosenDice[0]?.[0];
+      const from = first ? KINDS.find((k) => state.players[player].areas[k].some((d) => d.id === first)) : undefined;
+      const ALL: { value: string; label: string }[] = [
+        { value: 'attack', label: '攻击骰区' },
+        { value: 'defense', label: '防御骰区' },
+        { value: 'meditation', label: '冥想骰区' },
+      ];
+      return [
+        { kind: 'dice' as const, label: '选择要移动的 1 个能力骰', owner: 'self' as const, areas: KINDS, min: 1, max: 1 },
+        {
+          kind: 'option' as const,
+          label: '移动到哪个区域',
+          // 圆舞＝"移动到**另 1 个**区域"→ 第二步**排除**所选骰当前所在区，否则"移到原区"会被引擎判非法
+          options: from ? ALL.filter((o) => o.value !== from) : ALL,
+        },
+      ];
+    },
     buildParams: () => ({}),
   },
   // L06 传奇面板·无光领域（启动）：选择 ①攻击点数+1（最大6）/ ②-1（最小1）

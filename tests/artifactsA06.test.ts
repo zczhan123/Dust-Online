@@ -222,15 +222,20 @@ describe('A06 战斗提示 battleNotes', () => {
       .map((n) => `${n.label}｜${n.text}`)
       .join('　');
 
-  it('被动神器：无论勾魂/幽魂不散哪侧激活，均不出现其条目（也不出现「虚臾」）', () => {
+  it('勾魂（持续·左）：激活时出现条目；幽魂不散 / 神器名「虚臾」不出现', () => {
     const g = gA06();
     toMain(g);
     expect(g.phase).toBe('main');
-    const names = ['勾魂', '幽魂不散', '虚臾'];
-    for (const side of ['left', 'right'] as const) {
-      arm(g, 'A', 'A06', side);
-      const text = allText(g);
-      for (const name of names) expect(text).not.toContain(name);
-    }
+    // 未激活 → 不出现
+    expect(allText(g)).not.toContain('勾魂');
+    // 激活勾魂（左侧）→ 出现
+    arm(g, 'A', 'A06', 'left');
+    expect(allText(g)).toContain('勾魂');
+    // 幽魂不散 / 神器名「虚臾」不出现
+    expect(allText(g)).not.toContain('幽魂不散');
+    expect(allText(g)).not.toContain('虚臾');
+    // 只激活右（幽魂不散）→ 勾魂不出现
+    arm(g, 'A', 'A06', 'right');
+    expect(allText(g)).not.toContain('勾魂');
   });
 });

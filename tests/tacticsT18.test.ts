@@ -52,6 +52,27 @@ describe('T18「适应」', () => {
     expect(g.players.A.areas.attack.find((d) => d.id === id)?.value).toBe(6);
   });
 
+  it('龙腾万丈（002·右）内联掷的 4 颗随机骰也挂「适应」待决策', () => {
+    const g = mk();
+    const a002 = g.players.A.artifacts.find((a) => a.id === '002')!;
+    a002.activeMarkerSide = 'right';
+    a002.armedSide = 'right';
+    a002.armedTurn = g.turnIndex;
+    g.players.A.areas.meditation = [
+      { id: 'm1', value: 1, kind: 'meditation' },
+      { id: 'm2', value: 2, kind: 'meditation' },
+      { id: 'm3', value: 3, kind: 'meditation' },
+    ];
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '002',
+      side: 'right',
+      params: { costSlots: [{ dieIds: ['m1'] }, { dieIds: ['m2'] }, { dieIds: ['m3'] }] },
+    });
+    expect(g.pending?.kind).toBe('shipeiPick');
+    expect(g.pending && g.pending.kind === 'shipeiPick' ? g.pending.dieIds.length : 0).toBe(4);
+  });
+
   it('不发动：不消耗整局 1 次', () => {
     const g = mk();
     gainRandomDice(g, 'A', 'attack', 1, { rollDie: () => 4 });

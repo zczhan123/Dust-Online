@@ -4,10 +4,11 @@ import { refillPhase, doReroll, endPhase } from './phases';
 import { effectiveSpeed, effectiveWill, emptyDistribution, rerollAllowance, totalDice } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attacksBanned, checkLifeEnd, commitAttack, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, SHOUHUN_CONT_KEYS, YonghengQueenSignal, tacticActiveBonus, settleAttack, type AttackMods } from './combat';
+import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attacksBanned, checkLifeEnd, maybeBarrier, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, SHOUHUN_CONT_KEYS, YonghengQueenSignal, tacticActiveBonus, settleAttack, type AttackMods } from './combat';
 import { abilityDieInfo, abilityDicePool, canPayCosts, defaultCostFills, findDieOf, gainRandomDice, maxAffordableSlots, setDieValue, applyHeal, heal, moveDice, noteLifeDrop, offerAdapt, paySlots, withRngState } from './effects';
 import { areaOf, createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
+import { fxPush, fxReset, fxTacticFired, fxSkillFired } from './fx';
 import { runChargeSkill } from './charge';
 import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { skillUseKey } from './skill-state';
@@ -128,6 +129,8 @@ export function beginTurn(g: GameState): void {
   // 战术牌 T11「迷烟」：你自己的**第一个回合仍具有重掷阶段**（首回合本来跳过重掷）
   const t11 = TACTIC_BY_ID[g.players[p].tactic ?? '']?.key === 'miyan';
   g.phase = g.firstRound[p] && !t11 ? 'dustRise' : 'reroll';
+  // T11「迷烟」：首回合本应跳过重掷，是它**多给了一段"重掷阶段"** → 弹「迷烟」
+  if (g.firstRound[p] && t11) fxTacticFired(g, p);
   logLine(g, `${pname(p)} 的回合开始`);
   g.pendingAttack = null;
   g.pending = null;
@@ -159,6 +162,7 @@ export function beginTurn(g: GameState): void {
     for (const a of g.players[id].artifacts) {
       a.continuousLostThisTurn = false;
     }
+    if (g.players[id].legend) g.players[id].legend!.continuousLostThisTurn = false;
   }
   // 028 天罚（激活·本回合）：攻击点数视为固定值 / 只能用某类骰抵挡 / 造成伤害次数统计，均按本回合清零
   g.tianfa.A = null;
@@ -307,6 +311,7 @@ export function advancePhase(g: GameState): void {
       // 顺序（2026-09-28 用户确认）：**鏖战 → 033 → 意志上限弃骰**（后两者会先减骰子，若排在前面会把鏖战"饿死"）。
       if (hasActiveSkill(g.players[g.activePlayer], 'lifeng.aozhan')) {
         queueXianzhen(g, g.activePlayer, 'mainEnd');
+        fxSkillFired(g, g.activePlayer, 'lifeng.aozhan');
       }
       // 032 梦魇·低语（持续）：持有者自己的主要阶段结束时，宣称 1 个能力骰类型
       if (hasActiveSkill(g.players[g.activePlayer], 'mengyan.diyu')) {
@@ -553,6 +558,7 @@ function checkBaoshou(g: GameState): void {
     if (p.tacticOnceUsed) continue;
     if (p.areas.defense.length !== 0) continue;
     p.tacticOnceUsed = true;
+    fxTacticFired(g, id);
     withRng(g, (rng) => {
       const d1 = gainRandomDice(g, id, 'defense', 1, rng)[0];
       const d2 = gainRandomDice(g, id, 'meditation', 1, rng)[0];
@@ -574,6 +580,7 @@ function checkWuqing(g: GameState, turnStarter: PlayerId): void {
   if (TACTIC_BY_ID[g.players[holder].tactic ?? '']?.key !== 'wuqing') return;
   if (g.players.A.life > 20 && g.players.B.life > 20) return;
   logLine(g, `${pname(holder)} 「无情」：有玩家生命 ≤20 → ${pname(turnStarter)} 受到 2 点真实伤害`);
+  fxTacticFired(g, holder);
   dealTrueDamage(g, turnStarter, 2, holder);
 }
 
@@ -844,6 +851,8 @@ function resolveActivationOnArm(g: GameState, player: PlayerId, artifactId: stri
       reportConsumed: () => {},
     }),
   );
+  // 动效旁路："激活"立即发动其技能 → 第二条气泡（技能名）；先由 rise 弹「激活」。
+  fxPush({ kind: 'skillFired', player, artifactId, side: s.side, skillKey: s.key, auto: false });
 }
 
 /** 该「激活」技能是否需要玩家选择（需要则装填时弹出强制选择器） */
@@ -1834,6 +1843,7 @@ const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
  * （清空待决策/多段队列/延后攻击 → 立即开始该玩家的全新回合）。其它异常**原样抛出**（绝不吞错）。
  */
 export function applyAction(g: GameState, action: Action): GameState {
+  fxReset(); // 动效旁路事件：每次动作开始清空
   try {
     return applyActionCore(g, action);
   } catch (e) {
@@ -1848,6 +1858,7 @@ export function applyAction(g: GameState, action: Action): GameState {
 /** L11 永恒女王：取消一切 + 立即开始该玩家的一个**全新回合**（整局 1 次；标记在进入时已置） */
 function runYonghengQueen(g: GameState, target: PlayerId): void {
   logLine(g, `${pname(target)} 「永恒女王」：取消该伤害与所有尚待结算的效果/阶段 → 立即开始 1 个新的回合`);
+  fxSkillFired(g, target, 'aiwa.yonghengnvwang');
   g.legendOnceUsed.push(skillUseKey(target, 'aiwa.yonghengnvwang'));
   // 被打断的玩家＝当前回合玩家。永恒女王**只取消"将来触发的效果/阶段"**，不撤销已生效状态：
   //  - 不跑其"回合结束时触发"（遍野残杀不死、寒光骰不弃、残响不 −1）——这些是将来触发；
@@ -1977,6 +1988,10 @@ function applyActionCore(g: GameState, action: Action): GameState {
       for (const id of action.dieIds) if (!owned.has(id)) throw new Error(`not your die: ${id}`);
       withRng(g, (rng) => doReroll(g, g.activePlayer, action.dieIds, rng));
       g.rerollUsed += 1;
+      // 龙游万象（002 持续）：把重掷上限提到 2 → **第 2 次**重掷＝它多给的那次 → 弹它的气泡
+      if (g.rerollUsed >= 2 && hasActiveSkill(g.players[g.activePlayer], 'youlong.wanxiang')) {
+        fxSkillFired(g, g.activePlayer, 'youlong.wanxiang');
+      }
       // 029 真言·全知（持续）：重掷阶段同样不按常规分布落区，由玩家重新分配全部能力骰
       if (hasActiveSkill(g.players[g.activePlayer], 'zhenyan.quanzhi')) {
         queuePending(g, { kind: 'quanzhiAssign', player: g.activePlayer });
@@ -1993,6 +2008,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g.rerollUsed = 0;
         g.phase = 'reroll';
         logLine(g, `${pname(pd.player)} 发动「雷暴」：插入一个额外重掷阶段（重掷 1 次，骰数 ≤ 速度）`);
+        fxSkillFired(g, pd.player, 'minglei.leibao.trigger');
       } else {
         g.phase = 'dustRise';
         logLine(g, `${pname(pd.player)} 放弃「雷暴」的额外重掷`);
@@ -2016,6 +2032,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
         if (!info || info.kind !== 'meditation') throw new Error(`电刑需要冥想骰: ${id}`);
       }
       g.pending = null;
+      fxSkillFired(g, pd.player, 'minglei.dianxing'); // 013 / A08（按持有者实际 key）
+      fxSkillFired(g, pd.player, 'minglei.alt.dianxing');
       // 「消耗 2 个冥想骰」→ 走 paySlots（与「使用/消耗」语义一致：支持 010 置换 / 034 破障）
       const eff = paySlots(
         g,
@@ -2055,6 +2073,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 发动「雷暴」：将 ${ids.length} 个冥想骰移动到攻击骰区（保留点数）`,
       );
+      fxSkillFired(g, pd.player, 'minglei.leibao.trigger');
       pumpAttackQueue(g);
       break;
     }
@@ -2089,6 +2108,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
           g.freeDustRise -= 1;
         } else if (g.dustRiseNormalCount < (hasActiveSkill(p, 'ying.canying') ? 2 : 1)) {
           g.dustRiseNormalCount += 1;
+          // 残影（L02 持续）：把尘起上限提到 2 → 第 2 次＝它多给的那次 → 弹「残影」
+          if (g.dustRiseNormalCount >= 2) fxSkillFired(g, who, 'ying.canying');
         } else if (
           // 战术牌 T12「激进」：你自己的**第一个尘起阶段**里，可对**第三列**神器额外充能 1 次（正常支付冥想骰）
           g.firstRound[who] &&
@@ -2097,6 +2118,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
           beforeRise?.column === 3
         ) {
           p.tacticOnceUsed = true;
+          fxTacticFired(g, who); // 动效旁路：战术栏弹「激进」
           logLine(g, `${pname(who)} 「激进」：第一个尘起阶段 → 对第三列神器进行 1 次额外充能`);
         } else {
           throw new Error('no dust rise action available');
@@ -2107,6 +2129,14 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       const desc = applyDustRiseToArtifact(g, who, action.artifactId, action.side);
       logLine(g, `${pname(who)} 尘起：${desc}${action.useSeal ? '（使用尘印标记）' : ''}`);
+      // 动效旁路：尘起"开"气泡（切换 / 激活 / 充能）。第三列＝充能（侧按 'only' 取名）
+      fxPush({
+        kind: 'rise',
+        player: who,
+        artifactId: action.artifactId,
+        side: beforeRise?.column === 3 ? 'only' : (action.side ?? 'left'),
+        mode: beforeRise?.column === 3 ? 'charge' : wasSwitching ? 'switch' : 'activate',
+      });
       // 战术牌 T10「迂回」：你**第一次切换**一件**不含「激活」技能**的神器后 → 获得 2 个 1 点能力骰（待放置）
       if (
         wasSwitching &&
@@ -2117,6 +2147,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       ) {
         p.tacticOnceUsed = true;
         queuePending(g, { kind: 'yuhuiPlace', player: who });
+        fxTacticFired(g, who);
         logLine(g, `${pname(who)} 「迂回」：第一次切换神器 → 获得 2 个 1 点能力骰（待放置）`);
       }
       runChargeSkill(g, who, action.artifactId, () => endMainPhase(g));
@@ -2180,6 +2211,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
             action.to === 'defense' ? '防御' : '冥想'
           }骰区`,
         );
+        fxSkillFired(g, pd.player, 'yuqie.caiyuliu');
       } else {
         logLine(g, `${pname(pd.player)} 放弃裁雨流`);
       }
@@ -2205,6 +2237,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         p.areas[kind].push(die);
         const cn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
         logLine(g, `${pname(pd.player)} 发动「极之境·裁雨流」：将该攻击骰重新投掷为 ${v} 点，移回${cn}骰区`);
+        fxSkillFired(g, pd.player, 'c01.caiyuliu');
         offerAdapt(g, pd.player, [die], true); // T18「适应」
       });
       break;
@@ -2231,6 +2264,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
           `${pname(pd.player)} 发动「锋芒」：消耗 1 颗攻击骰（${av}点）与 1 颗冥想骰（${mv}点），取消抵挡并追加 2 点真实伤害`,
         );
         if ((g.phase as string) !== 'gameOver') dealTrueDamage(g, pd.defenderId, 2, pd.player);
+        fxSkillFired(g, pd.player, 'buxiang.fengmang.trigger');
         // L02 传奇面板·暗夜凶神（触发）：通过「锋芒」取消对方防御骰后 → 可选使「不祥」计数 +1（最高 3 层）
         if ((g.phase as string) !== 'gameOver') {
           const atkP = g.players[pd.player];
@@ -2305,6 +2339,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         const opponent: PlayerId = pd.player === 'A' ? 'B' : 'A';
         g.pending = null;
         logLine(g, `${pname(pd.player)} 发动「杀意」：造成 3 点真实伤害，然后回复 2 点生命`);
+        fxSkillFired(g, pd.player, 'shenhong.kill');
         dealTrueDamage(g, opponent, 3, pd.player);
         heal(g, pd.player, 2);
       } else {
@@ -2330,6 +2365,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       g.pending = null;
       logLine(g, `${pname(pd.player)} 发动「哀悼」：造成 2 点真实伤害，然后弃置对方的 1 个防御骰`);
+      fxSkillFired(g, pd.player, 'shenhong.alt.aidao');
       dealTrueDamage(g, opponent, 2, pd.player);
       // 弃置对方 1 个防御骰（持有者已选定；034 破障的存放骰不属区域 → 不可选）
       if (defense.length > 0 && action.defenseDieId) {
@@ -2357,11 +2393,14 @@ function applyActionCore(g: GameState, action: Action): GameState {
         const convertible = fills[0].dieIds.length === 2;
         if (convertible || (info && info.kind === 'meditation')) {
           // 「消耗 1 个冥想骰」→ 走 paySlots（支持 010 置换 / 034 破障）
-          paySlots(g, pd.player, [{ kind: 'meditation' }], fills, undefined, 'skill');
+          const eff = paySlots(g, pd.player, [{ kind: 'meditation' }], fills, undefined, 'skill');
           paid = true;
+          // 动效旁路：011 的冥想骰飞到中间、与攻击骰**并排** → 只它消失（攻击骰留位等抵挡）
+          fxPush({ kind: 'attackJoin', player: pd.player, mode: 'spend', dieIds: fills[0].dieIds, value: eff[0].value });
         }
       }
       if (paid) {
+        fxSkillFired(g, pd.player, 'dunwu.barrier.trigger');
         if (g.pendingAttack) {
           // 统一减半入口：同种削减不叠加（屏障 / 021 满计数 / 023 畏惧 只减半一次，FAQ 21.1.5）
           const ok = halveAttackDamage(g.pendingAttack, '灵能屏障');
@@ -2385,6 +2424,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         const opponent: PlayerId = pd.player === 'A' ? 'B' : 'A';
         g.pending = null;
         logLine(g, `${pname(pd.player)} 发动「灵能脉冲」：造成 ${pd.amount} 点真实伤害`);
+        fxSkillFired(g, pd.player, 'dunwu.pulse.trigger');
         dealTrueDamage(g, opponent, pd.amount, pd.player);
         g.dunwuPulseUsedThisTurn = true;
       } else {
@@ -2408,6 +2448,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (!found) throw new Error(`not ${pname(opp)}'s ability die: ${dieId}`);
       const val = found.die.value;
       logLine(g, `${pname(pd.player)} 发动「帷幕」：受到 2 点真实伤害，弃置 ${pname(opp)} 的 1 个能力骰（${val}点）`);
+      fxSkillFired(g, pd.player, 'youming.weimu');
       dealTrueDamage(g, pd.player, 2, pd.player);
       consumeDice(g, g.players[opp], found.kind, [dieId]);
       break;
@@ -2436,6 +2477,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (action.accept) {
         g.freeNoCostRise += 1;
         logLine(g, `${pname(pd.player)} 「尘起」：获得 1 次无需冥想骰的额外尘起行动（可在主要阶段立即使用）`);
+        fxSkillFired(g, pd.player, 'chenai.rise');
       } else {
         logLine(g, `${pname(pd.player)} 放弃「尘起」的额外尘起行动`);
       }
@@ -2446,6 +2488,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (!pd || pd.kind !== 'bacheng') throw new Error('no bacheng pending');
       g.pending = null;
       if (action.accept) {
+        fxSkillFired(g, pd.player, 'batton.bacheng'); // 按「发动拔城」那一下才弹「拔城」技能名
         const p = g.players[pd.player];
         virtualAttack(g, pd.player, 5, { skill: '拔城', owner: pd.player });
         logLine(g, `${pname(pd.player)} 「拔城」：视为以 5 点进行 1 次攻击`);
@@ -2521,6 +2564,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       g.pending = null;
       consumeDiceByKind(g, g.players[oppId2], byKind); // 一次效果（多类型）→ 对方「雨落狂流」只 +1
       logLine(g, `${pname(pd.player)} 「涤罪大剑术」：弃置 ${pname(oppId2)} 的 2 颗能力骰（种类不相同）`);
+      fxSkillFired(g, pd.player, 'mate.dizuidaijianshu');
       break;
     }
     case 'nudengzuiren': {
@@ -2541,6 +2585,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         `${pname(pd.player)} 「汝等罪人」：放弃回复 ${pd.amount} 点生命，改为对 ${pname(oppId2)} 造成 ${pd.amount} 点真实伤害`,
       );
       dealTrueDamage(g, oppId2, pd.amount, pd.player); // 真伤：source＝你（对方 009 等可取消）
+      fxSkillFired(g, pd.player, 'mate.nudengzuiren');
       break;
     }
     case 'duanexing': {
@@ -2562,6 +2607,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 「闻我名者断恶行」：弃置 ${pname(oppId3)} 的 1 个攻击骰（${found.value} 点）`,
       );
+      fxSkillFired(g, pd.player, 'miyun.duanexing');
       g.pending = null;
       break;
     }
@@ -2585,6 +2631,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       paySlots(g, pd.player, [{ kind: 'meditation' }], fills, undefined, 'skill');
       card.count = 3;
       logLine(g, `${pname(pd.player)} 「始祖兽魂」：额外消耗 1 个冥想骰 → 将「${card.name}」的计数重设为 3`);
+      fxSkillFired(g, pd.player, 'nisa.shizushouhun');
       break;
     }
     case 'wufaraoshu': {
@@ -2604,6 +2651,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       g.pending = null;
       consumeDice(g, o, 'defense', [dieId]); // 弃置（非支付）
       logLine(g, `${pname(pd.player)} 「无法饶恕」：弃置 ${pname(opp)} 的 1 个 ${pd.value} 点防御骰`);
+      fxSkillFired(g, pd.player, 'zoray.wufaraoshu');
       break;
     }
     case 'anyexiongshen': {
@@ -2617,6 +2665,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
           const before = card.count;
           card.count = Math.min(card.countCap ?? 3, card.count + 1);
           logLine(g, `${pname(pd.player)} 「暗夜凶神」：使「不祥」的计数 +1（${before} → ${card.count}）`);
+          fxSkillFired(g, pd.player, 'ying.anyexiongshen');
         }
       } else {
         logLine(g, `${pname(pd.player)} 放弃「暗夜凶神」`);
@@ -2680,6 +2729,10 @@ function applyActionCore(g: GameState, action: Action): GameState {
         // 取消的这次攻击仍**算作进行了一次攻击 / 使用了攻击骰**（说明书「取消」条）：
         // 触发"使用攻击骰后/进行攻击后"类；但 damageDealt=0 → "造成伤害后"类不触发；blocked=false → "被抵挡后"类不触发。
         // 关键：必须推进多段攻击队列（否则 013 电刑 / A01 不败之王 的第 2/3 段会凭空消失）。
+        fxSkillFired(g, pd.owner, 'shouhun.xiong.continuous');
+        fxSkillFired(g, pd.owner, 'shouhun.lang.continuous');
+        fxSkillFired(g, pd.owner, 'shouhun.alt.xiong.continuous');
+        fxSkillFired(g, pd.owner, 'shouhun.alt.lang.continuous');
         if ((g.phase as string) !== 'gameOver') {
           afterAttackResolved(g, pa2, { blocked: false, damageDealt: 0 });
           pumpAttackQueue(g);
@@ -2713,6 +2766,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (!kinds.some((k) => p.areas[k].some((d) => d.id === dieId))) throw new Error(`「适应」：找不到该骰 ${dieId}`);
       g.pending = null;
       p.tacticOnceUsed = true;
+      fxTacticFired(g, pd.player);
       if (pd.replaceByDist) {
         const dist = p.artifacts.find((a) => a.column === 2)?.distribution;
         if (!dist) throw new Error(`player ${pd.player} has no distribution`);
@@ -2757,6 +2811,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       p.areas[to].push(...moved);
       const cn: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
       logLine(g, `${pname(pd.player)} 「诱敌」：将${cn[from]}骰区的 ${ids.length} 颗骰移到${cn[to]}骰区（保留点数）`);
+      fxTacticFired(g, pd.player);
       break;
     }
     case 'yingziPick': {
@@ -2812,6 +2867,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (action.accept) {
         payer.tacticOnceUsed = true;
         logLine(g, `${pname(pd.player)} 「慈悲」：取消该 ${pd.amount} 点伤害，改为回复 ${pd.amount} 点生命（整局 1 次）`);
+        fxTacticFired(g, pd.player);
         heal(g, pd.player, pd.amount);
         // 攻击伤害：视为本次攻击未造成伤害（仍算进行过一次攻击；"被抵挡"事实按原结算）
         if (pd.attack && (g.phase as string) !== 'gameOver') {
@@ -2860,6 +2916,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         }`,
       );
       doAttack(g, pd.player, pd.costSlots, mods);
+      fxSkillFired(g, pd.player, 'siji.chuxing');
       // L08 传奇面板·只为赏金而来（触发）：**实际发动**「处刑通牒」（选①/②）之后 → 由持有者选择启动 1 个"已激活的启动式"技能
       // （放在 doAttack 之后：攻击已生成、正在等抵挡决定；本待决策会先弹出，符合"触发处刑通牒后立即"的时序）
       if (hasActiveSkill(g.players[pd.player], 'xiva.zhiweishangjin')) {
@@ -2887,6 +2944,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
       const eff = paySlots(g, pd.player, spec, fills, undefined, 'skill');
       const theirValue = eff[0].value;
       g.pending = null;
+      // 动效旁路：被要求方骰到位 → 与发起方停在中间的骰并排后一起消失
+      fxPush({ kind: 'weiju', player: pd.player, mode: 'pay', dieIds: fills[0].dieIds, value: theirValue });
       const kindCn = info.kind === 'attack' ? '攻击' : info.kind === 'defense' ? '防御' : '冥想';
       logLine(
         g,
@@ -2944,6 +3003,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 发动「威压」：将 ${pname(target)} 的 1 颗能力骰 ${old} → ${pd.value}（保留原区域）`,
       );
+      fxSkillFired(g, pd.player, 'aige.weiya');
       break;
     }
     case 'xianzhenResolve': {
@@ -2957,6 +3017,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `「陷阵」：${pname(pd.player)} 选择弃置 ${pname(pd.owner)} 的 ${found.die.value} 点能力骰`,
       );
+      fxSkillFired(g, pd.owner, 'aige.xianzhen');
       // 然后：持有者获得「另外两种类型」的随机点数能力骰各 1 个
       const others = KINDS_ORDER.filter((k) => k !== found.kind);
       withRng(g, (rng) => {
@@ -2990,6 +3051,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 发动「横贯」：弃置 ${pname(oppId)} 的 ${found.die.value} 点能力骰（小于本次攻击 ${pd.value} 点）`,
       );
+      fxSkillFired(g, pd.player, 'tuohu.hengguan.trigger');
       break;
     }
     case 'hanguangPick': {
@@ -3027,6 +3089,15 @@ function applyActionCore(g: GameState, action: Action): GameState {
           `${pname(pd.player)} 「凛冽之音」：移除神器上的 ${held.value} 点骰，弃置 ${pname(oppId)} 的 1 颗 ${held.value} 点能力骰`,
         );
       }
+      // 动效旁路：027 寒光·必杀的两种模式（供界面播"移入对应区" / "与对方同点骰一起消失"）
+      fxSkillFired(g, pd.player, 'hanguang.ultimate');
+      fxPush({
+        kind: 'hanguang',
+        player: pd.player,
+        mode: action.pick,
+        heldId: action.dieId,
+        ...(action.targetDieId ? { opponentId: action.targetDieId } : {}),
+      });
       g.pending = null;
       // 继续本次攻击：先处理 022（若可用），否则直接发起攻击
       if (
@@ -3057,6 +3128,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 「全知」：将全部能力骰重新落区（防御=同点成对 / 攻击=顺点三连 / 其余冥想）`,
       );
+      // 动效旁路：本次重排的**全部**骰子（含"落区没变"的）→ 界面整体"聚中间再分体"
+      fxPush({ kind: 'move', player: pd.player, dieIds: Object.keys(action.assign) });
       g.pending = null;
       break;
     }
@@ -3082,6 +3155,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
           logLine(g, `「低语」：该骰（${die.value} 点）不符合骰点分布，尘落 ${before} → ${g.dustfall}`);
         }
       });
+      fxSkillFired(g, pd.player, 'mengyan.diyu');
       break;
     }
     case 'tiaolingResolve': {
@@ -3110,6 +3184,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
         g,
         `${pname(pd.player)} 「死亡亦逝」：选择「${action.pick === 'same' ? '全部相同' : '全部不同'}」，弃置 ${ids.length} 颗能力骰`,
       );
+      fxSkillFired(g, pd.player, 'diaoling.siwang');
       break;
     }
     case 'endDiscardResolve': {
@@ -3136,6 +3211,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       g.pending = null;
       logLine(g, `${pname(pd.player)} 「万丈明光」：主要阶段开始，弃置 ${ids.length} 个能力骰`);
+      fxSkillFired(g, pd.player, 'qianjie.wanzhang');
       break;
     }
     case 'putiResolve': {
@@ -3146,20 +3222,29 @@ function applyActionCore(g: GameState, action: Action): GameState {
       g.pending = null;
       if (!action.accept) {
         logLine(g, `${pname(pd.player)} 不发动「不动菩提」`);
+        // mode='block'：防御骰站住 → 走正常"抵挡"；mode='attack'：攻击已停住 → 继续（此时才做 011 追问）
         if (pd.mode === 'block') finalizeAttackResolution(g, pa, true);
-        else commitAttack(g, pa);
+        else maybeBarrier(g, pa);
         break;
       }
       // 发动：移除神器上 1 个同点数存放骰
       const card = artifactWithSkill(g.players[pd.player], 'jingang.puti.trigger');
+      const removedHeld = card?.heldDice?.find((h) => h.value === pd.value);
       if (card?.heldDice) card.heldDice = card.heldDice.filter((h) => h.value !== pd.value);
+      const joinIds = removedHeld ? [removedHeld.id] : [];
       if (pd.mode === 'block') {
         logLine(g, `${pname(pd.player)} 「不动菩提」：移除 1 个 ${pd.value} 点存放骰，取消对方的抵挡`);
+        // 动效：攻击+防御+灰存放骰 三颗并排 → 一起消失
+        fxPush({ kind: 'attackJoin', player: pd.player, mode: 'cancel', dieIds: joinIds, value: pd.value });
         finalizeAttackResolution(g, pa, false);
       } else {
         logLine(g, `${pname(pd.player)} 「不动菩提」：移除 1 个 ${pd.value} 点存放骰，取消对方的攻击`);
+        // 动效：攻击骰 + 灰存放骰 并排 → 一起消失
+        g.pendingAttack = null;
+        fxPush({ kind: 'attackJoin', player: pd.player, mode: 'cancel', dieIds: joinIds, value: pd.value });
         pumpAttackQueue(g);
       }
+      fxSkillFired(g, pd.player, 'jingang.puti.trigger');
       break;
     }
     case 'skill': {
@@ -3257,12 +3342,36 @@ function applyActionCore(g: GameState, action: Action): GameState {
         if (e instanceof YonghengQueenSignal) recordUse(); // 必杀照样算"已用尽"
         throw e; // 普通非法参数错误不登记；信号交给外层 runYonghengQueen
       }
+      // L08「没有怜悯」：024 必杀**经它**发动 → **先**弹「没有怜悯」（随后才是 024 必杀的必杀横幅）
+      if (s.key === 'kuangwu.ultimate' && hasActiveSkill(g.players[skillOwner], 'xiva.meiyoulianmin') && g.dustfall >= 4) {
+        fxSkillFired(g, skillOwner, 'xiva.meiyoulianmin');
+      }
+      // L01「断苇一斩」：斩神切**经它**发动（改为弃置对方全部能力骰）→ 先弹「断苇一斩」（随后才是斩神切的必杀横幅）
+      if (
+        s.key === 'mingjing.ultimate' &&
+        (action.params as { opponentDiscardAll?: boolean } | undefined)?.opponentDiscardAll === true
+      ) {
+        fxSkillFired(g, skillOwner, 'kong.duanweiyizhan');
+      }
+      // L08「只为赏金而来」：本次启动**由它授予**（不计每回合上限）→ 先弹「只为赏金而来」（随后才是被启动的技能名）
+      if (fromShangjin) {
+        fxSkillFired(g, skillOwner, 'xiva.zhiweishangjin');
+      }
+      // 动效旁路：技能"用"气泡（发动）。激活/充能会连弹两条（先「激活/充能」，再此条技能名）。
+      fxPush({ kind: 'skillFired', player: skillOwner, artifactId: a.id, side: s.side, skillKey: s.key, auto: false });
       // 非法参数在处理器内抛错时不清空待决策（非法动作不得改变状态）
       // 只在"待决策仍是本次解决的那个"时清空 —— 处理器可能已经**设置了一个新的待决策**
       //（如 023 畏惧 → weijuPay），不能把它一起清掉
       const consumedPending = pendingSkill ?? pendingCharge ?? pendingShangjin;
       if (consumedPending && g.pending === consumedPending) g.pending = null;
       recordUse();
+      // L02「残影」：影袭上限提到 2 → 第 2 次＝它多给的那次 → 弹「残影」
+      if (
+        s.key === 'yingle.yingxi' &&
+        g.skillsUsedThisTurn.filter((k) => k === skillUseKey(skillUser, 'yingle.yingxi')).length >= 2
+      ) {
+        fxSkillFired(g, skillUser, 'ying.canying');
+      }
       // L08 没有怜悯（持续）：每次启动「凶弹业舞」（必杀）后 → 你受到 2 点真实伤害
       if (
         s.key === 'kuangwu.ultimate' &&

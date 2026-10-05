@@ -767,6 +767,18 @@ describe('renderGame (read-only snapshot)', () => {
     expect(pop.querySelector('.detail-sub')!.textContent).toContain('充能');
   });
 
+  it('双方同 id 神器：详情浮窗按玩家取件（点对方卡图显示对方状态）', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '005', '006'], heroB: ['004', '005', '006'] });
+    state.players.A.artifacts.find((a) => a.id === '004')!.count = 1;
+    state.players.B.artifacts.find((a) => a.id === '004')!.count = 2;
+    const { ui, hooks } = mount(state, root);
+    // 打开「玩家B 的 004」只读浮窗 → 应显示 B 的计数（2），而非先找到的 A（1）
+    ui.detail = { artifactId: '004', player: 'B', rect: { left: 0, top: 0, width: 10, height: 10 } as DOMRect };
+    hooks.requestRender();
+    const pop = root.querySelector('.detail-popover')!;
+    expect(pop.querySelector('.detail-sub')!.textContent).toContain('计数 2/3');
+  });
+
   it('settings buttons have no gear icon', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     renderGame(state, root, hooksFor());
@@ -3725,6 +3737,40 @@ describe('034 金刚：存放骰的合法出现范围（使用/消耗 vs 弃置�
     hooks.requestRender();
     expect(root.querySelector('.selector .pay-die--held[data-id="hMed2"]')).not.toBeNull();
     expect(root.querySelector('.selector .pay-die--held[data-id="hAtk3"]')).toBeNull();
+  });
+
+  it('确定/取消顺序全站统一：confirm-row 与 selector-actions 都是「确认 → 取消」', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A' });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    const { ui, hooks } = mount(state, root);
+
+    // ① 确认条（confirm-row）
+    ui.pendingConfirm = { action: { t: 'advance' } as Action, label: '测试确认' };
+    hooks.requestRender();
+    expect(
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.confirm-row .btn')).map((b) => b.textContent),
+    ).toEqual(['确认', '取消']);
+
+    // ② 选择器（.selector-actions）
+    ui.pendingConfirm = null;
+    ui.selection = {
+      key: '@wanzhangDiscard',
+      artifactId: '',
+      side: 'only',
+      stepIndex: 0,
+      chosenDice: [],
+      options: [],
+      currentSel: new Set<string>(),
+      numbers: [],
+      slots: [],
+      slotModes: [],
+      pendingKind: 'wanzhangDiscard',
+    };
+    hooks.requestRender();
+    expect(
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector-actions .btn')).map((b) => b.textContent),
+    ).toEqual(['确认', '取消']);
   });
 
   it('027 待决策期间，其它神器（034）卡面上的存放骰不可点，只有 027 的可点', () => {

@@ -1,6 +1,7 @@
 // 战术牌 T10「迂回」/ T11「迷烟」/ T12「激进」
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
+import { fxReset, fxTake } from '../src/core/engine/fx';
 import { TACTIC_BY_ID, tacticDisplayText, TACTIC_POOL } from '../src/core/content/tactics';
 import type { GameState } from '../src/core/model/types';
 
@@ -88,8 +89,11 @@ describe('T12「激进」', () => {
     expect(g.dustRiseNormalCount).toBe(1);
     expect(g.players.A.tacticOnceUsed).toBe(false);
     g.freeDustRise = 0; // 003「明镜」充能会赠予免费尘起，测试中清掉以聚焦 T12
+    fxReset();
     applyAction(g, { t: 'dustRise', artifactId: '003', costSlots: [{ dieIds: ['m2'] }] });
     expect(g.players.A.tacticOnceUsed).toBe(true);
+    // 动效旁路：额外充能时发 tacticFired → 战术栏弹「激进」
+    expect(fxTake()).toContainEqual({ kind: 'tacticFired', player: 'A', tacticId: 'T12' });
     g.freeDustRise = 0; // 充能又赠予了免费尘起，清掉以验证"第三次被拒"
     expect(() => applyAction(g, { t: 'dustRise', artifactId: '003', costSlots: [{ dieIds: ['m3'] }] })).toThrow();
   });

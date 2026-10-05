@@ -13,6 +13,7 @@ import {
   virtualAttack,
 } from '../src/core/engine/combat';
 import { pumpPending } from '../src/core/engine/pending';
+import { fxReset, fxTake } from '../src/core/engine/fx';
 import { endPhase } from '../src/core/engine/phases';
 import { paySlots, heal } from '../src/core/engine/effects';
 import { effectiveWill, totalDice } from '../src/core/engine/derive';
@@ -477,6 +478,22 @@ describe('L04 无上剑术（持续）', () => {
     paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5b'] }], undefined, 'skill');
     expect(A.life).toBe(31);
   });
+
+  it('触发时发 skillFired（无上剑术）；非 5 点不发', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L04', heroA: ['010', '011', '012'] });
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    const A = g.players.A;
+    A.life = 30;
+    A.areas.attack.push(die('a5', 5, 'attack'));
+    fxReset();
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], undefined, 'attack');
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tata.wushangjianshu')).toBe(true);
+    A.areas.attack.push(die('a4', 4, 'attack'));
+    fxReset();
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a4'] }], undefined, 'attack');
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tata.wushangjianshu')).toBe(false);
+  });
 });
 
 describe('L04 我将在下个梦境与你再度相逢（必杀）', () => {
@@ -913,6 +930,16 @@ describe('L06 死即新生（持续）', () => {
     g.players.A.life = 5;
     dealTrueDamage(g, 'A', 10, 'B');
     expect(g.phase).toBe('gameOver');
+  });
+
+  it('触发时发 skillFired（死即新生）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L06', heroA: ['016', '017', '018'] });
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    g.players.A.life = 5;
+    fxReset();
+    dealTrueDamage(g, 'A', 10, 'A');
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'xiu.sijixinsheng')).toBe(true);
   });
 });
 
@@ -1854,6 +1881,13 @@ describe('L11 永恒女王（持续）', () => {
     expect(g.legendOnceUsed).toContain('B:aiwa.yonghengnvwang');
   });
 
+  it('触发时发 skillFired（永恒女王）', () => {
+    const g = queenB();
+    g.players.B.life = 3;
+    lethalAttack(g);
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'aiwa.yonghengnvwang')).toBe(true);
+  });
+
   it('整局仅 1 次：已用过后不再拦截（直接判负）', () => {
     const g = queenB();
     g.players.B.life = 3;
@@ -2163,5 +2197,38 @@ describe('L11 永恒女王 打断行为（2026-09-29 裁定）', () => {
     expect(A.life).toBe(5); // 血祭自伤被永恒女王取消
     expect(g.legendOnceUsed).toContain('A:aiwa.yonghengnvwang');
     expect(g.activePlayer).toBe('A'); // 立即开自己的新回合
+  });
+});
+
+describe('A07 历王之血之印：本回合双方「持续式」失效（含传奇面板）', () => {
+  it('必杀发动后 → 双方神器与传奇面板的 continuousLostThisTurn 置真；下回合开始清除', () => {
+    const g = setupGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['A07', '002', '003'],
+      heroB: ['004', '005', '006'],
+      legendA: 'L02',
+      legendB: 'L12',
+    });
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    for (const who of ['A', 'B'] as PlayerId[]) {
+      g.players[who].areas.attack = [];
+      g.players[who].areas.defense = [];
+      g.players[who].areas.meditation = [];
+    }
+    const a07 = g.players.A.artifacts.find((a) => a.id === 'A07')!;
+    a07.chargeLayer = a07.chargeReq ?? 0;
+    a07.activeMarkerSide = 'left';
+    applyAction(g, { t: 'skill', artifactId: 'A07', side: 'only', params: {} });
+    expect(g.players.A.legend!.continuousLostThisTurn).toBe(true);
+    expect(g.players.B.legend!.continuousLostThisTurn).toBe(true);
+    expect(g.players.A.artifacts.every((a) => a.continuousLostThisTurn)).toBe(true);
+    expect(g.players.B.artifacts.every((a) => a.continuousLostThisTurn)).toBe(true);
+    // 进入下一回合 → 清除（神器与传奇都要清）
+    beginTurn(g);
+    expect(g.players.A.legend!.continuousLostThisTurn).toBe(false);
+    expect(g.players.B.legend!.continuousLostThisTurn).toBe(false);
+    expect(g.players.A.artifacts.some((a) => a.continuousLostThisTurn)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { artifactWithSkill, attackDamageBonus } from './combat';
 import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
 import { TACTIC_BY_ID } from '../content/tactics';
+import { ARTIFACT_TEXT } from '../content/artifactText';
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
@@ -52,6 +53,10 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   if (hasActiveSkill(p, 'lifeng.tunhuzhilang')) {
     notes.push({ label: '吞虎之狼', text: '本回合的第 3 次攻击伤害 +3' });
   }
+  // A **常驻提醒**：L05 传奇面板·复仇之灵（生命十位数变化 → 立即额外尘起 1 次，无需冥想骰）
+  if (hasActiveSkill(p, 'zoray.fuchouzhiling')) {
+    notes.push({ label: '复仇之灵', text: '你的生命十位数变化后，立即进行 1 次无需冥想骰的额外「尘起行动」' });
+  }
 
   // A L06 无光领域（持续状态）：你的攻击点数视为 ±1
   if (p.wuguang === 'up' || p.wuguang === 'down') {
@@ -70,6 +75,14 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     if (candidates.some((d) => canTreatAsAttack(g, player, d.id))) {
       notes.push({ label: '奇袭', text: '可将点数不在对方区域的能力骰视为攻击骰' });
     }
+  }
+
+  // A/D 使用攻击骰后：013 鸣雷·电刑 / A08 将至的电刑（各需 2 冥想骰）
+  if (hasActiveSkill(p, 'minglei.dianxing') && canPayCosts(g, player, { meditation: 2 }, { held: true })) {
+    notes.push({ label: '电刑', text: '使用攻击骰后，可消耗 2 冥想骰，视为以 1、2、3 点依次各攻击一次' });
+  }
+  if (hasActiveSkill(p, 'minglei.alt.dianxing') && canPayCosts(g, player, { meditation: 2 }, { held: true })) {
+    notes.push({ label: '将至的电刑', text: '使用攻击骰后，可消耗 2 冥想骰，视为以 1、3、6 点依次各攻击一次' });
   }
 
   // A（不可抵挡）：L07 传奇面板·无尽追猎（持续）——攻击骰区恰剩 1 颗时，用它可以打出不可抵挡的攻击
@@ -142,8 +155,13 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
     notes.push({ label: '暗夜凶神', text: '通过「锋芒」取消对方防御骰后，可使「不祥」计数 +1（最高 3 层）' });
   }
   // B 被抵挡时：013 鸣雷·雷暴·触发（需 1 冥想骰；含置换与 034/A03 存放骰）
+  // B 被抵挡时：013 雷暴 / A08 将至的雷暴（**共用同一 key**；按持有神器的卡面名取标签）
   if (hasActiveSkill(p, 'minglei.leibao.trigger') && canPayCosts(g, player, { meditation: 1 }, { held: true })) {
-    notes.push({ label: '雷暴', text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区' });
+    const art = artifactWithSkill(p, 'minglei.leibao.trigger');
+    const name = art
+      ? ARTIFACT_TEXT[art.id]?.skills.find((s) => s.side === 'right' && s.type.includes('触发'))?.name ?? '雷暴'
+      : '雷暴';
+    notes.push({ label: name, text: '攻击被抵挡时，可将最多 2 个冥想骰移到攻击骰区' });
   }
   // B 被抵挡时：021 决意·野火燎原（计数 = 5）
   const jueyi = artifactWithSkill(p, 'jueyi.wildfire.continuous');
@@ -168,6 +186,22 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
       label: '冥界行走',
       text: '攻击造成伤害后，回复该点数一半的生命（向上取整）；若攻击点数为 6，则受 3 真实伤害',
     });
+  }
+  // C 造成伤害后：001 雨切·裁雨流（每回合最多 3 次）
+  if (hasActiveSkill(p, 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
+    notes.push({ label: '裁雨流', text: '使用攻击骰造成伤害后，可保留其点数并移到你的防御骰区或冥想骰区（每回合最多 3 次）' });
+  }
+  // C 造成伤害后：C01 极之境·裁雨流
+  if (hasActiveSkill(p, 'c01.caiyuliu')) {
+    notes.push({ label: '裁雨流', text: '使用攻击骰造成伤害后，可将其重掷并移回你的对应区域' });
+  }
+  // C 造成伤害后：A06 虚臾·勾魂
+  if (hasActiveSkill(p, 'xuyu.alt.gouhun')) {
+    notes.push({ label: '勾魂', text: '以"点数不在本神器上"的攻击骰造成伤害后，将该攻击骰置于本神器上' });
+  }
+  // C 造成伤害后：019 蛮王之牙·尘起（每回合 1 次）
+  if (hasActiveSkill(p, 'chenai.rise') && !g.chenaiUsed[player]) {
+    notes.push({ label: '尘起', text: '攻击造成伤害后，可立即进行 1 次无需冥想骰的额外「尘起行动」（每回合 1 次）' });
   }
 
   // C 不可抵挡：001 雨切·中央突破（本回合状态）
