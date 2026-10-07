@@ -102,6 +102,7 @@ export function setupGame(opts: SetupOptions): GameState {
     firstPlayer: opts.firstPlayer,
     initialRerollQueue: [],
     phase: 'setup',
+    mode: 'standard',
     dustfall: 0,
     turnIndex: 0,
     firstRound: { A: true, B: true },

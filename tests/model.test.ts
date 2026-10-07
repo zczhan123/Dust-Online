@@ -37,6 +37,7 @@ describe('model types', () => {
       firstPlayer: 'A',
       initialRerollQueue: [],
       phase: 'setup',
+      mode: 'standard',
       dustfall: 0,
       turnIndex: 0,
       tacticStartDone: false,

@@ -14,6 +14,7 @@ import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnS
 import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
+import { CHALLENGES } from '../content/challenges';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
@@ -325,7 +326,8 @@ export function advancePhase(g: GameState): void {
       break;
     }
     case 'dustRise':
-      if (!g.dustRiseActed) {
+      // 单人挑战「不存在尘落」（说明书 page_15）→ 不尘起也不 +1、不判 10 层胜
+      if (g.mode !== 'challenge' && !g.dustRiseActed) {
         const before = g.dustfall;
         const player = g.activePlayer;
         incrementDustfall(g);
@@ -424,10 +426,50 @@ export function createGame(opts: SetupOptions): GameState {
     enterInitialReroll(g);
   }
   // 收口：初始状态也不该停在"没有任何可做之事"的阶段（如 L03「无敌」无初始能力骰、T01「谨慎」无初始重掷步骤）
+  settleAutoAdvance(g);
+  return g;
+}
+
+/** 建局收口：反复自动推进，直到没有"没得做"的阶段（见 `autoAdvanceAction`）。 */
+function settleAutoAdvance(g: GameState): void {
   for (let guard = 0; guard < 6; guard++) {
     if (!autoAdvanceAction(g)) break;
     doAdvance(g);
   }
+}
+
+export interface ChallengeSetupOptions {
+  seed: number;
+  /** 挑战卡 id（如 'Z02'） */
+  cardId: string;
+  /** 挑战者（A）构筑的 3 件神器（第一/二/三列） */
+  challenger: [string, string, string];
+  /** 挑战者的战术牌（可空） */
+  tactic?: string;
+}
+
+/** 单人挑战建局：挑战者＝A（构筑），传奇＝B（挑战卡预设，无能力骰、生命取卡面、先手）。 */
+export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
+  const card = CHALLENGES.find((c) => c.id === opts.cardId);
+  if (!card) throw new Error(`unknown challenge card: ${opts.cardId}`);
+  const g = setupGame({
+    seed: opts.seed,
+    firstPlayer: 'B', // 说明书：永远从「昔日传奇」回合开始
+    heroA: opts.challenger,
+    heroB: card.artifacts,
+    tacticA: opts.tactic,
+  });
+  g.mode = 'challenge';
+  // 传奇没有初始能力骰（它的骰是每回合投的"驱动骰"），也没有冥想骰区
+  g.players.B.areas = { attack: [], defense: [], meditation: [] };
+  if (card.life != null) g.players.B.life = g.players.B.lifeMax = card.life;
+  g.challenge = { cardId: card.id, count: 0, driven: [], turn: 0 };
+  logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」（${card.id}）· 生命 ${g.players.B.life}`);
+  // 挑战者的战术牌：构筑直接生效
+  if (opts.tactic) applyTacticStart(g, 'A');
+  // 挑战者仍需初始重掷（传奇无骰 → 它那一步会被自动跳过）
+  enterInitialReroll(g);
+  settleAutoAdvance(g);
   return g;
 }
 
