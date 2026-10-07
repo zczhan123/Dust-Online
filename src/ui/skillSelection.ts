@@ -161,9 +161,10 @@ function swordCostSteps(
   const typeName = KIND_CN[spec.kind];
   const N = spec.maxSlots;
   const real = chosenDice[0] ?? [];
-  // 防呆 P2（死路预防）：固定款"真骰至少要选几颗"，否则置换源凑不够（realMin = max(0, 2N − 可用骰总数)）
+  // 防呆 P2（死路预防）：固定款"真骰至少要选几颗"，否则置换源凑不够（realMin = max(0, 2N − 可用骰总数)）。
+  // 可变款下限为 **0**：允许"这几格全用「真实之剑」置换"（由步②补足最小格数）。
   const minReal = spec.variable
-    ? 1
+    ? 0
     : Math.min(kindCount(state, player, spec.kind), Math.max(0, 2 * N - payTotalDice(state, player)));
   const summary = swordSummary(state, player, spec, numbers, chosenDice);
   const steps: SelectStep[] = [
@@ -171,8 +172,8 @@ function swordCostSteps(
       kind: 'dice',
       label:
         (spec.variable
-          ? `选择消耗的${typeName}骰（${minReal}–${N} 颗；点几颗＝消耗几颗，不够可用「真实之剑」补）`
-          : `选择消耗的${typeName}骰（${minReal}–${N} 颗；不够的用「真实之剑」补）`) +
+          ? `选真骰 · ${typeName}（0–${N} 颗；0＝这几格全用「真实之剑」置换）`
+          : `选真骰 · ${typeName}（${minReal}–${N} 颗；不够用「真实之剑」补）`) +
         (summary ? `　${summary}` : ''),
       owner: 'self',
       areas: [spec.kind],
@@ -188,10 +189,10 @@ function swordCostSteps(
     if (spec.variable) {
       steps.push({
         kind: 'dice',
-        label: `还需更多格？再选偶数颗任意骰（每 2 颗顶 1 颗${typeName}骰，视为 5 点；不选＝不置换）`,
+        label: `再选偶数颗任意骰补格（每 2 颗＝1 格，视为 5 点；0＝不加）`,
         owner: 'self',
         areas: KINDS,
-        min: 0,
+        min: Math.max(0, 2 * (1 - real.length)),
         max: Math.min(2 * room, 2 * Math.floor(sources / 2)),
         filter: (d) => !real.includes(d.id),
         allowArtifact: true,
@@ -204,7 +205,7 @@ function swordCostSteps(
       const needDice = room * 2;
       steps.push({
         kind: 'dice',
-        label: `再选恰好 ${needDice} 颗任意骰（每 2 颗顶 1 颗${typeName}骰，视为 5 点）`,
+        label: `再选恰好 ${needDice} 颗任意骰（每 2 颗＝1 格，视为 5 点）`,
         owner: 'self',
         areas: KINDS,
         min: needDice,

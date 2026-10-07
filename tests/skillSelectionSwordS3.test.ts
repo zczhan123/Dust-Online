@@ -65,12 +65,16 @@ describe('真实之剑代价 · S3（选真骰 → 选置换源）', () => {
     });
     const s0 = stepsOf(g, 'dunwu.barrier.activate');
     expect(s0.map((s) => s.kind)).toEqual(['dice', 'dice']);
-    expect(s0[0].kind === 'dice' ? s0[0].min : null).toBe(1);
+    expect(s0[0].kind === 'dice' ? s0[0].min : null).toBe(0); // 允许 0 颗真骰（这几格全用置换）
     expect(s0[0].kind === 'dice' ? s0[0].max : null).toBe(3);
+
+    // 真骰 0 颗 → 步②至少 2 颗置换源（＝1 格，满足下限 1 格）
+    const s0sub = s0[1];
+    expect(s0sub.kind === 'dice' ? s0sub.min : null).toBe(2);
 
     const s1 = stepsOf(g, 'dunwu.barrier.activate', [['d1']]);
     const sub = s1[1];
-    expect(sub.kind === 'dice' ? sub.min : null).toBe(0); // 不置换也合法
+    expect(sub.kind === 'dice' ? sub.min : null).toBe(0); // 已有 1 颗真骰 → 不置换也合法
     expect(sub.kind === 'dice' ? (sub.validate?.([{ id: 'x', value: 1, kind: 'attack' }]) as { ok: boolean }).ok : null).toBe(false); // 奇数颗非法
     expect(sub.kind === 'dice' ? (sub.validate?.([{ id: 'x', value: 1, kind: 'attack' }, { id: 'y', value: 2, kind: 'attack' }]) as { ok: boolean }).ok : null).toBe(true);
   });

@@ -1358,6 +1358,13 @@ button.pay-die {
 .actionzone > .hint {
   flex: 1 1 100%;
 }
+/* 选择器：**3 行式**——① 提示（上面 .hint 已独占一行）② 文字（标题 + 已选）③ 骰片与操作按钮 */
+.actionzone > .selector {
+  flex: 1 1 100%;
+}
+.actionzone .selector-head {
+  flex: 1 1 100%;
+}
 .confirm-row { flex-wrap: wrap; }
 .actionlist,
 .confirm-row { min-height: 40px; }
