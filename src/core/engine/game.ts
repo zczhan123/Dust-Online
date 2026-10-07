@@ -14,7 +14,8 @@ import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnS
 import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
-import { CHALLENGES } from '../content/challenges';
+import { CHALLENGES, type ChallengeSkill } from '../content/challenges';
+import { matchSlots } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
@@ -121,8 +122,80 @@ function queueXianzhen(g: GameState, owner: PlayerId, reason: 'rerollEnd' | 'mai
   return true;
 }
 
+/** 投 `n` 个驱动骰（非能力骰；`kind` 只作占位，**永不进区域**，只活在 `g.challenge.driven`）。 */
+function rollDrivenDice(g: GameState, n: number): void {
+  withRngState(g, (rng) => {
+    for (let i = 0; i < n; i++) {
+      g.challenge!.driven.push(createDie(newDieId('drv-B-'), rng.rollDie(), 'meditation'));
+    }
+  });
+}
+
+/** 传奇单条技能（2b-2 只写战报；效果在 2c）。 */
+function runChallengeSkill(g: GameState, legacy: string, skill: ChallengeSkill, consumed: string[]): void {
+  const vals = consumed
+    .map((id) => g.challenge!.driven.find((d) => d.id === id)?.value)
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b)
+    .join('/');
+  logLine(g, `「${legacy}」：${skill.name}${vals ? `（消耗驱动骰 ${vals}）` : ''}`);
+}
+
+/**
+ * 传奇的一个回合（说明书 page_15–16）：投驱动骰 → 按箭头逐条检查 → 全部查完 / 遇 `endsTurn` 即结束。
+ * 不遵循常规阶段；**不存在尘落**；它的一切抉择由挑战者代决（模式 1，2d 接）。
+ */
+function runLegendTurn(g: GameState): void {
+  const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+  if (!g.challenge || !card || !card.skills) {
+    endTurn(g); // 兜底：数据缺失也必须把回合交还，绝不卡死
+    return;
+  }
+  g.phase = 'main'; // 传奇无阶段概念；仅作占位（回合内同步跑完）
+  g.rerollUsed = 0;
+  g.dustRiseNormalCount = 0;
+  g.dustRiseActed = false;
+  const legacy = card.legacy;
+  logLine(g, `——「${legacy}」的回合——`);
+  rollDrivenDice(g, card.rollDice ?? 0);
+  const rolled = [...g.challenge.driven]
+    .map((d) => d.value)
+    .sort((a, b) => a - b)
+    .join('/');
+  logLine(g, `「${legacy}」：投掷 ${card.rollDice ?? 0} 个驱动骰（${rolled}）`);
+  for (const skill of card.skills) {
+    if (skill.marker === '怜悯*' && g.challenge.turn === 0) {
+      logLine(g, `「${legacy}」：${skill.name} — 首次回合（怜悯*），跳过`);
+      continue;
+    }
+    let consumed: string[] = [];
+    if (skill.slots && skill.slots.length > 0) {
+      const m = matchSlots(skill.slots, g.challenge.driven);
+      if (!m) {
+        logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+        continue;
+      }
+      consumed = m;
+      g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d.id));
+    }
+    runChallengeSkill(g, legacy, skill, consumed);
+    if (skill.endsTurn) {
+      logLine(g, `「${legacy}」：${skill.name} — 立即结束回合`);
+      break;
+    }
+  }
+  g.challenge.driven = [];
+  g.challenge.turn += 1;
+  endTurn(g); // 交回合给挑战者（其 beginTurn 走正常流程）
+}
+
 export function beginTurn(g: GameState): void {
   if (g.phase === 'gameOver') return;
+  // 单人挑战：轮到传奇 → 不按常规阶段，直接跑它的"自动机回合"
+  if (g.mode === 'challenge' && g.activePlayer === 'B') {
+    runLegendTurn(g);
+    return;
+  }
   const p = g.activePlayer;
   // 战术牌 T05「狂热」：该玩家**自己的回合**计数 +1（封顶 4；L04 重开清零）——"前 3 个回合"判定用
   g.players[p].turnsTaken = Math.min(4, g.players[p].turnsTaken + 1);
