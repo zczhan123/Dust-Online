@@ -1096,6 +1096,7 @@ describe('L07 始祖兽魂（触发）', () => {
     applyAction(g, { t: 'shizushouhun', accept: false }); // 不发动
     expect(s.count).toBe(2);
     g.dustRiseNormalCount = 0; // 模拟"另一个尘起阶段"（每阶段正常 1 次）
+    g.phase = 'dustRise'; // 上一个尘起阶段已被"没得做就自动翻页"收口 → 显式回到尘起阶段
     applyAction(g, { t: 'dustRise', artifactId: '020', side: 'right', costSlots: [{ dieIds: ['m2'] }] });
     expect(s.activeMarkerSide).toBe('right');
     expect(g.pending?.kind).toBe('shizushouhun'); // 第二次激活同样询问
@@ -1120,6 +1121,7 @@ describe('L07 始祖兽魂（触发）', () => {
     expect(s.count).toBe(3);
     // 切换到另一侧（付费）：先重设为 2，再询问；付 → 3
     g.dustRiseNormalCount = 0; // 模拟"另一个尘起阶段"
+    g.phase = 'dustRise'; // 上一个尘起阶段已被"没得做就自动翻页"收口 → 显式回到尘起阶段
     applyAction(g, { t: 'dustRise', artifactId: '020', side: 'right', costSlots: [{ dieIds: ['m3'] }] });
     expect(s.activeMarkerSide).toBe('right');
     expect(s.count).toBe(2); // ← 切换重设计数（不是保留 3）
@@ -1140,6 +1142,7 @@ describe('L07 始祖兽魂（触发）', () => {
     // 手上只剩 1 颗冥想骰：付完切换就没有可付的了
     g.players.A.areas.meditation = [die('m3', 1, 'meditation')];
     g.dustRiseNormalCount = 0;
+    g.phase = 'dustRise'; // 上一个尘起阶段已被"没得做就自动翻页"收口 → 显式回到尘起阶段
     applyAction(g, { t: 'dustRise', artifactId: '020', side: 'right', costSlots: [{ dieIds: ['m3'] }] });
     expect(s.activeMarkerSide).toBe('right');
     expect(s.count).toBe(2); // 仍然重设为 2

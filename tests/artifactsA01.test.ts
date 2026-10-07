@@ -31,6 +31,10 @@ const chargeA01 = (g: GameState): void => {
   a.chargeLayer = (a.chargeReq ?? 1) - 1;
   const med = { id: `med-${g.turnIndex}-a01`, value: 4, kind: 'meditation' as const };
   g.players.A.areas.meditation.push(med);
+  // 首回合 A 可能没有冥想骰 → 「没得做就自动翻页」已把尘起阶段自动推进掉了；这里显式回到尘起阶段做本用例的充能
+  g.phase = 'dustRise';
+  g.dustRiseNormalCount = 0;
+  g.dustRiseActed = false;
   applyAction(g, { t: 'dustRise', artifactId: 'A01', costSlots: [{ dieIds: [med.id] }] });
 };
 

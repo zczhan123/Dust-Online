@@ -403,10 +403,8 @@ describe('013 鸣雷（电刑 / 雷暴）', () => {
     const rr = getLegalActions(g).filter((a) => a.t === 'reroll');
     expect(rr.length).toBeGreaterThan(0);
     applyAction(g, rr[0]);
-    expect(g.rerollUsed).toBe(1);
     expect(getLegalActions(g).some((a) => a.t === 'reroll')).toBe(false); // 只允许 1 次
-
-    applyAction(g, { t: 'advance' }); // 结束额外重掷阶段
+    // 重掷次数用尽 → **自动**结束额外重掷阶段、交还原玩家（不再需要手动点结束）
     expect(g.extraReroll).toBeNull();
     expect(g.activePlayer).toBe('B'); // 交还原玩家
     expect(g.phase).toBe('dustRise');

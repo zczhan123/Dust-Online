@@ -35,6 +35,15 @@ const until = (g: GameState, pred: () => boolean, max = 60): void => {
 };
 const atA = (g: GameState, phase: GameState['phase']) => () => g.activePlayer === 'A' && g.phase === phase;
 
+/** 推进到 A 的尘起阶段；若该阶段"没得做"已被「自动翻页」推进掉 → 显式拉回尘起阶段（本组用例都要在尘起阶段做充能） */
+const toADustRise = (g: GameState): void => {
+  until(g, () => atA(g, 'dustRise')() || atA(g, 'main')());
+  g.activePlayer = 'A';
+  g.phase = 'dustRise';
+  g.dustRiseNormalCount = 0;
+  g.dustRiseActed = false;
+};
+
 /** 结束当前回合（从主要阶段推进；遇 019 尘起询问则放弃） */
 const finishTurn = (g: GameState): void => {
   toMain(g);
@@ -53,7 +62,7 @@ const dustRise = (g: GameState, artifactId: string, side?: 'left' | 'right'): vo
 describe('021 决意（野火燎原）', () => {
   it('首次充能完成 = 激活：受到 8 点真实伤害、计数 1（FAQ 21.1.1）', () => {
     const g = nisaGame();
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     const card = art(g, 'A', '021');
     const life = g.players.A.life;
     dustRise(g, '021');
@@ -65,7 +74,7 @@ describe('021 决意（野火燎原）', () => {
 
   it('可对已激活的本神器继续充能：计数 +1（上限 5）、回复＝计数的生命（FAQ 21.1.1）', () => {
     const g = nisaGame();
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     const card = art(g, 'A', '021');
     // 第 1 次（激活）：8 伤 + 计数 1
     dustRise(g, '021');
@@ -73,7 +82,7 @@ describe('021 决意（野火燎原）', () => {
     const lifeAfterFirst = g.players.A.life;
     // 第 2 次：计数 2、回复 2
     finishTurn(g);
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     dustRise(g, '021');
     expect(card.count).toBe(2);
     expect(g.players.A.life).toBe(lifeAfterFirst + 2);
@@ -81,14 +90,14 @@ describe('021 决意（野火燎原）', () => {
     for (const want of [3, 4, 5]) {
       const before = g.players.A.life;
       finishTurn(g);
-      until(g, atA(g, 'dustRise'));
+      toADustRise(g);
       dustRise(g, '021');
       expect(card.count).toBe(want);
       expect(g.players.A.life).toBe(Math.min(g.players.A.lifeMax, before + want));
     }
     // 计数 5 后不能再被尘起选中（FAQ 21.1.4）
     finishTurn(g);
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     expect(getLegalActions(g).some((a) => a.t === 'dustRise' && a.artifactId === '021')).toBe(false);
   });
 
@@ -193,7 +202,7 @@ describe('021 决意（野火燎原）', () => {
 describe('020 兽魂（熊之心 / 狼之血）', () => {
   it('激活：将本神器计数重设为 2；两侧都能重置（尘起装填即强制结算）', () => {
     const g = nisaGame();
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     const card = art(g, 'A', '020');
     card.count = 0;
     dustRise(g, '020', 'left');
@@ -202,7 +211,7 @@ describe('020 兽魂（熊之心 / 狼之血）', () => {
     // 下一回合切到右侧 → 再次把计数重设为 2
     card.count = 0;
     finishTurn(g);
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     dustRise(g, '020'); // 无 side → 切换到另一侧
     expect(card.activeMarkerSide).toBe('right');
     expect(card.count).toBe(2);
@@ -271,7 +280,7 @@ describe('020 兽魂（熊之心 / 狼之血）', () => {
 
   it('20.1.2：标记已在该侧时不能重复激活（只能切到另一侧）', () => {
     const g = nisaGame();
-    until(g, atA(g, 'dustRise'));
+    toADustRise(g);
     activate(g, 'A', '020', 'left');
     const acts = getLegalActions(g).filter((a) => a.t === 'dustRise' && a.artifactId === '020');
     expect(acts.every((a) => (a.t === 'dustRise' ? a.side === 'right' : false))).toBe(true);

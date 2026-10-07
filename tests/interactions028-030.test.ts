@@ -101,15 +101,16 @@ describe('§19-②/③ 重掷（027 / 额外重掷）× 029 全知', () => {
     g.activePlayer = 'B';
     g.rerollUsed = 0;
     g.players.B.areas.meditation = [die('bx', 1, 'meditation')];
+    // 额外重掷阶段 A 需有可重掷的骰，否则"空阶段"会被自动翻页
+    g.players.A.areas.meditation = [die('ax', 2, 'meditation')];
     applyAction(g, { t: 'reroll', dieIds: ['bx'] });
-    applyAction(g, { t: 'advance' }); // 离开重掷阶段 → 触发 A 的雷暴
+    // B 的重掷次数用尽 → 自动结束其重掷阶段 → 触发 A 的雷暴（不再需要手动点结束）
     expect(g.pending?.kind).toBe('leibaoReroll');
     applyAction(g, { t: 'leibaoReroll', accept: true });
     expect(g.extraReroll?.player).toBe('A');
     expect(g.activePlayer).toBe('A');
     expect(g.phase).toBe('reroll');
     // A 在额外重掷阶段重掷 → 全知分配待决策
-    g.players.A.areas.meditation = [die('ax', 2, 'meditation')];
     applyAction(g, { t: 'reroll', dieIds: ['ax'] });
     expect(g.pending?.kind).toBe('quanzhiAssign');
   });

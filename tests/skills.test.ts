@@ -3,12 +3,13 @@ import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/co
 import { totalDice, effectiveWill } from '../src/core/engine/derive';
 import { virtualAttack } from '../src/core/engine/combat';
 import { applyTurnStartEffects } from '../src/core/engine/skills';
+import { toMain } from './helpers';
 
 describe('真实之剑置换（战报留痕）', () => {
   it('置换攻击：战报记录一条「真实之剑」置换', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    toMain(g); // 尘起 -> 主要
     g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     g.players.A.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     g.players.A.areas.meditation = [{ id: 'm1', value: 6, kind: 'meditation' }];
@@ -21,7 +22,7 @@ describe('真实之剑置换（战报留痕）', () => {
   it('置换技能代价（淬炼）：战报同样留痕', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '004', '002'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    toMain(g); // 尘起 -> 主要
     const gs = g.players.A.artifacts.find((a) => a.id === '010')!;
     gs.activeMarkerSide = 'left';
     const bx = g.players.A.artifacts.find((a) => a.id === '004')!;
@@ -42,7 +43,7 @@ describe('basic activate skills', () => {
   it('淬炼 consumes an attack die and increments 不祥 count (cap 3)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     g.players.A.areas.attack.push({ id: 'x', value: 3, kind: 'attack' });
@@ -54,7 +55,7 @@ describe('basic activate skills', () => {
   it('龙腾万丈 consumes 3 meditation dice, gains 4, moves 2 to attack and adds +1 damage', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     const youlong = g.players.A.artifacts.find((a) => a.id === '002')!;
     youlong.activeMarkerSide = 'right';
     while (g.players.A.areas.meditation.length < 3) {
@@ -86,7 +87,7 @@ describe('basic activate skills', () => {
   it('rejects activating a skill that is not active', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.areas.attack.push({ id: 'x', value: 3, kind: 'attack' });
     expect(() => applyAction(g, { t: 'skill', artifactId: '004', side: 'left', params: { costSlots: [{ dieIds: ['x'] }] } })).toThrow();
   });
@@ -94,7 +95,7 @@ describe('basic activate skills', () => {
   it('rejects using the same activate skill twice in one turn', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     const buxiang = g.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     g.players.A.areas.attack.push({ id: 'x1', value: 3, kind: 'attack' }, { id: 'x2', value: 4, kind: 'attack' });
@@ -148,7 +149,7 @@ describe('中央突破', () => {
   it('consumes 3 meditation dice and discards the chosen opponent defense dice, granting unblockable', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     while (g.players.A.areas.meditation.length < 3) {
       g.players.A.areas.meditation.push({ id: `m${g.players.A.areas.meditation.length}`, value: 2, kind: 'meditation' });
@@ -167,7 +168,7 @@ describe('中央突破', () => {
   it('an unblockable attack deals damage even if a defense die is offered', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     while (g.players.A.areas.meditation.length < 3) {
       g.players.A.areas.meditation.push({ id: `m${g.players.A.areas.meditation.length}`, value: 2, kind: 'meditation' });
@@ -190,7 +191,7 @@ describe('中央突破', () => {
   it('中央突破 consumes the SPECIFIC meditation dice chosen', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     g.players.A.areas.meditation = [
       { id: 'm1', value: 2, kind: 'meditation' },
@@ -258,7 +259,7 @@ describe('裁雨流 / 锋芒触发', () => {
   it('裁雨流 offers to move the physical attack die after damage; accepting places it', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'atk1', value: 5, kind: 'attack' });
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk1'] }] });
@@ -272,7 +273,7 @@ describe('裁雨流 / 锋芒触发', () => {
   it('裁雨流 does not trigger for a virtual (skill) attack', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '005', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'right';
     g.players.A.artifacts.find((a) => a.id === '005')!.activeMarkerSide = 'left';
     g.players.A.areas.attack.push({ id: 'v1', value: 6, kind: 'attack' });
@@ -285,7 +286,7 @@ describe('裁雨流 / 锋芒触发', () => {
   it('锋芒·触发: after a block, the attacker may pay to cancel and deal +2 true damage', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
     g.players.A.areas.attack.push({ id: 'a2', value: 3, kind: 'attack' });
@@ -302,7 +303,7 @@ describe('裁雨流 / 锋芒触发', () => {
   it('锋芒·触发: declining changes nothing', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     g.players.A.areas.attack.push({ id: 'a1', value: 5, kind: 'attack' });
     g.players.B.areas.defense.push({ id: 'd1', value: 3, kind: 'defense' });
@@ -319,7 +320,7 @@ describe('必杀', () => {
   it('斩神切: discards all own dice + matching opponent dice, deals true damage, gains 3 defense dice', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' }); // A has 003 明镜
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '003')!.activeMarkerSide = 'left';
     g.players.A.areas = {
       attack: [{ id: 'a1', value: 3, kind: 'attack' }, { id: 'a2', value: 4, kind: 'attack' }],
@@ -410,7 +411,7 @@ describe('007 主宰', () => {
   const setup007 = (side: 'left' | 'right') => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = side;
     return g;
   };
@@ -569,7 +570,7 @@ describe('008 铁壁', () => {
   const setup008 = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'right';
     return g;
   };
@@ -594,7 +595,7 @@ describe('008 铁壁', () => {
   it('战车 FAQ 8.1.1: the gained die counts toward the will cap and reduces the refill', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'left';
     // 008 持续使意志 7+1=8；现有 6 颗（含 1 个以上防御骰）
     g.players.A.areas = {
@@ -763,7 +764,7 @@ describe('009 孤王', () => {
 
   it('必杀: discards all dice, gains random defense dice up to will, then ends the main phase', () => {
     const g = setup009();
-    applyAction(g, { t: 'advance' }); // 尘起 -> 主要
+    toMain(g); // 尘起 -> 主要
     g.players.A.artifacts.find((x) => x.id === '009')!.activeMarkerSide = 'left'; // 充能完成后激活
     g.players.A.areas = {
       attack: [{ id: 'ga', value: 4, kind: 'attack' }],
@@ -878,7 +879,7 @@ describe('011 顿悟', () => {
   const setup011 = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     return g;
   };
 
@@ -1057,7 +1058,7 @@ describe('011 灵能屏障·触发', () => {
   const setupDefender = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // A -> main
+    toMain(g); // A -> main
     return g;
   };
 
@@ -1112,7 +1113,7 @@ describe('011 灵能屏障·触发', () => {
   it('010 置换 × 011：用 2 颗任意骰代替 1 颗冥想骰，同样减半并消耗 2 颗', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['010', '011', '012'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // A -> main
+    toMain(g); // A -> main
     g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑·持续
     g.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障·触发
     g.players.B.areas.meditation = [];
@@ -1153,7 +1154,7 @@ describe('011 灵能脉冲·触发', () => {
   const setupPulse = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '011', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     // 001 中央突破（左，消耗自身冥想骰）；011 灵能脉冲·触发（右侧激活）
     g.players.A.artifacts.find((a) => a.id === '001')!.activeMarkerSide = 'left';
     g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
@@ -1241,7 +1242,7 @@ describe('011 灵能脉冲·触发', () => {
   it('技能消耗后若产生其他待决策（孤王取消），不挂起脉冲', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '011', '003'], heroB: ['004', '002', '009'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' });
+    toMain(g);
     g.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = 'left';
     g.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
     g.players.B.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left';
@@ -1275,7 +1276,7 @@ describe('012 魔女', () => {
   const setup012 = () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     return g;
   };
 
@@ -1459,7 +1460,7 @@ describe('010 真实之剑 置换骰位', () => {
   it('攻击置换：已激活 010 左（真实之剑）时，2 颗骰置换为 5 点有效攻击（含加成）', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     g.players.A.areas.attack = [
       { id: 'ca1', value: 2, kind: 'attack' },
@@ -1480,7 +1481,7 @@ describe('010 真实之剑 置换骰位', () => {
   it('攻击置换：未激活 010（真实之剑）时抛错', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // -> main
+    toMain(g); // -> main
     g.players.A.areas.attack = [
       { id: 'ca1', value: 2, kind: 'attack' },
       { id: 'ca2', value: 3, kind: 'attack' },
@@ -1491,7 +1492,7 @@ describe('010 真实之剑 置换骰位', () => {
   it('抵挡置换：防御方已激活 010 时，2 颗骰置换抵挡并无伤消耗', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['010', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // A -> main
+    toMain(g); // A -> main
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     g.players.B.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
@@ -1509,7 +1510,7 @@ describe('010 真实之剑 置换骰位', () => {
   it('抵挡置换：未激活 010 时抛错且不消耗骰子', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', heroB: ['004', '002', '003'] });
     skipInitialReroll(g);
-    applyAction(g, { t: 'advance' }); // A -> main
+    toMain(g); // A -> main
     g.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     g.players.B.areas.defense = [

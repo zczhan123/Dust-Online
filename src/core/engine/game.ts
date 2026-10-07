@@ -252,6 +252,45 @@ export function endTurn(g: GameState): void {
   beginTurn(g);
 }
 
+/** 「推进阶段」的唯一入口：初始重掷 → 走初始重掷步；其余 → `advancePhase`。
+ *  供 `advance` 动作与「自动推进」（见 `autoAdvanceAction`）共用，保证阶段口径一致。 */
+function doAdvance(g: GameState): void {
+  if (g.phase === 'initialReroll') finishInitialRerollStep(g);
+  else advancePhase(g);
+}
+
+/**
+ * 「没得做就自动翻页」：判断当前阶段是否**确实没有任何可做之事**，是则返回 `{t:'advance'}`。
+ *
+ * - **初始重掷**：持 T01「谨慎」（卡面：没有初始重掷步骤）或没有任何能力骰。
+ * - **重掷阶段**：重掷次数已用尽（默认 1；002「龙游万象」→2；013 雷暴插入的额外阶段→1）或无骰可重掷。
+ *   **首回合由 T11「迷烟」带入的重掷阶段同样适用**（有骰就正常停下等重掷，无骰才跳过）。
+ * - **尘起阶段**：`dustRiseActions` 为空＝没有任何可用的尘起途径。
+ *   （**尘印 / 019 免费尘起 / T12「激进」都算"还能尘起"** → 动作列表非空 → 不会自动结束。）
+ * - 有 `pending` / 待抵挡 / 多段攻击队列时一律**不**自动推进（让位待决策）。
+ *
+ * 纯读、不改状态。**必须在 `checkBaoshou`（T07「保守」补骰）之后调用**：否则会把"刚获得冥想骰、
+ * 其实能尘起"的阶段误判为空。
+ */
+export function autoAdvanceAction(g: GameState): Action | null {
+  if (g.phase === 'gameOver') return null;
+  if (g.pending || g.pendingQueue.length > 0 || g.pendingAttack) return null;
+  const p = g.players[g.activePlayer];
+  if (g.phase === 'initialReroll') {
+    const noStep = TACTIC_BY_ID[p.tactic ?? '']?.key === 'qingzhen';
+    return noStep || totalDice(p) === 0 ? { t: 'advance' } : null;
+  }
+  if (g.phase === 'reroll') {
+    const allowance = g.extraReroll ? 1 : rerollAllowance(p);
+    const canReroll = g.rerollUsed < allowance && effectiveSpeed(p) > 0 && totalDice(p) > 0;
+    return canReroll ? null : { t: 'advance' };
+  }
+  if (g.phase === 'dustRise') {
+    return dustRiseActions(g, g.activePlayer).length === 0 ? { t: 'advance' } : null;
+  }
+  return null;
+}
+
 export function advancePhase(g: GameState): void {
   if (g.phase === 'gameOver') return;
   switch (g.phase) {
@@ -383,6 +422,11 @@ export function createGame(opts: SetupOptions): GameState {
     maybeEnterInitialReroll(g);
   } else {
     enterInitialReroll(g);
+  }
+  // 收口：初始状态也不该停在"没有任何可做之事"的阶段（如 L03「无敌」无初始能力骰、T01「谨慎」无初始重掷步骤）
+  for (let guard = 0; guard < 6; guard++) {
+    if (!autoAdvanceAction(g)) break;
+    doAdvance(g);
   }
   return g;
 }
@@ -1714,7 +1758,9 @@ export function getLegalActions(g: GameState): Action[] {
     const p = g.players[g.activePlayer];
     const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation].map((d) => d.id);
     const acts: Action[] = [{ t: 'advance' }];
-    if (all.length) acts.push({ t: 'reroll', dieIds: all });
+    // T01「谨慎」：没有初始重掷步骤（此前仍会枚举出一个"点了就抛错"的「重掷」选项）
+    const noStep = TACTIC_BY_ID[p.tactic ?? '']?.key === 'qingzhen';
+    if (all.length && !noStep) acts.push({ t: 'reroll', dieIds: all });
     return acts;
   }
 
@@ -1963,8 +2009,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       break;
     }
     case 'advance':
-      if (g.phase === 'initialReroll') finishInitialRerollStep(g);
-      else advancePhase(g);
+      doAdvance(g);
       break;
     case 'reroll': {
       if (g.phase === 'initialReroll') {
@@ -3432,5 +3477,13 @@ function applyActionCore(g: GameState, action: Action): GameState {
   maybeEnterInitialReroll(g);
   // 战术牌 T07「保守」：每次行动结算后，若某持牌者防御骰第一次为 0 → 触发
   checkBaoshou(g);
+  // 「没得做就自动翻页」：重掷 / 尘起 / 初始重掷阶段若确实没有任何可做之事 → 自动推进到下一阶段。
+  // 必须排在 `checkBaoshou` 之后（T07 可能刚补了防御/冥想骰，不能把"刚有骰子可做"的阶段误判为空）。
+  for (let guard = 0; guard < 6; guard++) {
+    if (!autoAdvanceAction(g)) break;
+    doAdvance(g);
+  }
+  // 自动推进可能新排队待决策（如 035「万丈明光」主要阶段开始的弃骰）→ 再泵一次（`pumpPending` 幂等）
+  pumpPending(g);
   return g;
 }

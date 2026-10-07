@@ -44,10 +44,12 @@ describe('game actions and turn flow', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(g);
     g.players.A.areas.meditation.push({ id: 'med-a', value: 2, kind: 'meditation' });
+    const dfBefore = g.dustfall;
+    // 用过 1 次尘起后已无尘起次数 → 自动进入主要阶段（不再需要玩家点「结束尘起阶段」）
     applyAction(g, { t: 'dustRise', artifactId: '001', side: 'left', costSlots: [{ dieIds: ['med-a'] }] });
-    applyAction(g, { t: 'advance' });
-    expect(g.dustfall).toBe(0);
+    expect(g.dustfall).toBe(dfBefore);
     expect(g.phase).toBe('main');
+    expect(g.dustRiseActed).toBe(true);
   });
 
   it('seal can be used after a normal dust rise in the same phase', () => {
@@ -66,9 +68,9 @@ describe('game actions and turn flow', () => {
     skipInitialReroll(g);
     g.players.B.hasDustSeal = true; // B 持有尘印
     g.players.B.areas.meditation = [];
+    const dfBefore = g.dustfall;
     applyAction(g, { t: 'dustRise', artifactId: '004', side: 'left', useSeal: true });
-    applyAction(g, { t: 'advance' });
-    expect(g.dustfall).toBe(0);
+    expect(g.dustfall).toBe(dfBefore);
     expect(g.phase).toBe('main');
   });
 

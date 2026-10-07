@@ -50,12 +50,15 @@ describe('T01「谨慎」', () => {
     expect(() => applyAction(g, { t: 'tacticDice', values: [1] })).toThrow();
   });
 
-  it('你没有对初始能力骰的重掷步骤', () => {
+  it('T01「谨慎」：没有初始重掷步骤 → 该阶段自动跳过', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', tacticA: 'T01', tacticB: 'T04' });
     applyAction(g, resolvePending(g));
+    // A（T01「谨慎」）没有初始重掷步骤 → 自动跳到队列里下一个待初始重掷的玩家 B
     expect(g.phase).toBe('initialReroll');
-    expect(g.activePlayer).toBe('A');
-    expect(() => applyAction(g, { t: 'reroll', dieIds: [] })).toThrow(/没有初始重掷/);
+    expect(g.activePlayer).toBe('B');
+    // 切回 T01 持有者 A：不产出「重掷」动作（旧版会枚举出一个"点了就抛错"的入口）
+    g.activePlayer = 'A';
+    expect(getLegalActions(g).some((a) => a.t === 'reroll')).toBe(false);
   });
 });
 

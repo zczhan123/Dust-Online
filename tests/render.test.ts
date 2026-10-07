@@ -6,6 +6,7 @@ import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
 import { fxReset, fxPush } from '../src/core/engine/fx';
 import type { Action, GameState } from '../src/core/model/types';
+import { toMain } from './helpers';
 
 const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
   rerollSelected: new Set(),
@@ -214,6 +215,7 @@ describe('renderGame (read-only snapshot)', () => {
 
   it('renders one .skill box per shared skill name with one part per entry (009 高塔铁幕)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['009', '002', '003'] });
+    skipInitialReroll(state); // 让 A 成为当前操作者（本用例只查 A 的卡面渲染）
     state.players.A.artifacts.find((a) => a.id === '009')!.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
     const card = root.querySelector('.player--self .card[data-artifact="009"]')!;
@@ -245,7 +247,7 @@ describe('renderGame (read-only snapshot)', () => {
   it('renders the 006 零时枭首 ultimate as a clickable part when active', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.activeMarkerSide = 'left';
     state.players.A.areas.attack.push({ id: 'wansha-atk', value: 2, kind: 'attack' });
@@ -953,7 +955,7 @@ describe('renderGame (read-only snapshot)', () => {
     card.armedTurn = state.turnIndex;
     card.count = 2;
     const { hooks } = mount(state, root);
-    applyAction(state, { t: 'advance' }); // 尘起 → 主要阶段
+    toMain(state); // 尘起 → 主要阶段
     hooks.requestRender();
     const sel = '.player--self .card[data-artifact="018"]';
     // 用之前：持续行绿色、已激活徽标不灰
@@ -984,7 +986,7 @@ describe('renderGame (read-only snapshot)', () => {
   it('019 蛮王之牙：选择器按「X → 种类组合 → 每种 1 颗 → 选 X 项」推进并派发参数', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 → 主要
+    toMain(state); // 尘起 → 主要
     const card = state.players.A.artifacts.find((a) => a.id === '019')!;
     card.activeMarkerSide = 'right'; // 蛮王之牙侧激活
     card.armedSide = 'right';
@@ -1074,7 +1076,7 @@ describe('renderGame (read-only snapshot)', () => {
   it('019 免费额外尘起：入口标注「（免费）」，切换类神器点击后直接派发 free 动作', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['019', '020', '021'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 主要阶段
+    toMain(state); // 主要阶段
     state.freeNoCostRise = 1;
     state.players.A.artifacts.find((a) => a.id === '020')!.activeMarkerSide = 'left'; // 020 有标记 → 切换
     const { onAction } = mount(state, root);
@@ -1089,7 +1091,7 @@ describe('renderGame (read-only snapshot)', () => {
   it('022 填弹：顺点约束实时校验（不满足时禁用确认并提示）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '023', '024'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // → 主要阶段
+    toMain(state); // → 主要阶段
     const card = state.players.A.artifacts.find((a) => a.id === '022')!;
     card.activeMarkerSide = 'left';
     card.armedSide = 'left';
@@ -1214,7 +1216,7 @@ describe('renderGame (read-only snapshot)', () => {
     card.chargeLayer = 4;
     card.activeMarkerSide = 'left';
     state.players.A.areas.defense = [{ id: 'd1', value: 2, kind: 'defense' }];
-    applyAction(state, { t: 'advance' }); // 尘起 → 主要阶段
+    toMain(state); // 尘起 → 主要阶段
     const { ui } = mount(state, root);
     const open = Array.from(root.querySelectorAll<HTMLButtonElement>('.actionlist .btn')).find((b) =>
       (b.textContent ?? '').includes('凶弹业舞'),
@@ -1380,7 +1382,7 @@ describe('renderGame (read-only snapshot)', () => {
   it('does not offer 淬炼 once 不祥 count reaches 3', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     buxiang.count = 3;
@@ -1417,7 +1419,7 @@ describe('renderGame (interaction)', () => {
   it('renders an operation list with buttons in the main phase', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     renderGame(state, root, hooksFor());
     expect(root.querySelectorAll('.actionlist .btn').length).toBeGreaterThan(0);
   });
@@ -1425,7 +1427,7 @@ describe('renderGame (interaction)', () => {
   it('puts the action zone and the vitals bar inside the center band', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     renderGame(state, root, hooksFor());
     const band = root.querySelector('.centerband')!;
     const zone = band.querySelector('.centerband-left .actionzone')!;
@@ -1579,7 +1581,7 @@ describe('renderGame (interaction)', () => {
   it('never renders an internal skill key (e.g. wansha.ultimate) in the UI', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.chargeLayer = wansha.chargeReq ?? 4;
     wansha.activeMarkerSide = 'left';
@@ -1593,7 +1595,7 @@ describe('renderGame (interaction)', () => {
   it('recolors a fully charged 完杀: 充能 disabled, 必杀 green', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.chargeLayer = wansha.chargeReq ?? 4;
     wansha.activeMarkerSide = 'left';
@@ -1611,7 +1613,7 @@ describe('renderGame (interaction)', () => {
   it('distinguishes disabled (darker grey) from inactive (light grey) and used ultimate', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     buxiang.count = 3;
@@ -1631,7 +1633,7 @@ describe('renderGame (interaction)', () => {
   it('marks a used ultimate row as disabled', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     const wansha = state.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.chargeLayer = wansha.chargeReq ?? 4;
     wansha.activeMarkerSide = 'left';
@@ -1646,7 +1648,7 @@ describe('renderGame (interaction)', () => {
   it('clicking a legal attack die proposes a confirm, and 确认 dispatches it', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const die = state.players.A.areas.attack[0];
     const { ui, onAction } = mount(state, root);
 
@@ -1669,7 +1671,7 @@ describe('renderGame (interaction)', () => {
   it('renders attack dice as compact chips (label + die chips) in the operation list', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const { ui } = mount(state, root);
 
     const chips = root.querySelectorAll<HTMLButtonElement>(
@@ -1691,7 +1693,7 @@ describe('renderGame (interaction)', () => {
   it('clicking a parameterized skill card opens the dice chooser (no default dispatch)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const yuqie = state.players.A.artifacts.find((a) => a.id === '001')!;
     yuqie.activeMarkerSide = 'left';
     state.players.A.areas.meditation.push(
@@ -1713,7 +1715,7 @@ describe('renderGame (interaction)', () => {
   it('enters the skill chooser from the operation list', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
@@ -1732,7 +1734,7 @@ describe('renderGame (interaction)', () => {
   it('completes the chooser, proposes the skill, and dispatches only after 确认', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const buxiang = state.players.A.artifacts.find((a) => a.id === '004')!;
     buxiang.activeMarkerSide = 'left';
     state.players.A.areas.attack.push({ id: 'atk-test', value: 3, kind: 'attack' });
@@ -1778,7 +1780,7 @@ describe('renderGame (interaction)', () => {
   it('cancels a pending confirm without dispatching', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     const die = state.players.A.areas.attack[0];
     const { ui, onAction } = mount(state, root);
 
@@ -1850,7 +1852,7 @@ describe('renderGame (interaction)', () => {
   it('shows the defender as the acting player while an attack is pending (colored)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.areas.attack.push({ id: 'atk', value: 5, kind: 'attack' });
     applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['atk'] }] });
     renderGame(state, root, hooksFor());
@@ -1872,7 +1874,7 @@ describe('renderGame (interaction)', () => {
   it('opens the 007 chooser with an option step and completes 震荡斩击 with explicit params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['007', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.artifacts.find((a) => a.id === '007')!.activeMarkerSide = 'right';
     state.players.A.areas.attack = [
       { id: 'c1', value: 2, kind: 'attack' },
@@ -1948,7 +1950,7 @@ describe('renderGame (interaction)', () => {
   it('opens the 008 王家之拳 chooser and proposes explicit meditation/defense params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '008', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.artifacts.find((a) => a.id === '008')!.activeMarkerSide = 'right';
     state.players.A.areas = {
       attack: [],
@@ -2105,7 +2107,7 @@ describe('renderGame (interaction)', () => {
   it('opens the 011 灵能屏障 chooser and proposes explicit defense dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2151,7 +2153,7 @@ describe('renderGame (interaction)', () => {
   it('opens the 011 灵能脉冲 chooser and proposes explicit attack dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['011', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
     state.players.A.areas = {
       attack: [
@@ -2197,7 +2199,7 @@ describe('renderGame (interaction)', () => {
   it('灵能屏障 骰片行：多颗冥想骰时括号只出现一次且在末尾', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // A -> main
+    toMain(state); // A -> main
     state.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     state.players.B.areas.meditation = [
       { id: 'bm1', value: 3, kind: 'meditation' },
@@ -2221,7 +2223,7 @@ describe('renderGame (interaction)', () => {
   it('renders the 011 灵能屏障 触发 prompt with halve / decline buttons', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroB: ['011', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // A -> main
+    toMain(state); // A -> main
     state.players.B.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left';
     state.players.B.areas.meditation = [{ id: 'bm1', value: 3, kind: 'meditation' }];
     state.players.A.areas.attack = [{ id: 'atk', value: 5, kind: 'attack' }];
@@ -2256,7 +2258,7 @@ describe('renderGame (interaction)', () => {
   it('锋芒: opens a selection panel instead of enumerating 攻×冥 combos', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     state.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'right';
     state.players.A.areas.attack = [
       { id: 'a1', value: 5, kind: 'attack' },
@@ -2304,7 +2306,7 @@ describe('renderGame (interaction)', () => {
   it('chooser dice step shows chips mirroring the area dice (dual entry)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     state.players.A.artifacts.find((a) => a.id === '004')!.activeMarkerSide = 'left';
     state.players.A.areas.attack = [{ id: 'atk-test', value: 3, kind: 'attack' }];
 
@@ -2330,7 +2332,7 @@ describe('renderGame (interaction)', () => {
   it('置换攻击 picker also allows clicking the area dice (dual entry)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2366,7 +2368,7 @@ describe('renderGame (interaction)', () => {
   it('opens the 012 梦醒时分 chooser and proposes explicit destination + meditation dice params', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['012', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     state.players.A.artifacts.find((a) => a.id === '012')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2422,7 +2424,7 @@ describe('renderGame (interaction)', () => {
   it('offers 置换攻击 when 真实之剑 is active: pick 2 dice then confirm', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2466,7 +2468,7 @@ describe('renderGame (interaction)', () => {
   it('re-opens the 置换攻击 picker on each click (one conversion per click)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2499,7 +2501,7 @@ describe('renderGame (interaction)', () => {
   it('does not offer 置换攻击 when 真实之剑 is not active', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     state.players.A.areas = {
       attack: [],
       defense: [{ id: 'pd1', value: 2, kind: 'defense' }],
@@ -2516,7 +2518,7 @@ describe('renderGame (interaction)', () => {
   it('cancels the 置换支付 panel without dispatching', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     state.players.A.areas = {
       attack: [],
@@ -2540,7 +2542,7 @@ describe('renderGame (interaction)', () => {
   it('新版「真实之剑」代价：选真骰（点几颗＝几格）→ 选置换源 → 直接发动（灵能脉冲 N=3，1 组置换）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left'; // 真实之剑
     state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right'; // 灵能脉冲
     state.players.A.areas = {
@@ -2596,7 +2598,7 @@ describe('renderGame (interaction)', () => {
     // 骰片步：灵能脉冲（真实之剑）→ 带 .selector--head-row
     const s1 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(s1);
-    applyAction(s1, { t: 'advance' });
+    toMain(s1);
     s1.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     s1.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
     s1.players.A.areas = { attack: [{ id: 'a1', value: 2, kind: 'attack' }], defense: [], meditation: [] };
@@ -2632,7 +2634,7 @@ describe('renderGame (interaction)', () => {
   it('shows the active skill name in the card badge (已激活·技能名)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     state.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
     renderGame(state, root, hooksFor());
     const badge = root.querySelector<HTMLElement>(
@@ -2643,7 +2645,7 @@ describe('renderGame (interaction)', () => {
     // 第三列（技能在 only 侧）显示对应技能名，而非「左侧」
     const state2 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['006', '002', '003'] });
     skipInitialReroll(state2);
-    applyAction(state2, { t: 'advance' });
+    toMain(state2);
     const wansha = state2.players.A.artifacts.find((a) => a.id === '006')!;
     wansha.chargeLayer = wansha.chargeReq ?? 4;
     wansha.activeMarkerSide = 'left';
@@ -2657,7 +2659,7 @@ describe('renderGame (interaction)', () => {
   it('shows the kind prefix on attack/block chips (攻N / 防N)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A' });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' });
+    toMain(state);
     renderGame(state, root, hooksFor());
     const chip = root.querySelector<HTMLButtonElement>(
       '.actionlist-chips .pay-die[data-act="attack"]',
@@ -2668,7 +2670,7 @@ describe('renderGame (interaction)', () => {
   it('uses the normal all-real dice step for a skill cost when 真实之剑 is inactive', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // 尘起 -> 主要
+    toMain(state); // 尘起 -> 主要
     state.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'left'; // 灵能屏障（010 未激活）
     state.players.A.areas = {
       attack: [
@@ -2915,7 +2917,7 @@ describe('renderGame (interaction)', () => {
   it('025 奇袭：可视为攻击骰的能力骰在攻击行标注「→ 攻击」且样式区分（不重复）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['025', '026', '027'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     const card = state.players.A.artifacts.find((a) => a.id === '025')!;
     card.activeMarkerSide = 'left';
     card.armedSide = 'left';
@@ -3062,7 +3064,7 @@ describe('战斗提示（.hint-notes）', () => {
   const mainState = (heroA: [string, string, string]): GameState => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA });
     skipInitialReroll(state);
-    applyAction(state, { t: 'advance' }); // -> main
+    toMain(state); // -> main
     return state;
   };
 

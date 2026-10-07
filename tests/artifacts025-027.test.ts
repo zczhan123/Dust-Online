@@ -420,7 +420,7 @@ describe('027 寒光（凛冽之音）', () => {
     g.players.A.areas.meditation.push({ id: 'medA', value: 3, kind: 'meditation' });
     applyAction(g, { t: 'dustRise', artifactId: '027', costSlots: [{ dieIds: ['medA'] }] });
     expect(g.rerollPunish.A).toBe(true);
-    applyAction(g, { t: 'advance' }); // → A 的主要阶段
+    // 尘起次数用尽 → 已**自动**进入 A 的主要阶段
 
     // A 的**下个回合**：这是重掷阶段（在尘起阶段**之前**）→ 惩罚仍在，A 重掷同样受伤
     toReroll(g, 'A');
@@ -435,9 +435,8 @@ describe('027 寒光（凛冽之音）', () => {
     applyAction(g, { t: 'reroll', dieIds: ['ar1', 'ar2'] });
     expect(g.players.A.life).toBe(aLife - 2);
 
-    // 进入 A 的尘起阶段 → 此刻才清除
-    applyAction(g, { t: 'advance' });
-    expect(g.phase).toBe('dustRise');
+    // 重掷次数用尽 → 自动结束重掷阶段；A 已无冥想骰、无法尘起 → 尘起阶段也自动翻页 → 惩罚在此清除
+    expect(g.phase).toBe('main');
     expect(g.rerollPunish.A).toBe(false);
   });
 
@@ -588,8 +587,7 @@ describe('027 寒光·必杀：真实路径（充能 → 按钮 → 发动）', 
     expect(card.chargeLayer).toBe(2);
     expect(card.activeMarkerSide).not.toBeNull(); // 已激活
 
-    // 进入主要阶段：必杀动作必须已被枚举出来（本次「按钮不出现」bug 的回归点）
-    applyAction(g, { t: 'advance' });
+    // 进入主要阶段（充能完成、次数用尽 → 已**自动**进入主要阶段）：必杀动作必须已被枚举出来（本次「按钮不出现」bug 的回归点）
     expect(g.phase).toBe('main');
     const offered = getLegalActions(g).some(
       (a) => a.t === 'skill' && a.artifactId === '027' && a.side === 'only',
