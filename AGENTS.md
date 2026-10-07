@@ -312,3 +312,23 @@
     - **新卡义务**：新增任何"某阶段可能多出可做之事"的来源（新次数/新支付途径/新目标）时，**必须让 `autoAdvanceAction` 认得它**，否则会被误跳过、且属于静默错误。
     - **界面表现（2026-10-07 追加，勿违）**：阶段被自动翻页时**不能悄无声息** —— `render.ts` 的 `phaseBannerSegs()` 按 `STANDARD_PHASES` 顺序**依次补播**被跨过的阶段横幅：**被跨过的过渡段**用较短的 `MOTION.bannerHoldTransient`（600ms），**当前真实阶段**用 `MOTION.bannerHold`；**串行排程、绝不重叠**（`playBanner` 返回值即下一段起点）。**换手那一帧不再吞掉阶段横幅** → 「回合开始 → 尘起阶段 → 主要阶段」可三段连播。**「重掷阶段」不加横幅**（没骰就静默跳过）。回归：`tests/phaseBannerSegs.test.ts`。
     - **测试口径**：需要"到主要阶段"的测试统一用 `tests/helpers.ts` 的 **`toMain(g)`**（只在还没到 main 时补推进）——旧的"`skipInitialReroll` → 一次 `advance`"写法在自动翻页后会**走过头**。回归见 `tests/autoAdvancePhase.test.ts`。
+
+## 挑战模式（单人 vs 昔日传奇「自动机」）—— 2026-10-07 落地，勿违
+
+> 设计文档：`..\plans\挑战模式设计.md`；代决点清单：`..\plans\挑战模式-代为操作清单.md`；逐批计划：`..\plans\2026-10-07-挑战模式-Plan*.md`。**本轮只转写并打通 Z02（传说中的"永暗之刃"）**。
+
+1. **单局形态**：`GameState.mode: 'standard' | 'challenge'`（默认 `'standard'`，旧路径**零变化**）；`GameState.challenge`＝传奇运行时（`cardId/count/driven/turn/resumeAt/activeSkill/decisions`）。**传奇＝ `players.B` 这一席**（复用全部"对方"语义）；挑战者＝ `players.A`；`firstPlayer='B'`（说明书：永远从传奇回合开始）。
+2. **建局**：`createChallengeGame({seed, cardId, challenger, tactic?})`（`game.ts`）——挑战者用构筑 3 件；传奇装**卡面预设 3 件**（只为取分布/生命）、**无初始能力骰、无冥想骰区**、生命取卡面、**先手**（尘印归挑战者）；挑战者仍做初始重掷（传奇那一步被自动跳过）。
+3. **无尘落**：`advancePhase` 的尘落分支以 `mode !== 'challenge'` 为条件（单人挑战不存在尘落）。
+4. **传奇回合（自动机）**：`beginTurn` 在"挑战模式 + 轮到传奇"时分流到 `runLegendTurn` → `continueLegendTurn`：
+   - 投 `card.rollDice` 个**驱动骰**（非能力骰、**不进区域**，只活在 `g.challenge.driven`）；
+   - 按**卡面箭头顺序**逐条：`怜悯*` 首回合跳过 / 无槽或 `∞` 必执行 / 有槽先 `matchSlots`（**填不满跳过、填满才执行并扣骰**）/ `endsTurn` 立即收尾；全部查完 → 清空驱动骰 → 交还挑战者。
+   - **可暂停续跑**：`challenge.resumeAt` 记"下一条技能下标"；`applyActionCore` 收尾在"无待决策/无攻击队列"时自动 `continueLegendTurn`。**多段攻击走现成 `virtualQueue` + `pumpAttackQueue`**（不新增机制）。
+   - **扣驱动骰的时机**：**真正结算前才扣**（曾因"提问前就扣"导致续跑重算槽匹配→整条被跳过）。
+5. **代决（模式 1）**：传奇本该自己做的抉择**全部由挑战者决定**。机制＝`Pending{kind:'challengePick', player:'A', prompt, options[]}` ＋ `Action{t:'challengePick', id}`；`challengeDecisions()` 给出本条需要的选择，`continueLegendTurn` 逐条问、收集齐再结算；选择存 `g.challenge.decisions`（按技能 id）。**已接**：`z02-2` 留哪颗防御骰、`z02-3` 弃哪颗防御骰、`z02-4` 枭首攻击顺序（`asc/desc`）。**未代决时一律有确定性默认**（AI/测试兼容）。
+6. **挑战者侧**：正常流程但无尘落；传奇按 **「防御规则」** 抵挡——`ChallengeCard.defenseMin`（Z01=2 / Z02=3），伤害 < 门槛 → `getLegalActions` **不给任何抵挡动作**（自动不挡）；「防御骰上限」`defenseCap` 在传奇**获得**防御骰时截断。
+7. **本模式技能削弱（唯一来源 `CHALLENGE_RULE_NOTES`）**：013 雷暴·持续 / 017 帷幕 / 028 与 A05「白昼之火」（`tianfa.bairi`、`tianfa.alt.shenkong`）→ **整条失效**（`isInertSkill(g,key)`；护栏测试确保 key 真实存在）；023 共振选"双方各获得"时**跳过给传奇的冥想骰**；020 兽魂的选择由挑战者定（Z02 无此卡）。
+8. **对手面板（D 方案，`render.ts` 的 `challengePanel()`）**：面板头＝`传说中的「X」` ＋药丸 `昔日传奇 · Z0N` ＋**点数分布**（取第二列神器，同玩家卡头写法）＋计数 `X/上限`；**卡图缩略**（`public/challenges/Z0NN.jpg`，点开＝大图浮窗 `challengeCardOverlay`）＋**技能列**（序号/名称/`∞`·`怜悯*`/槽摘要，**正在结算**一条高亮＝`challenge.activeSkill`）；生命条独占一行；三区＝防御骰区 / 攻击骰区 / **驱动骰槽**（＝原冥想骰区槽位，**仅本模式**改名）。图上不显示三神器。
+9. **固定视角**：本模式**不做 A/B 换位**——宿主 `main.ts` 在挑战局用 `setLocalViewPlayer('A')`（`viewOwnerOf` 唯一开关）⇒ `holdView` 恒假。
+10. **入口**：`setupScreen` 主页菜单「挑战模式」→ 已有的 4 列选择界面 → 「开始挑战」按钮带 `challengeCardId` → `main.ts` 的 `startLocal` 分支走 `createChallengeGame`。中段右槽在挑战模式多一个 **`挑战模式特殊规则`** 按钮（浮窗＝第 7 条清单）。
+11. **新卡义务**：转写 Z03–Z12 时，除 `CHALLENGES` 数据外，必须在 `applyChallengeSkill` 里逐条实现效果、在 `challengeDecisions` 登记其**代决点**、并更新代决清单；**槽/`∞`/`怜悯*`/`endsTurn` 由状态机统一处理，不要各写一遍**。

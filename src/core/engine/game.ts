@@ -150,8 +150,10 @@ function syncLegendFengmang(g: GameState): void {
 function challengeDecisions(
   g: GameState,
   skill: ChallengeSkill,
+  consumedCount = 0,
 ): { prompt: string; options: { id: string; label: string }[] }[] {
   const A = g.players.A;
+  const B = g.players.B;
   const defOpts = (): { id: string; label: string }[] =>
     A.areas.defense.map((d) => ({ id: d.id, label: `防${d.value}` }));
   switch (skill.id) {
@@ -163,6 +165,21 @@ function challengeDecisions(
       return A.areas.defense.length > 0
         ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts() }]
         : [];
+    case 'z02-4': {
+      // 会用它全部攻击骰逐个攻击时才需要定顺序
+      const atk = B.areas.attack.length + consumedCount;
+      return atk > A.areas.defense.length && atk > 1
+        ? [
+            {
+              prompt: '「枭首」：用全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+            },
+          ]
+        : [];
+    }
     default:
       return [];
   }
@@ -216,6 +233,10 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
           label: '枭首',
           owner: 'B' as PlayerId,
         }));
+        // 代决（模式 1）：攻击顺序（未代决时保持原顺序）
+        const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+        if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+        else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
         pumpAttackQueue(g);
       }
       return;
@@ -296,7 +317,7 @@ function continueLegendTurn(g: GameState): void {
       // 注意：**此刻不扣**——代决可能中途暂停，续跑时会重新算槽；等真正结算前再扣（见下）
     }
     // 代决（模式 1）：本条需要的选择还没收集齐 → 逐条问挑战者，收集完再结算
-    const wants = challengeDecisions(g, skill);
+    const wants = challengeDecisions(g, skill, consumed.length);
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {

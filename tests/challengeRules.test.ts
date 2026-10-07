@@ -4,6 +4,7 @@ import {
   createGame,
   skipInitialReroll,
   applyAction,
+  applyChallengeSkill,
   getLegalActions,
 } from '../src/core/engine/game';
 import { legendCanBlock, isInertSkill } from '../src/core/engine/challenge';
@@ -90,5 +91,15 @@ describe('挑战模式 · 规则与削弱', () => {
     // 挑战者替传奇决定：留「防3」（d2）
     applyAction(g, { t: 'challengePick', id: 'd2' });
     expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['d2']);
+  });
+
+  it('代决：「枭首」攻击顺序交给挑战者选（asc→先小后大）', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    g.players.B.areas.attack = [die('b1', 5, 'attack'), die('b2', 2, 'attack')];
+    g.players.A.areas.defense = [];
+    g.challenge!.decisions = { 'z02-4': ['asc'] };
+    const skill = Z02.skills!.find((s) => s.id === 'z02-4')!;
+    applyChallengeSkill(g, Z02, skill, [die('k1', 6, 'meditation')]);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2 });
   });
 });
