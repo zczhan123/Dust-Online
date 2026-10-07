@@ -106,6 +106,8 @@ export type Action =
   | { t: 'weijuPay'; dieId?: string; costSlots?: SlotFill[] }
   /** 023 蛇蝎·共振：选择 ①双方各得 2 颗 / ②双方各弃置 2 颗（弃置由发起者指定） */
   | { t: 'gongzhenResolve'; pick: 'gain' | 'discard'; myIds?: string[]; oppIds?: string[] }
+  /** 挑战模式·代决：挑战者替「昔日传奇」做的选择（模式 1）。`id` ∈ 该待决策 options 的 id */
+  | { t: 'challengePick'; id: string }
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
   | { t: 'shouhunCancel'; cancel: boolean }
   /** 026 哀歌·威压：使用能力骰后，令自己或对方的 1 颗能力骰点数变为固定值（保留区域）；dieId 省略 = 不发动 */
@@ -186,6 +188,13 @@ export type Pending =
   | { kind: 'weijuPay'; player: PlayerId; initiator: PlayerId; initiatorValue: number }
   /** 023 蛇蝎·共振：重掷并落区后，按落区类型二选一 */
   | { kind: 'gongzhenPick'; player: PlayerId; areaKind: DiceKind }
+  /** 挑战模式·代决（模式 1）：把「昔日传奇」本该自己做的抉择交给挑战者；`options` 为候选。 */
+  | {
+      kind: 'challengePick';
+      player: PlayerId;
+      prompt: string;
+      options: { id: string; label: string }[];
+    }
   /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
   | { kind: 'chargeResolve'; player: PlayerId; artifactId: string }
   /** 026 哀歌·威压：某人「使用 1 个任意能力骰后」，威压持有者可令 1 颗能力骰点数变为固定值（FAQ 26.2.1：先于该骰的基础效果结算） */
@@ -396,6 +405,8 @@ export interface GameState {
     resumeAt?: number | null;
     /** 正在结算的技能下标（界面高亮"正在结算"用）；不在回合内为 null */
     activeSkill?: number | null;
+    /** 代决（模式 1）：已收集的选择，按技能 id 存（值＝所选 option 的 id） */
+    decisions?: Record<string, string[]>;
   };
   dustfall: number;
   turnIndex: number;

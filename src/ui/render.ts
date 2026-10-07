@@ -1610,6 +1610,9 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点）——随后比较双方消耗的能力骰点数大小；1 视为大于 6；请选择` },
     ];
   }
+  if (pd && pd.kind === 'challengePick') {
+    return [{ text: `挑战模式 · 代决：${pd.prompt}` }];
+  }
   if (pd && pd.kind === 'gongzhenPick') {
     const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
     return [
@@ -2181,6 +2184,11 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
           : '② 本次攻击伤害 +5';
     case 'gongzhenResolve':
       return a.pick === 'gain' ? '① 双方各获得 2 颗' : '② 双方各弃置 2 颗';
+    case 'challengePick': {
+      const pd = state.pending;
+      if (pd?.kind !== 'challengePick') return null;
+      return pd.options.find((o) => o.id === a.id)?.label ?? null;
+    }
     case 'weijuPay':
       return '消耗 1 颗能力骰';
     case 'guwangCancel':

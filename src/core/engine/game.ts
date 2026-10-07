@@ -146,6 +146,28 @@ function syncLegendFengmang(g: GameState): void {
   if (add > 0) p.buffs.push({ attr: 'attackDamage', add, duration: 'thisTurn', source: '传奇锋芒' });
 }
 
+/** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。 */
+function challengeDecisions(
+  g: GameState,
+  skill: ChallengeSkill,
+): { prompt: string; options: { id: string; label: string }[] }[] {
+  const A = g.players.A;
+  const defOpts = (): { id: string; label: string }[] =>
+    A.areas.defense.map((d) => ({ id: d.id, label: `防${d.value}` }));
+  switch (skill.id) {
+    case 'z02-2':
+      return A.areas.defense.length > 1
+        ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts() }]
+        : [];
+    case 'z02-3':
+      return A.areas.defense.length > 0
+        ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts() }]
+        : [];
+    default:
+      return [];
+  }
+}
+
 /**
  * 结算传奇的一条技能（导出供测试直接调用；`consumed` ＝本条消耗的驱动骰对象，点数仍保留）。
  * 攻击类效果（暗夜凶神 / 枭首 / 遁入暗影的"发起攻击"）在 2c-2；本批先把**状态改动**做完。
@@ -163,15 +185,18 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
       syncLegendFengmang(g);
       return;
     case 'z02-2': {
-      // 尽可能弃置挑战者防御骰，直至剩 1（默认：留第一颗；"留哪颗"由代决层决定）
-      const drop = A.areas.defense.slice(1).map((d) => d.id);
+      // 尽可能弃置挑战者防御骰，直至剩 1（"留哪颗"＝代决，模式 1；未代决时默认留第一颗）
+      const keepId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
+      const drop = A.areas.defense.filter((d) => d.id !== keepId).map((d) => d.id);
       if (drop.length) consumeDice(g, A, 'defense', drop);
       // 获得 1/2/3/4 点攻击骰各 1
       for (const v of [1, 2, 3, 4]) B.areas.attack.push(createDie(newDieId('chg-B-'), v, 'attack'));
       return;
     }
     case 'z02-3': {
-      if (A.areas.defense.length > 0) consumeDice(g, A, 'defense', [A.areas.defense[0].id]);
+      // 弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；未代决时默认第一颗）
+      const dropId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
+      if (dropId) consumeDice(g, A, 'defense', [dropId]);
       const cap = card.countCap ?? Number.POSITIVE_INFINITY;
       g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
       syncLegendFengmang(g);
@@ -264,14 +289,27 @@ function continueLegendTurn(g: GameState): void {
     if (skill.slots && skill.slots.length > 0) {
       const m = matchSlots(skill.slots, g.challenge.driven);
       if (!m) {
-        logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+        logLine(g, `「${card.legacy}」：${skill.name} — 驱动骰不足，跳过`);
         continue;
       }
       consumed = g.challenge.driven.filter((d) => m.includes(d.id));
-      g.challenge.driven = g.challenge.driven.filter((d) => !m.includes(d.id));
+      // 注意：**此刻不扣**——代决可能中途暂停，续跑时会重新算槽；等真正结算前再扣（见下）
     }
+    // 代决（模式 1）：本条需要的选择还没收集齐 → 逐条问挑战者，收集完再结算
+    const wants = challengeDecisions(g, skill);
+    const dec = (g.challenge.decisions ??= {});
+    const got = dec[skill.id] ?? [];
+    if (wants.length > got.length) {
+      const w = wants[got.length];
+      g.challenge.activeSkill = i;
+      g.challenge.resumeAt = i;
+      g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
+      return;
+    }
+    g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
     g.challenge.activeSkill = i; // 界面高亮"正在结算"
     applyChallengeSkill(g, card, skill, consumed);
+    delete dec[skill.id];
     if (g.pendingAttack || g.virtualQueue) {
       g.challenge.resumeAt = i + 1; // 等挑战者响应完再续
       return;
@@ -1701,6 +1739,10 @@ export function getLegalActions(g: GameState): Action[] {
       for (const h of heldAbilityDice(g, g.pending.player)) acts.push({ t: 'weijuPay', dieId: h.id });
       return acts;
     }
+    // 挑战模式·代决：把该待决策的全部候选直接枚举（挑战者代为决定）
+    if (g.pending.kind === 'challengePick') {
+      return g.pending.options.map((o) => ({ t: 'challengePick' as const, id: o.id }));
+    }
     if (g.pending.kind === 'gongzhenPick') {
       const pd = g.pending;
       const me = g.players[pd.player];
@@ -2056,6 +2098,7 @@ export function getLegalActions(g: GameState): Action[] {
 /** 对第三列神器执行充能后，触发其「充能」技能效果（无论是否完成充能） */
 /** 每种「待决策」对应的解算动作类型（替代手写白名单，新增 pending 时只需在此登记） */
 const PENDING_ACTION: Record<Pending['kind'], Action['t']> = {
+  challengePick: 'challengePick',
   caiyuliu: 'caiyuliu',
   c01Caiyuliu: 'c01Caiyuliu',
   fengmang: 'fengmang',
@@ -3238,6 +3281,19 @@ function applyActionCore(g: GameState, action: Action): GameState {
       } else {
         logLine(g, `「畏惧」未生效（1 视为大于 6；相等或更大则无事发生）`);
       }
+      break;
+    }
+    case 'challengePick': {
+      const pd = g.pending;
+      if (!pd || pd.kind !== 'challengePick') throw new Error('no challengePick pending');
+      const opt = pd.options.find((o) => o.id === action.id);
+      if (!opt) throw new Error(`非法代决选项：${action.id}`);
+      g.pending = null;
+      const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+      const key = card?.skills?.[g.challenge?.resumeAt ?? 0]?.id ?? 'unknown';
+      const dec = (g.challenge!.decisions ??= {});
+      dec[key] = [...(dec[key] ?? []), action.id];
+      logLine(g, `（代决）${pd.prompt} → ${opt.label}`);
       break;
     }
     case 'gongzhenResolve': {

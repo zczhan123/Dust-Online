@@ -71,4 +71,24 @@ describe('挑战模式 · 规则与削弱', () => {
     applyAction(g, { t: 'dustRise', artifactId: '028', side: 'left', costSlots: [{ dieIds: ['m1'] }] });
     expect(g.tianfa.A).toBeNull();
   });
+
+  it('代决（模式 1）：「葬敌的完杀」留哪颗防御骰交给挑战者选', () => {
+    const g = toChallengerMain(['001', '002', '003']);
+    g.players.A.areas = {
+      attack: [],
+      defense: [die('d1', 2, 'defense'), die('d2', 3, 'defense'), die('d3', 4, 'defense')],
+      meditation: [],
+    };
+    // 备好 完杀〔1/2/3/4〕的驱动骰（开回合时还会追加）
+    g.challenge!.driven = [die('q1', 1, 'meditation'), die('q2', 2, 'meditation'), die('q3', 3, 'meditation'), die('q4', 4, 'meditation')];
+    applyAction(g, { t: 'advance' }); // 结束挑战者回合 → 传奇回合（跑到 完杀 的"留哪颗"处停下）
+    const pd = g.pending;
+    expect(pd?.kind).toBe('challengePick');
+    if (pd?.kind !== 'challengePick') throw new Error('expect challengePick');
+    expect(pd.player).toBe('A');
+    expect(pd.options.map((o) => o.label)).toEqual(['防2', '防3', '防4']);
+    // 挑战者替传奇决定：留「防3」（d2）
+    applyAction(g, { t: 'challengePick', id: 'd2' });
+    expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['d2']);
+  });
 });

@@ -108,4 +108,22 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     (root.querySelector('[data-act="challengeCardClose"]') as HTMLElement).click();
     expect(root.querySelector('[data-act="challengeCardOverlay"]')).toBeNull();
   });
+
+  it('代决待决策：提示语 + 候选按钮（challengePick）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.pending = {
+      kind: 'challengePick',
+      player: 'A',
+      prompt: '「葬敌的完杀」：留哪 1 颗防御骰？',
+      options: [
+        { id: 'd1', label: '防2' },
+        { id: 'd5', label: '防5' },
+      ],
+    };
+    const { root } = mount(state);
+    const t = root.textContent ?? '';
+    expect(t).toContain('挑战模式 · 代决：「葬敌的完杀」：留哪 1 颗防御骰？');
+    expect(t).toContain('防2');
+    expect(t).toContain('防5');
+  });
 });
