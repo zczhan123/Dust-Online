@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ARTIFACTS, HEROES } from '../src/core/content/artifacts';
+import { challengeInertSkills } from '../src/core/content/challenges';
 import { SKILL_HANDLERS } from '../src/core/engine/skills';
 import { createGame, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
 import type { DiceKind, GameState } from '../src/core/model/types';
@@ -20,6 +21,13 @@ describe('内容 / 引擎一致性守卫', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('挑战模式削弱的技能 key 必须真实存在于神器内容（防拼写变成静默失效）', () => {
+    const allKeys = new Set(Object.values(ARTIFACTS).flatMap((a) => a.skills.map((s) => s.key)));
+    for (const key of challengeInertSkills()) {
+      expect(allKeys.has(key)).toBe(true);
+    }
   });
 
   it('每个英雄：神器全部激活 + 给足骰子后，所有「必杀」都必须出现在 getLegalActions', () => {

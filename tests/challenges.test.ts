@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CHALLENGES, slotPhrase } from '../src/core/content/challenges';
+import { CHALLENGES, slotPhrase, CHALLENGE_RULE_NOTES, challengeInertSkills } from '../src/core/content/challenges';
 
 describe('挑战卡 · slotPhrase（文本记法）', () => {
   it('无槽 → （必发动）', () => {
@@ -55,5 +55,27 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
     // 与"回合开始"那条的卡面文字必须一致（防两处漂移）
     expect(z2.skills![0].name).toBe('回合开始');
     expect(z2.skills![0].effect).toContain('8');
+  });
+});
+
+describe('挑战模式特殊规则（技能削弱）· 唯一数据来源', () => {
+  it('5 条规则、顺序与 id 精确', () => {
+    expect(CHALLENGE_RULE_NOTES.map((n) => n.id)).toEqual([
+      'leibao',
+      'weimu',
+      'tianfa-bairi',
+      'shexie-gongzhen',
+      'shouhun',
+    ]);
+    for (const n of CHALLENGE_RULE_NOTES) {
+      expect(n.title.length).toBeGreaterThan(0);
+      expect(n.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('inertSkills：本模式下整条失效的技能 key 精确集合', () => {
+    expect([...challengeInertSkills()].sort()).toEqual(
+      ['minglei.leibao.continuous', 'tianfa.alt.shenkong', 'tianfa.bairi', 'youming.weimu'].sort(),
+    );
   });
 });

@@ -97,3 +97,54 @@ export function slotPhrase(slots: ChallengeSlot[] | null): string {
   if (s.kind === 'straight') return `（满足 ${s.count} 个顺点驱动骰时发动）`;
   return '（必发动）';
 }
+
+/** 挑战模式「特殊规则（技能削弱）」单条。**浮窗与引擎共用这一份**，禁止另写文案。 */
+export interface ChallengeRuleNote {
+  id: string;
+  /** 浮窗显示名（带神器编号更好认，如「013 鸣雷·雷暴（持续）」） */
+  title: string;
+  /** 一句话说明（照 FAQ 结论写，别自己发挥） */
+  text: string;
+  /**
+   * 本模式下**整条失效**的神器技能 key（引擎只读它）。
+   * 不填＝该条不是"整条失效"，而是"改结算口径"（如 023 跳过给传奇的冥想骰、020 改由挑战者决定）。
+   */
+  inertSkills?: string[];
+}
+
+/** 出处：`尘起时刻FAQ_v2.6文本.md`（13.2.5 / 17.1.5 / 28.1.2 / 41.1.1 / 23.2.3 / 20.1.4）。 */
+export const CHALLENGE_RULE_NOTES: ChallengeRuleNote[] = [
+  {
+    id: 'leibao',
+    title: '013 鸣雷·雷暴（持续）',
+    text: '单人挑战中没有任何效果——「昔日传奇」没有重掷阶段。',
+    inertSkills: ['minglei.leibao.continuous'],
+  },
+  {
+    id: 'weimu',
+    title: '017 幽冥·帷幕',
+    text: '单人挑战中没有任何效果——「昔日传奇」没有重掷阶段。',
+    inertSkills: ['youming.weimu'],
+  },
+  {
+    id: 'tianfa-bairi',
+    title: '028 天罚·白昼之火（含异相 A05）',
+    text: '单人挑战中没有任何效果——用于降低「天罚」对「昔日传奇」的压制。',
+    inertSkills: ['tianfa.bairi', 'tianfa.alt.shenkong'],
+  },
+  {
+    id: 'shexie-gongzhen',
+    title: '023 蛇蝎·共振',
+    text: '选「双方各获得冥想骰」时，跳过给「昔日传奇」的那份；你照常获得。',
+  },
+  {
+    id: 'shouhun',
+    title: '020 兽魂',
+    text: '「扣减你的计数」这类选择，由挑战者决定。',
+  },
+];
+
+/** 本模式下**整条失效**的神器技能 key 集合——引擎只读这里（唯一来源）。 */
+export function challengeInertSkills(): Set<string> {
+  return new Set(CHALLENGE_RULE_NOTES.flatMap((n) => n.inertSkills ?? []));
+}
