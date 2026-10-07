@@ -73,12 +73,12 @@ export function doReroll(g: GameState, player: PlayerId, dieIds: string[], rng: 
   if (g.phase === 'gameOver') return;
   // 伤害来源 = 027 持有者；若持有者恰为「被重掷方」（自掷）则取另一方（保证「来自对方」的 009 判定正确）
   const source = holders.find((id) => id !== player) ?? player;
+  fxSkillFired(g, source, 'hanguang.charge'); // 先发（兼作真伤白墨线锚点），再落血
   dealTrueDamage(g, player, dieIds.length, source);
   logLine(
     g,
     `${pname(player)} 因「凛冽之音」受到 ${dieIds.length} 点真实伤害（被重掷 ${dieIds.length} 颗能力骰）`,
   );
-  fxSkillFired(g, source, 'hanguang.charge');
 }
 
 /** 结束阶段：弃置多余能力骰至意志上限。

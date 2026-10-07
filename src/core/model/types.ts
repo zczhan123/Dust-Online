@@ -158,7 +158,7 @@ export interface PendingAttack {
 export type Pending =
   | { kind: 'caiyuliu'; player: PlayerId; dieId: string; value: number }
   /** C01 特典·极之境·裁雨流（触发）：使用攻击骰造成伤害后，由攻击方决定是否重掷该骰并按新点数落区 */
-  | { kind: 'c01Caiyuliu'; player: PlayerId }
+  | { kind: 'c01Caiyuliu'; player: PlayerId; dieId: string }
   | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number }
   | { kind: 'guwangCharge'; player: PlayerId }
   | { kind: 'guwangCancel'; player: PlayerId; amount: number }
@@ -436,5 +436,5 @@ export interface GameState {
   /** 027 寒光·凛冽之音（充能）：持有者自己的下个尘起阶段开始前，任何玩家重掷能力骰都会受到等量真实伤害 */
   rerollPunish: Record<PlayerId, boolean>;
   /** 028 天罚（激活·本回合）：该玩家的攻击点数「视为固定值」（可选——A05 异相无固定值、改为攻击伤害+3），且对方只能用某类骰抵挡；damageCount 统计本回合通过攻击造成伤害的次数（满 2 次即结束主要阶段） */
-  tianfa: Record<PlayerId, { blockKind: 'meditation' | 'attack'; value?: number; damageCount: number } | null>;
+  tianfa: Record<PlayerId, { blockKind: 'meditation' | 'attack'; value?: number; damageCount: number; /** 发动它的技能 key（bairi / yunluo / alt.shenkong / alt.yunluo）→ 供界面每次攻击时弹技能名 */ key: string } | null>;
 }

@@ -607,6 +607,15 @@ describe('L04 我将在下个梦境与你再度相逢（必杀）', () => {
     expect(g.log.length).toBeGreaterThan(logLen);
   });
 
+  it('发动时发 `reset` 动效事件（供界面走"全部合成一个再分回"的专用动画）', () => {
+    const g = setupGame({ seed: 1, firstPlayer: 'A', legendA: 'L04', heroA: ['010', '011', '012'] });
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    fxReset();
+    applyAction(g, { t: 'skill', artifactId: 'L04', side: 'only', params: { first: 'A' } });
+    expect(fxTake().some((e) => e.kind === 'reset')).toBe(true);
+  });
+
   it('对照：重启后局面（排除 骰子/随机/日志/生命/尘落/计数/技能列表）与"同英雄同面板的全新一局"逐字段一致', () => {
     const g = setupGame({
       seed: 1,

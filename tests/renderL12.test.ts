@@ -1,6 +1,7 @@
 // L12「渡世行僧」弥云 界面：面板三行技能、闻我名者断恶行两入口（不发动 + 对方攻击骰内联骰片）
 import { describe, it, expect } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
+import { lidichengfoRegions } from '../src/core/engine/skills';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import type { Action, DiceKind, Die, GameState } from '../src/core/model/types';
 
@@ -30,7 +31,7 @@ const makeUi = (): UiState => ({
   error: null,
 });
 
-const mount = (state: GameState): { root: HTMLElement; acts: Action[] } => {
+const mount = (state: GameState, ui: UiState = makeUi()): { root: HTMLElement; acts: Action[] } => {
   const root = document.createElement('div');
   const acts: Action[] = [];
   const hooks: RenderHooks = {
@@ -38,7 +39,7 @@ const mount = (state: GameState): { root: HTMLElement; acts: Action[] } => {
       acts.push(a);
       renderGame(state, root, hooks);
     },
-    ui: makeUi(),
+    ui,
     propose: (a) => {
       acts.push(a);
       renderGame(state, root, hooks);
@@ -48,6 +49,18 @@ const mount = (state: GameState): { root: HTMLElement; acts: Action[] } => {
   };
   renderGame(state, root, hooks);
   return { root, acts };
+};
+
+/** 把双方 6 个区域显式设成给定内容（避免 setupGame 初始落骰干扰统计） */
+const setAreas = (
+  g: GameState,
+  a: Partial<Record<DiceKind, Die[]>>,
+  b: Partial<Record<DiceKind, Die[]>>,
+): void => {
+  for (const k of ['defense', 'attack', 'meditation'] as DiceKind[]) {
+    g.players.A.areas[k] = a[k] ?? [];
+    g.players.B.areas[k] = b[k] ?? [];
+  }
 };
 
 const die = (id: string, value: number, kind: DiceKind): Die => ({ id, value, kind });
@@ -85,5 +98,54 @@ describe('L12 渡世行僧 弥云 · 面板 UI', () => {
 
     root.querySelector<HTMLButtonElement>('.actionlist-chips [data-id="ba2"]')!.click();
     expect(acts).toEqual([{ t: 'duanexing', accept: true, dieId: 'ba2' }]);
+  });
+
+  it('lidichengfoRegions：只统计"非空且仅有 1 种点数"的区域（空区 / 多种点数不算）', () => {
+    const g = l12();
+    setAreas(
+      g,
+      {
+        defense: [die('a1', 4, 'defense'), die('a2', 4, 'defense')],
+        meditation: [die('a3', 2, 'meditation'), die('a4', 5, 'meditation')],
+      },
+      { attack: [die('b1', 6, 'attack')] },
+    );
+    const regions = lidichengfoRegions(g);
+    expect(regions.map((r) => `${r.who}:${r.kind}`)).toEqual(['A:defense', 'B:attack']);
+    expect(regions.map((r) => r.ids)).toEqual([['a1', 'a2'], ['b1']]);
+  });
+
+  it('发动前预览：确认条上写清"区域数 → 6N 点真实伤害"', () => {
+    const g = l12();
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    setAreas(
+      g,
+      {
+        defense: [die('a1', 4, 'defense'), die('a2', 4, 'defense')],
+        meditation: [die('a3', 2, 'meditation'), die('a4', 5, 'meditation')],
+      },
+      { attack: [die('b1', 6, 'attack')] },
+    );
+    const ui = makeUi();
+    ui.pendingConfirm = {
+      action: { t: 'skill', artifactId: 'L12', side: 'only', params: { legendKey: 'miyun.lidichengfo' } },
+      label: '发动必杀：「知我心者立地成佛」',
+    };
+    const hint = mount(g, ui).root.querySelector<HTMLElement>('.confirm-hint');
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toBe('目前双方共有 2 个“有且只有 1 种点数”的区域 → 会造成 12 点真实伤害');
+  });
+
+  it('发动前预览：只有「立地成佛」出现（别的技能确认条不加这行）', () => {
+    const g = l12();
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    const ui = makeUi();
+    ui.pendingConfirm = {
+      action: { t: 'skill', artifactId: 'L12', side: 'only', params: { legendKey: 'miyun.duanexing' } },
+      label: '发动「闻我名者断恶行」',
+    };
+    expect(mount(g, ui).root.querySelector('.confirm-hint')).toBeNull();
   });
 });

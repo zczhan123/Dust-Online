@@ -1,6 +1,6 @@
 // 战术牌 T04「末路」/ T05「狂热」/ T06「残忍」
 import { describe, it, expect } from 'vitest';
-import { createGame, applyAction, beginTurn, skipInitialReroll } from '../src/core/engine/game';
+import { createGame, applyAction, beginTurn, skipInitialReroll, tacticBarState } from '../src/core/engine/game';
 import { pumpPending } from '../src/core/engine/pending';
 import { tacticActiveBonus, applyMolu } from '../src/core/engine/combat';
 import type { GameState, PlayerId } from '../src/core/model/types';
@@ -117,6 +117,18 @@ describe('T05「狂热」：自己前 3 个回合攻击伤害 +1', () => {
     for (let i = 0; i < 8; i++) beginTurn(g);
     expect(g.players.A.turnsTaken).toBe(4); // 封顶
   });
+
+  it('tacticBarState：前 3 回合内**不看是否自己回合**都「生效中」；第 4 回合转「已用尽」', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], tacticA: 'T05', tacticB: 'T03' });
+    skipInitialReroll(g);
+    g.players.A.turnsTaken = 2;
+    g.activePlayer = 'A';
+    expect(tacticBarState(g, 'A')).toBe('active');
+    g.activePlayer = 'B'; // 对方回合也不闪灰
+    expect(tacticBarState(g, 'A')).toBe('active');
+    g.players.A.turnsTaken = 4;
+    expect(tacticBarState(g, 'A')).toBe('spent');
+  });
 });
 
 describe('T06「残忍」：对方生命 ≤13 时攻击伤害 +5', () => {
@@ -129,5 +141,19 @@ describe('T06「残忍」：对方生命 ≤13 时攻击伤害 +5', () => {
     expect(tacticActiveBonus(g, 'A')).toEqual({ label: '残忍', value: 5 });
     g.players.B.life = 14;
     expect(tacticActiveBonus(g, 'A')).toBeNull();
+  });
+
+  it('实际攻击：对方生命 13 → 本次伤害 +5（E2E，2 点攻击骰 → 扣 7）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], tacticA: 'T06', tacticB: 'T03' });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'A';
+    g.players.B.life = 13;
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    expect(g.pendingAttack?.value).toBe(7); // 2 + 5
+    applyAction(g, { t: 'block' }); // 不抵挡
+    expect(g.players.B.life).toBe(13 - 7);
   });
 });

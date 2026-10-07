@@ -4,6 +4,7 @@ import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/co
 import { effectiveWill } from '../src/core/engine/derive';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
+import { fxReset, fxPush } from '../src/core/engine/fx';
 import type { Action, GameState } from '../src/core/model/types';
 
 const freshUi = (prefs?: Partial<UiState['prefs']>): UiState => ({
@@ -50,6 +51,79 @@ const mount = (state: GameState, root: HTMLElement, onAction: (a: Action) => voi
   renderGame(state, root, hooks);
   return { ui, hooks, onAction };
 };
+
+describe('技能气泡去重（同卡同侧不同技能）', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    // jsdom 无布局 → 让 canAnimate 通过（否则动画整体跳过、横幅不生成）
+    vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300,
+      toJSON: () => ({}),
+    } as unknown as DOMRect);
+  });
+
+  it('018 持续 + 必杀 同帧（同 artifactId/side、不同 skillKey）→ 必杀横幅仍出现', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['016', '017', '018'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    const ui = freshUi();
+    const hooks: RenderHooks = { onAction: () => {}, ui, propose: () => {}, requestRender: () => {}, onRestart: () => {} };
+    fxReset();
+    fxPush({ kind: 'skillFired', player: 'A', artifactId: '018', side: 'only', skillKey: 'zhihai.bloom', auto: true });
+    fxPush({ kind: 'skillFired', player: 'A', artifactId: '018', side: 'only', skillKey: 'zhihai.bloom.ultimate', auto: true });
+    renderGame(state, root, hooks);
+    // 修前：去重键 = 玩家:神器:侧 → 必杀被"持续"顶掉、横幅不生成。
+    //（必杀横幅挂在 body 的 #fx-layer，不在 #app 内）
+    expect(document.querySelector('.fx-ultimate')).not.toBeNull();
+  });
+});
+
+describe('联机 · 战斗界面「退出对局」', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+  });
+
+  it('显示「退出对局」→ 二次确认（取消/确认）；确认调 onLeaveLobby', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(state);
+    const ui = freshUi();
+    const onLeave = vi.fn();
+    const hooks: RenderHooks = {
+      onAction: () => {},
+      ui,
+      propose: (a, l) => {
+        ui.pendingConfirm = { action: a, label: l };
+      },
+      requestRender: () => renderGame(state, root, hooks),
+      onRestart: () => {},
+      online: { myPlayer: 'A', names: { A: '甲', B: '乙' }, peerOnline: true, onLeaveLobby: onLeave, onChat: () => {} },
+    };
+    renderGame(state, root, hooks);
+    const quit = root.querySelector<HTMLButtonElement>('.btn[data-act="onlineQuit"]')!;
+    expect(quit).not.toBeNull();
+    expect(quit.textContent).toBe('退出对局');
+    // 点开 → 二次确认弹框
+    quit.click();
+    const overlay = root.querySelector<HTMLElement>('.online-modal-overlay')!;
+    expect(overlay).not.toBeNull();
+    expect(overlay.textContent).toContain('本局作废');
+    // 取消 → 关框、不退出
+    Array.from(overlay.querySelectorAll<HTMLButtonElement>('.online-modal-btn'))
+      .find((b) => b.textContent === '取消')!
+      .click();
+    expect(root.querySelector('.online-modal-overlay')).toBeNull();
+    expect(onLeave).not.toHaveBeenCalled();
+    // 再打开 → 确认退出
+    root.querySelector<HTMLButtonElement>('.btn[data-act="onlineQuit"]')!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.online-modal-btn'))
+      .find((b) => b.textContent === '退出对局')!
+      .click();
+    expect(onLeave).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('renderGame (read-only snapshot)', () => {
   let root: HTMLElement;
@@ -3232,7 +3306,7 @@ describe('文案与选中态修复（用户反馈）', () => {
     B.areas.attack = [];
     B.areas.defense = [{ id: 'bd', value: 3, kind: 'defense' }];
     B.areas.meditation = [{ id: 'bm', value: 4, kind: 'meditation' }];
-    state.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    state.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     applyAction(state, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
 
     mount(state, root);

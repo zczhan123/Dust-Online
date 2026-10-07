@@ -241,16 +241,16 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     }),
   },
   // C01 特典·突破（启动）：消耗任意数量冥想骰（C01 第一列 → 无置换/存放骰）→ 弃对方等量防御骰
+  // 交互：**直接选冥想骰（选几颗＝消耗几颗）**，不再先问"消耗几颗" → 由 3 步简化为 2 步。
   'c01.breakthrough': {
-    steps: ({ state, player, numbers }) => {
+    steps: ({ state, player, chosenDice }) => {
       const med = state.players[player].areas.meditation.length;
       const oppDef = state.players[oppOf(player)].areas.defense.length;
       const maxN = Math.max(1, med);
-      const N = Math.min(numbers[0] ?? maxN, maxN);
-      const need = Math.min(N, oppDef);
+      const picked = chosenDice[0]?.length ?? 0;
+      const need = Math.min(picked, oppDef);
       return [
-        { kind: 'number', label: '「突破」：消耗几颗冥想骰（任意数量）？', min: 1, max: maxN, fmt: (n) => `${n} 颗` },
-        { kind: 'dice', label: `选择消耗的冥想骰（${N} 颗）`, owner: 'self', areas: ['meditation'], min: N, max: N },
+        { kind: 'dice', label: `选择消耗的冥想骰（1–${maxN} 颗）`, owner: 'self', areas: ['meditation'], min: 1, max: maxN },
         { kind: 'dice', label: `选择弃置对方的防御骰（${need} 颗）`, owner: 'opponent', areas: ['defense'], min: need, max: need },
       ];
     },
@@ -631,8 +631,9 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     }),
   },
   // 019 尘哀·蛮王之牙（启动）：选 X（1–3）→ 选种类组合 → 每种类各 1 颗 → 选 X 项（①②可重复）
+  // ①「弃置对方 1 个防御骰」由发动者**指定具体是哪颗**（页面末尾追加选骰步骤；对方没有防御骰时 ① 禁用）。
   'chenai.fang': {
-    steps: ({ options }) => {
+    steps: ({ state, player, options }) => {
       const x = Number(options[0] ?? '1');
       const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
       const steps: SelectStep[] = [
@@ -673,14 +674,32 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
           allowArtifact: true,
         });
       }
+      const opp = oppOf(player);
+      const oppDefCount = state.players[opp].areas.defense.length; // ① 的最多次数；0 则 ① 禁用
+      const pickBase = 2 + kinds.length;
       for (let i = 0; i < x; i++) {
+        const discardsSoFar = Array.from({ length: i }, (_, j) => options[pickBase + j]).filter(
+          (v) => v === 'discard',
+        ).length;
+        const opts = [{ value: 'gain', label: '② 获得 1 个 3 点攻击骰' }];
+        if (discardsSoFar < oppDefCount) opts.unshift({ value: 'discard', label: '① 弃置对方的 1 个防御骰' });
         steps.push({
           kind: 'option',
-          label: `选择第 ${i + 1} 项`,
-          options: [
-            { value: 'discard', label: '① 弃置对方的 1 个防御骰' },
-            { value: 'gain', label: '② 获得 1 个 3 点攻击骰' },
-          ],
+          label: `选择第 ${i + 1} 项${oppDefCount === 0 ? '（对方没有防御骰，①不可选）' : ''}`,
+          options: opts,
+        });
+      }
+      const dCount = Array.from({ length: x }, (_, i) => options[pickBase + i]).filter(
+        (v) => v === 'discard',
+      ).length;
+      if (dCount > 0) {
+        steps.push({
+          kind: 'dice',
+          label: `选择要弃置的对方防御骰（${dCount} 颗）`,
+          owner: 'opponent',
+          areas: ['defense'],
+          min: dCount,
+          max: dCount,
         });
       }
       return steps;
@@ -690,8 +709,12 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       const kinds = (options[1] ?? 'attack').split(',');
       const costSlots = kinds.map((_, i) => ({ dieIds: chosenDice[2 + i] ?? [] }));
       // 选项目的步骤排在「每个种类的骰子步骤」之后 → 按 step 下标读取
-      const picks = Array.from({ length: x }, (_, i) => options[2 + kinds.length + i] as string);
-      return { costSlots, picks };
+      const pickBase = 2 + kinds.length;
+      const picks = Array.from({ length: x }, (_, i) => options[pickBase + i] as string);
+      const dCount = picks.filter((p) => p === 'discard').length;
+      // 末尾追加的"选防御骰"步骤是最后一个入 chosenDice 的
+      const discardIds = dCount > 0 ? (chosenDice[chosenDice.length - 1] ?? []) : [];
+      return { costSlots, picks, ...(discardIds.length ? { discardIds } : {}) };
     },
   },
   // 022 死契·填弹（启动）：消耗 1–6 颗任意能力骰（≥2 颗必须顺点，UI 实时校验并禁用确认）

@@ -1,5 +1,10 @@
 export interface SkillText {
   side: 'left' | 'right' | 'only';
+  /**
+   * 结算技能 key（**传奇文案用它把"文案条目 ↔ 技能定义"精确对上**，不再靠数组下标；
+   * 神器可省略）。传奇侧与 `LEGENDS[id].skills[i].key` 一一对应。
+   */
+  key?: string;
   name: string;
   type: string; // 启动 / 触发 / 持续 / 充能 / 必杀
   text: string;

@@ -1,6 +1,24 @@
 import type { Artifact, GameState, PlayerId } from '../model/types';
 import { heal } from './effects';
 
+/**
+ * 第三列「充能 +1」的**唯一入口**：`applyDustRiseToArtifact` 与 L03「统御战场」等**所有**"给第三列充能"的效果
+ * 都必须走这里——层数 +1；**达到 `chargeReq` 即激活**（设 `activeMarkerSide='left'` + `armedSide/armedTurn`）。
+ * （真实事故：统御战场曾手写 `chargeLayer += 1` 漏掉激活 → 009/A01「孤王」永远未激活、触发/必杀就绪不了。）
+ */
+export function chargeLayerUp(g: GameState, a: Artifact): string {
+  a.chargeLayer += 1;
+  const req = a.chargeReq ?? 0;
+  let desc = `为「${a.name}」充能（${a.chargeLayer}/${req}）`;
+  if (a.chargeLayer >= req) {
+    a.activeMarkerSide = 'left';
+    a.armedSide = 'left';
+    a.armedTurn = g.turnIndex;
+    desc += '，完成充能并激活';
+  }
+  return desc;
+}
+
 /** 第三列神器是否还能被尘起行动选中：未完成充能，或（021 决意等）完成后仍可「续充」且计数未满 */
 export function canTargetForDustRise(a: Artifact): boolean {
   if (a.column === 3) {
@@ -42,16 +60,7 @@ export function applyDustRiseToArtifact(
         healed > 0 ? `，回复 ${healed} 点生命` : ''
       }`;
     }
-    a.chargeLayer += 1;
-    const req2 = req;
-    let desc = `为「${a.name}」充能（${a.chargeLayer}/${req2}）`;
-    if (a.chargeLayer >= req2) {
-      a.activeMarkerSide = 'left';
-      a.armedSide = 'left';
-      a.armedTurn = g.turnIndex;
-      desc += '，完成充能并激活';
-    }
-    return desc;
+    return chargeLayerUp(g, a);
   }
 
   if (a.activeMarkerSide == null) {

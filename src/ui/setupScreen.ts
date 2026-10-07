@@ -6,6 +6,9 @@ import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/le
 import { TACTICS, TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
+import { renderLobby } from './lobby';
+import { createOnlineShell, type OnlineCtx, type OnlineShell } from './online';
+import { enterOnlineBattle } from './onlineMode';
 
 export const HEROES = {
   kong: ['001', '002', '003'] as [string, string, string], // 雨中剑圣 空
@@ -116,7 +119,7 @@ export function randomColumnPool(column: number, anomaly: boolean, excludeIds: s
 /** 图鉴查询外链（新标签打开） */
 const MENU_EXTERNAL = 'http://www.dusttool.top/';
 /** 注入一次性的墨刷痕 SVG 滤镜（供首页菜单与预设/构筑页使用；仅 UI，不涉引擎） */
-function ensureInkFilter(): void {
+export function ensureInkFilter(): void {
   if (document.getElementById('dust-ink-svg')) return;
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
@@ -401,7 +404,16 @@ function renderMenu(
       item.addEventListener('click', () => go('jubai'));
       menu.appendChild(item);
     };
-    dead('联机游戏', '开发中');
+    const online = button('menu-item', '');
+    online.dataset.act = 'online';
+    const onlineWord = el('span', 'word');
+    onlineWord.textContent = '联机游戏';
+    online.appendChild(onlineWord);
+    const onlineTag = el('span', 'tag');
+    onlineTag.textContent = '同机测试';
+    online.appendChild(onlineTag);
+    online.addEventListener('click', () => renderLobby(root, () => renderMenu(root, onStart, 'home'), onStart));
+    menu.appendChild(online);
     live('左右互搏');
     const challenge = button('menu-item', '');
     challenge.dataset.act = 'challenge';
@@ -434,13 +446,13 @@ function renderMenu(
 }
 
 /** 「左右互搏 · 预设模式」：3 栏（A 确认列 / 中栏名单 / B 确认列）。 */
-export function renderHeroSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
-  renderPicker(root, onStart, 'yuxuan');
+export function renderHeroSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void, online?: OnlineCtx): void {
+  renderPicker(root, onStart, 'yuxuan', online);
 }
 
 /** 「左右互搏 · 构筑模式」：5 栏（A 确认 / A 候选 / 中栏名单 / B 候选 / B 确认）。 */
-export function renderBuildSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
-  renderPicker(root, onStart, 'gouzu');
+export function renderBuildSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void, online?: OnlineCtx): void {
+  renderPicker(root, onStart, 'gouzu', online);
 }
 
 /**
@@ -507,7 +519,7 @@ function tacticSection(opts: {
  *   双击候选卡＝选中并确定；任一方已确定的神器在候选里显示「已被选取」。
  * - 关联的附加模组（传奇/异相/战术）**暂未接引擎** → 显示但禁用（横线）。
  */
-function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, mode: PickerMode): void {
+function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, mode: PickerMode, online?: OnlineCtx): void {
   root.innerHTML = '';
   root.classList.add('setup-page');
   ensureInkFilter();
@@ -543,6 +555,111 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   root.appendChild(surface);
   root.appendChild(inspector.modal);
 
+  // 联机外壳（3a）：顶栏换成"退出房间 / 标题·联机 / 双方名 / 聊天 / 房间设置"；选择逻辑暂不变
+  let shell: OnlineShell | null = null;
+  if (online) {
+    shell = createOnlineShell(
+      {
+        session: online.session,
+        onExit: () => {
+          ac.abort();
+          shell?.dispose();
+          online.session.close(); // 离场关闭会话（否则旧 BroadcastChannel 还在应答 → "在线人数"虚高）
+          online.onExit();
+        },
+      },
+      root,
+    );
+  }
+
+  // ── 联机选择同步（3b）：预设/构筑＝各自选自己（只同步"我这一侧"，对端只读）──
+  const mySide: Side | null = online?.session.state.myPlayer ?? null;
+  const onlineOn = !!(online && mySide);
+  const oppSide: Side | null = mySide === 'A' ? 'B' : mySide === 'B' ? 'A' : null;
+  const selMode: 'preset' | 'build' = mode === 'yuxuan' ? 'preset' : 'build';
+  if (onlineOn && online) {
+    const cfg = online.session.state.config; // 附加开关取自房间配置（两端一致、只读）
+    if (cfg) {
+      anomaly = cfg.alt;
+      legendOn = cfg.legend;
+      tacticOn = cfg.tactics;
+    }
+  }
+  const mySnap = (): unknown =>
+    mode === 'yuxuan'
+      ? {
+          heroes: Object.keys(owner)
+            .map(Number)
+            .filter((i) => owner[i] === mySide),
+          confirmed: mySide ? confirmed[mySide] : false,
+        }
+      : {
+          slots: mySide ? slots[mySide] : [null, null, null],
+          confirmed: mySide ? confirmed[mySide] : false,
+          tacticPick: mySide ? tacticPick[mySide] : null,
+          candAlt: mySide ? candAlt[mySide] : [false, false, false],
+        };
+  const bcast = (): void => {
+    if (onlineOn && online && mySide) online.session.sendSel(selMode, mySide, 'merge', mySnap());
+  };
+  const guestJoined = (): boolean => !!online && online.session.state.members.some((m) => m.role === 'guest');
+  const readOnly = (side: Side): boolean => onlineOn && (side !== mySide || !guestJoined());
+  const onlineReady = (): boolean => onlineOn && !!mySide && confirmed[mySide!] && !!oppSide && confirmed[oppSide];
+  if (onlineOn && online) {
+    const sess = online.session;
+    let applied: unknown = null;
+    sess.subscribe((s) => {
+      const sel = s.sel;
+      if (!sel || sel === applied || !oppSide || sel.mode !== selMode || sel.side !== oppSide) return;
+      applied = sel;
+      const d = sel.data as {
+        heroes?: number[];
+        confirmed?: boolean;
+        slots?: (string | null)[];
+        tacticPick?: string | null;
+        candAlt?: boolean[];
+      };
+      if (mode === 'yuxuan') {
+        for (const k of Object.keys(owner)) if (owner[Number(k)] === oppSide) delete owner[Number(k)];
+        for (const h of d.heroes ?? []) owner[h] = oppSide;
+        confirmed[oppSide] = !!d.confirmed;
+      } else {
+        slots[oppSide] = d.slots ?? [null, null, null];
+        confirmed[oppSide] = !!d.confirmed;
+        tacticPick[oppSide] = d.tacticPick ?? null;
+        candAlt[oppSide] = d.candAlt ?? [false, false, false];
+      }
+      render();
+    });
+    bcast(); // 进场先广播一次"我这一侧"状态
+    // 来客加入 / 离开 → 重绘（解锁 / 锁住选择）
+    let lastGj = guestJoined();
+    sess.subscribe(() => {
+      const gj = guestJoined();
+      if (gj !== lastGj) {
+        lastGj = gj;
+        render();
+      }
+    });
+    // 对局一旦生成（房主 startGame / 来客收到 start）→ 进战斗界面
+    let battleEntered = false;
+    sess.subscribe((s) => {
+      if (battleEntered || !s.game) return;
+      battleEntered = true;
+      ac.abort();
+      shell?.dispose();
+      enterOnlineBattle(sess);
+    });
+  }
+
+  /** 开局（仅房主）：把最终 SetupOptions + seed 广播，两端各自建局 */
+  const hostStart = (): void => {
+    if (!onlineOn || !online || online.session.state.role !== 'host') return;
+    ac.abort();
+    shell?.dispose();
+    online.session.startGame(buildStartSetup());
+  };
+
   // ── 小工具 ──
   const sides: Side[] = ['A', 'B'];
   const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
@@ -573,6 +690,10 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   // ── 顶栏 ──
   function buildTop(): void {
     top.innerHTML = '';
+    if (shell) {
+      shell.bar(top, mode === 'yuxuan' ? '预设模式' : '构筑模式', { onStart: hostStart, canStart: onlineReady() });
+      return;
+    }
     const back = button('pick-back', '返回');
     back.addEventListener('click', () => {
       ac.abort();
@@ -729,9 +850,10 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       const ok = button('pick-cbtn pick-ok' + (confirmed[side] ? ' on' : ''), '确定');
       ok.disabled = !hasHero;
       ok.addEventListener('click', () => {
-        if (jiaIds(side).length === 0) return;
+        if (readOnly(side) || jiaIds(side).length === 0) return;
         confirmed[side] = !confirmed[side];
         anim = null;
+        bcast();
         render();
       });
       f.appendChild(ok);
@@ -807,8 +929,8 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       current: tacticPick[side],
       taken: oppPick ? [oppPick] : [],
       inspector,
-      onPick: (id) => { tacticPick[side] = id; render(); },
-      onRandom: (id) => { tacticPick[side] = id; render(); },
+      onPick: (id) => { if (readOnly(side)) return; tacticPick[side] = id; bcast(); render(); },
+      onRandom: (id) => { if (readOnly(side)) return; tacticPick[side] = id; bcast(); render(); },
     });
   }
 
@@ -844,6 +966,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
           locked,
           picked: pick[side] === id,
           onClick: () => {
+            if (readOnly(side)) return;
             pick[side] = pick[side] === id ? null : id;
             anim = null;
             render();
@@ -899,16 +1022,20 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
           const o = owner[i];
           if (o === side) b.classList.add('is-mine');
           if (o && o !== side) b.classList.add('is-taken');
+          else if (readOnly(side)) b.classList.add('is-disabled');
           else b.addEventListener('click', () => assignHero(i, side));
         } else {
           if (cand[side] === i) b.classList.add('is-cur');
-          b.addEventListener('click', () => {
-            cand[side] = cand[side] === i ? null : i;
-            candAlt[side] = [false, false, false];
-            pick[side] = null;
-            anim = null;
-            render();
-          });
+          if (readOnly(side)) b.classList.add('is-disabled');
+          else
+            b.addEventListener('click', () => {
+              cand[side] = cand[side] === i ? null : i;
+              candAlt[side] = [false, false, false];
+              pick[side] = null;
+              anim = null;
+              bcast();
+              render();
+            });
         }
         acts.appendChild(b);
       }
@@ -921,14 +1048,17 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
 
   // ── 修改状态 ──
   function assignHero(i: number, side: Side): void {
-    if (owner[i] === side) { delete owner[i]; confirmed[side] = false; anim = null; render(); return; }
+    if (readOnly(side)) return;
+    if (owner[i] === side) { delete owner[i]; confirmed[side] = false; anim = null; bcast(); render(); return; }
     for (const k of Object.keys(owner)) if (owner[Number(k)] === side) delete owner[Number(k)];
     owner[i] = side;
     confirmed[side] = false;
     anim = { side, ids: heroIds(i).slice() };
+    bcast();
     render();
   }
   function randomAssign(side: Side): void {
+    if (readOnly(side)) return;
     if (mode === 'yuxuan') {
       const pool = HERO_KEYS.map((_, i) => i).filter((i) => !owner[i] || owner[i] === side);
       if (pool.length === 0) return;
@@ -952,18 +1082,22 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       candAlt[side] = [false, false, false];
       anim = { side, ids: next.filter(Boolean) as string[] };
     }
+    bcast();
     render();
   }
   function confirmPickYi(side: Side): void {
+    if (readOnly(side)) return;
     const id = pick[side];
     if (!id || confirmed[side]) return;
     slots[side][colOf(id)] = id;
     pick[side] = null;
     if (filled(side) === 3) confirmed[side] = true;
     anim = { side, ids: [id] };
+    bcast();
     render();
   }
   function clearSide(side: Side): void {
+    if (readOnly(side)) return;
     if (mode === 'yuxuan') {
       for (const k of Object.keys(owner)) if (owner[Number(k)] === side) delete owner[Number(k)];
     } else {
@@ -972,11 +1106,12 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     }
     confirmed[side] = false;
     anim = null;
+    bcast();
     render();
   }
 
   // ── 开局 ──
-  function startGame(): void {
+  function buildStartSetup(): SetupOptions {
     let trioA: string[];
     let trioB: string[];
     if (mode === 'yuxuan') {
@@ -1016,7 +1151,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
     }
     const firstPlayer: PlayerId = first === 'random' ? (Math.random() < 0.5 ? 'A' : 'B') : first;
     const withLegend = mode === 'yuxuan' && legendOn;
-    onStart({
+    return {
       heroA: trioA as [string, string, string],
       heroB: trioB as [string, string, string],
       firstPlayer,
@@ -1027,12 +1162,16 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       //   **仅当"使用战术牌"开关开启时**才带，避免关掉开关后仍把旧选择带进去。
       tacticA: mode === 'gouzu' && tacticOn ? tacticPick.A ?? undefined : undefined,
       tacticB: mode === 'gouzu' && tacticOn ? tacticPick.B ?? undefined : undefined,
-    });
+    };
+  }
+  function startGame(): void {
+    onStart(buildStartSetup());
   }
 
   // ── 渲染 ──
   function buildBoard(): void {
-    board.className = 'pick-board ' + mode;
+    const locked = onlineOn && !guestJoined();
+    board.className = 'pick-board ' + mode + (locked ? ' pick-board--locked' : '');
     board.innerHTML = '';
     if (mode === 'yuxuan') {
       board.appendChild(confirmColJia('A'));
@@ -1061,7 +1200,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
  * 「左右互搏 · 轮选模式」：3 区（`玩家A确认 ｜ 九宫格板(内 3 列) ｜ 玩家B确认`）。
  * 准备态先定先手（默认随机）→ 进入轮选；严格按说明书 page_10 的 6 步流程。
  */
-export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
+export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void, online?: OnlineCtx): void {
   root.innerHTML = '';
   root.classList.add('setup-page');
   ensureInkFilter();
@@ -1091,6 +1230,100 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
   root.appendChild(surface);
   root.appendChild(inspector.modal);
 
+  // ── 联机（3b）：轮选＝"轮到谁谁选"；房主抽池并广播，对端采纳；只有 actor() 能选 ──
+  let shell: OnlineShell | null = null;
+  const mySideR: Side | null = online?.session.state.myPlayer ?? null;
+  const onlineOnR = !!(online && mySideR);
+  const guestJoinedR = (): boolean => !!online && online.session.state.members.some((m) => m.role === 'guest');
+  if (online && mySideR) {
+    const cfg = online.session.state.config;
+    const f = cfg?.first ?? 'host';
+    firstPlayer = f === 'host' ? 'A' : f === 'guest' ? 'B' : (online.session.state.roomId ?? '').length % 2 === 0 ? 'A' : 'B';
+    anomaly = cfg?.alt ?? false;
+    tacticOn = cfg?.tactics ?? false;
+    phase = 'draft'; // 联机跳过"选先手"准备态
+    shell = createOnlineShell(
+      {
+        session: online.session,
+        onExit: () => {
+          ac.abort();
+          shell?.dispose();
+          online.session.close(); // 离场关闭会话（否则旧 BroadcastChannel 还在应答 → "在线人数"虚高）
+          online.onExit();
+        },
+      },
+      root,
+    );
+  }
+  const bcastDraft = (): void => {
+    if (onlineOnR && online && mySideR)
+      online.session.sendSel('draft', mySideR, 'whole', { pieces, removed, taken, step, removedCol, step4Cols, done });
+  };
+  if (onlineOnR && online) {
+    const sess = online.session;
+    let applied: unknown = null;
+    sess.subscribe((s) => {
+      const sel = s.sel;
+      if (!sel || sel === applied || sel.mode !== 'draft') return;
+      applied = sel;
+      const d = sel.data as {
+        pieces?: typeof pieces;
+        removed?: boolean[];
+        taken?: typeof taken;
+        step?: number;
+        removedCol?: number;
+        step4Cols?: number[];
+        done?: boolean;
+      };
+      pieces = d.pieces ?? [];
+      removed = d.removed ?? [];
+      taken = d.taken ?? { A: [null, null, null], B: [null, null, null] };
+      step = d.step ?? 1;
+      removedCol = d.removedCol ?? 0;
+      step4Cols = d.step4Cols ?? [];
+      done = !!d.done;
+      phase = 'draft';
+      render();
+    });
+    if (sess.state.role === 'host') {
+      drawPool();
+      bcastDraft();
+    }
+    // 来客加入 / 离开 → 重绘（解锁 / 锁住）；**来客加入时房主重随一次牌池并广播**（来客首帧牌池为空）
+    let lastGjR = guestJoinedR();
+    sess.subscribe(() => {
+      const gj = guestJoinedR();
+      if (gj !== lastGjR) {
+        lastGjR = gj;
+        if (gj && sess.state.role === 'host') {
+          drawPool();
+          bcastDraft();
+        }
+        render();
+      }
+    });
+    // 对局生成（房主 startGame / 来客收到 start）→ 进战斗界面
+    let battleEnteredR = false;
+    sess.subscribe((s) => {
+      if (battleEnteredR || !s.game) return;
+      battleEnteredR = true;
+      ac.abort();
+      shell?.dispose();
+      enterOnlineBattle(sess);
+    });
+  }
+  const hostStartRot = (): void => {
+    if (!onlineOnR || !online || online.session.state.role !== 'host' || !done) return;
+    ac.abort();
+    shell?.dispose();
+    online.session.startGame({
+      heroA: taken.A as [string, string, string],
+      heroB: taken.B as [string, string, string],
+      firstPlayer,
+      tactics: tacticOn,
+    });
+  };
+
   const takenIds = (): string[] => [...taken.A, ...taken.B].filter((x): x is string => !!x);
   const isRemaining = (i: number): boolean => !removed[i] && !takenIds().includes(pieces[i].id);
   const remainingCount = (): number => pieces.filter((_, i) => isRemaining(i)).length;
@@ -1106,6 +1339,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
   };
   const isLegal = (i: number): boolean => {
     if (done || phase !== 'draft' || !isRemaining(i)) return false;
+    if (onlineOnR && actor() !== mySideR) return false; // 联机：非当前操作者不可点（也不显示可点框）
     const p = pieces[i];
     if (step === 1 || step === 3) return true;
     if (step === 2) return p.col === removedCol;
@@ -1133,6 +1367,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
   }
 
   function onPick(i: number): void {
+    if (onlineOnR && (actor() !== mySideR || !guestJoinedR())) return;
     if (!isLegal(i)) return;
     const p = pieces[i];
     if (step === 1) {
@@ -1164,11 +1399,17 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
       step = 6;
       animIds = [p.id];
     }
+    bcastDraft();
     render();
   }
 
   function buildTop(): void {
     const top = el('div', 'pick-top');
+    if (shell) {
+      shell.bar(top, '轮选模式', { onStart: hostStartRot, canStart: done });
+      surface.appendChild(top);
+      return;
+    }
     const back = button('pick-back', '返回');
     back.addEventListener('click', () => { ac.abort(); renderMenu(root, onStart, 'jubai'); });
     top.appendChild(back);
@@ -1247,7 +1488,10 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     bar.appendChild(n);
     if (!done) {
       const who = el('span', 'pick-step-who ' + actor());
-      who.textContent = `${actor() === firstPlayer ? '先手' : '后手'}（玩家${actor()}）`;
+      who.textContent =
+        onlineOnR && actor() !== mySideR
+          ? `轮到对方（玩家${actor()}）`
+          : `${actor() === firstPlayer ? '先手' : '后手'}（玩家${actor()}）`;
       bar.appendChild(who);
     }
     const txt = el('span', 'pick-step-txt');
@@ -1261,7 +1505,18 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     }
     bar.appendChild(dots);
     const reroll = button('pick-reroll', '重新随机');
-    reroll.addEventListener('click', () => { drawPool(); render(); });
+    // 联机：仅**房主**、且**来客已到**、且**尚未开始**（未移除/未选）才能重随；否则置灰不可点。
+    // 重随必须**广播** → 两端一致（否则各画各的）。
+    const rerollOff =
+      onlineOnR &&
+      (!online || online.session.state.role !== 'host' || !guestJoinedR() || step !== 1 || removed.some(Boolean));
+    reroll.disabled = rerollOff;
+    reroll.addEventListener('click', () => {
+      if (rerollOff) return;
+      drawPool();
+      bcastDraft();
+      render();
+    });
     bar.appendChild(reroll);
     surface.appendChild(bar);
   }
@@ -1312,6 +1567,8 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
       s.appendChild(art);
       const inner = art.querySelector('.pick-art-inner') as HTMLElement;
       s.dataset.cardId = p.id;
+      // 联机·非当前操作者：**还没被选走的**格子置灰、不可点（右键/长按看技能保留）
+      if (onlineOnR && actor() !== mySideR) s.classList.add('pick-slot--wait');
       if (anomaly && ALT_OF[p.baseId]) {
         addAltSwitch(inner, () => {
           p.id = p.id === p.baseId ? (ALT_OF[p.baseId] ?? p.baseId) : p.baseId;
@@ -1355,18 +1612,26 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     return col;
   }
   function buildBoard(): void {
-    const board = el('div', 'pick-board lunxuan');
+    const locked = onlineOnR && !guestJoinedR();
+    const board = el('div', 'pick-board lunxuan' + (locked ? ' pick-board--locked' : ''));
     board.appendChild(confirmCol('A'));
-    const wrap = el('div', 'pick-boardwrap');
-    for (let c = 0; c < 3; c++) {
-      const g = el('div', 'pick-col grid');
-      g.appendChild(colHead(COL_LABELS[c], ''));
-      const cards = el('div', 'pick-cards');
-      for (let r = 0; r < 3; r++) cards.appendChild(gridSlot(c * 3 + r));
-      g.appendChild(cards);
-      wrap.appendChild(g);
+    if (pieces.length < 9) {
+      // 联机：来客首帧牌池尚空（房主"来客加入时重随 + 广播"异步到达）→ 占位，且不让 gridSlot 取到 undefined 报错
+      const wait = el('div', 'pick-gridwait');
+      wait.textContent = '等待房主发牌…';
+      board.appendChild(wait);
+    } else {
+      const wrap = el('div', 'pick-boardwrap');
+      for (let c = 0; c < 3; c++) {
+        const g = el('div', 'pick-col grid');
+        g.appendChild(colHead(COL_LABELS[c], ''));
+        const cards = el('div', 'pick-cards');
+        for (let r = 0; r < 3; r++) cards.appendChild(gridSlot(c * 3 + r));
+        g.appendChild(cards);
+        wrap.appendChild(g);
+      }
+      board.appendChild(wrap);
     }
-    board.appendChild(wrap);
     board.appendChild(confirmCol('B'));
     surface.appendChild(board);
   }

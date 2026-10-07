@@ -57,6 +57,15 @@ describe('T11「迷烟」', () => {
     expect(g2.phase).toBe('dustRise');
   });
 
+  it('额外重掷阶段结束后 → 正常进入尘起阶段（回归）', () => {
+    const g = mk('T11');
+    skipInitialReroll(g);
+    expect(g.phase).toBe('reroll');
+    let guard = 0;
+    while (g.phase !== 'dustRise' && guard++ < 6) applyAction(g, { t: 'advance' });
+    expect(g.phase).toBe('dustRise');
+  });
+
   it('初始生命：自己 +3、对方 −3；显示文本', () => {
     const base = createGame({ seed: 1, firstPlayer: 'A' });
     const g = createGame({ seed: 1, firstPlayer: 'A', tacticA: 'T11', tacticB: 'T04' });

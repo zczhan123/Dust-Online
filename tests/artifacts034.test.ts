@@ -73,6 +73,17 @@ describe('034 金刚（破障 / 不动菩提）', () => {
     expect(art(g, 'A', '034').heldDice?.length ?? 0).toBe(0);
   });
 
+  it('破障：用神器上的存放骰当能力骰支付 → 发 jingang.pozhang.continuous 事件（供界面弹「破障」）', () => {
+    const g = g034();
+    toMain(g);
+    armLeft(g);
+    clear(g, 'A');
+    clear(g, 'B');
+    art(g, 'A', '034').heldDice = [{ id: 'h3', value: 3 }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['h3'] }] });
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'jingang.pozhang.continuous')).toBe(true);
+  });
+
   it('破障·持续：未激活破障（切到另一侧）时，存放骰不可当能力骰用', () => {
     const g = g034();
     toMain(g);

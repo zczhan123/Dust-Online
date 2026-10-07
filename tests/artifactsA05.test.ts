@@ -62,18 +62,18 @@ describe('A05 激活（无固定值）', () => {
     const g = gA05();
     toMain(g);
     activate(g, 'A', 'A05', 'left');
-    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', damageCount: 0 });
+    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', damageCount: 0, key: 'tianfa.alt.shenkong' });
     expect(g.tianfa.A?.value).toBeUndefined();
-    expect(Object.keys(g.tianfa.A!).sort()).toEqual(['blockKind', 'damageCount']);
+    expect(Object.keys(g.tianfa.A!).sort()).toEqual(['blockKind', 'damageCount', 'key']);
   });
 
   it('陨落（右）：blockKind=attack、damageCount=0，且 value 未设', () => {
     const g = gA05();
     toMain(g);
     activate(g, 'A', 'A05', 'right');
-    expect(g.tianfa.A).toEqual({ blockKind: 'attack', damageCount: 0 });
+    expect(g.tianfa.A).toEqual({ blockKind: 'attack', damageCount: 0, key: 'tianfa.alt.yunluo' });
     expect(g.tianfa.A?.value).toBeUndefined();
-    expect(Object.keys(g.tianfa.A!).sort()).toEqual(['blockKind', 'damageCount']);
+    expect(Object.keys(g.tianfa.A!).sort()).toEqual(['blockKind', 'damageCount', 'key']);
   });
 });
 
@@ -269,6 +269,6 @@ describe('A05 对照基础 028', () => {
     const g = g028();
     toMain(g);
     activate(g, 'A', '028', 'left');
-    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', value: 6, damageCount: 0 });
+    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' });
   });
 });

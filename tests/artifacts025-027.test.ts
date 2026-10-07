@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions, canUseHanguang } from '../src/core/engine/game';
+import { fxReset, fxTake } from '../src/core/engine/fx';
 import type { GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 025/026/027（天狱的战鬼 李封），B 持 004/005/006（永暗之刃 影） */
@@ -66,6 +67,21 @@ describe('025 屠虎（奇袭 / 横贯）', () => {
     expect(g.pending).toBeNull();
     const attackOpts2 = getLegalActions(g).filter((a) => a.t === 'attack');
     expect(attackOpts2).toEqual([{ t: 'attack', costSlots: [{ dieIds: ['d6'], treated: true }] }]);
+  });
+
+  it('奇袭：用「视为攻击骰」发起攻击 → 发 tuohu.qixi 技能事件（供界面弹技能名）', () => {
+    const g = lifengGame();
+    toMain(g);
+    activate(g, 'A', '025', 'left');
+    g.players.A.areas.attack = [];
+    g.players.A.areas.defense = [{ id: 'd5', value: 5, kind: 'defense' }];
+    g.players.A.areas.meditation = [];
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [];
+    g.players.B.areas.meditation = [];
+    fxReset();
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['d5'], treated: true }] });
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tuohu.qixi')).toBe(true);
   });
 
   it('FAQ 25.1.1 边界：对方区域存在该点数时不可视为；未激活奇袭时也不可（非法动作不改状态）', () => {
@@ -259,6 +275,34 @@ describe('026 哀歌（陷阵 / 威压）', () => {
     expect(g2.players.A.areas.attack.map((d) => d.id)).toEqual([]);
     expect(g2.players.A.areas.defense.length).toBe(1);
     expect(g2.players.A.areas.meditation.length).toBe(1);
+  });
+
+  it('L09 鏖战：主要阶段结束——「陷阵」未激活 → 不发「鏖战」事件；激活且有骰 → 发', () => {
+    const mk = (): GameState => {
+      const g = createGame({
+        seed: 1,
+        firstPlayer: 'A',
+        heroA: ['025', '026', '027'],
+        heroB: ['004', '005', '006'],
+        legendA: 'L09',
+      });
+      skipInitialReroll(g);
+      toMain(g);
+      return g;
+    };
+    // 未激活「陷阵」→ 不弹
+    const g = mk();
+    fxReset();
+    applyAction(g, { t: 'advance' }); // 主要阶段结束
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'lifeng.aozhan')).toBe(false);
+
+    // 激活「陷阵」且有骰 → 弹
+    const g2 = mk();
+    activate(g2, 'A', '026', 'left');
+    g2.players.A.areas.attack = [{ id: 'aAtk', value: 3, kind: 'attack' }];
+    fxReset();
+    applyAction(g2, { t: 'advance' });
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'lifeng.aozhan')).toBe(true);
   });
 
   it('FAQ 26.1.1 边界：重掷阶段结束时持有者没有任何能力骰 → 不弹陷阵，也不获得骰子', () => {

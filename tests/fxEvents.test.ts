@@ -54,6 +54,26 @@ describe('动效旁路事件 · 回血（供 UI 显示 +0）', () => {
     });
   });
 
+  it('真实之剑置换 → 同时弹「真实之剑」技能名（skillFired）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'], heroB: ['004', '005', '006'] });
+    fxReset();
+    g.players.A.areas.attack.push({ id: 'x1', value: 2, kind: 'attack' });
+    g.players.A.areas.defense.push({ id: 'x2', value: 3, kind: 'defense' });
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+    expect(fxTake()).toContainEqual(
+      expect.objectContaining({ kind: 'skillFired', player: 'A', skillKey: 'shenhong.sword' }),
+    );
+  });
+
+  it('未持 010/A02 时置换 → 不发「真实之剑」名', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['004', '005', '006'] });
+    fxReset();
+    g.players.A.areas.attack.push({ id: 'y1', value: 2, kind: 'attack' });
+    g.players.A.areas.defense.push({ id: 'y2', value: 3, kind: 'defense' });
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['y1', 'y2'] }], undefined, 'attack');
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'shenhong.sword')).toBe(false);
+  });
+
   it('doReroll → 记录 reroll 事件（无论点数是否变化）', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     fxReset();

@@ -64,7 +64,7 @@ describe('§19-① 真实之剑（010）置换兼容性', () => {
   it('010 × 028 抵挡：防守方用真实之剑置换出“攻击骰位”抵挡「陨落」的攻击', () => {
     const g = mkGame(['028', '029', '030'], ['010', '002', '003']);
     arm(g, 'B', '010', 'left'); // 防守方 B 的 真实之剑
-    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
     g.players.A.areas.attack = [die('a1', 1, 'attack')];
     g.players.B.areas.meditation = [die('bm1', 4, 'meditation'), die('bm2', 5, 'meditation')];
     applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
@@ -119,7 +119,7 @@ describe('FAQ 028 跨卡联动', () => {
   it('28.1.1：攻击点数「视为 6」会影响「幽冥-冥界行走」的回血（为 6 → 受 3 真实伤害）', () => {
     const g = mkGame(['028', '017', '030'], ['001', '002', '003']);
     arm(g, 'A', '017', 'right'); // 017 冥界行走·持续
-    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     g.players.A.areas.attack = [die('a1', 2, 'attack')];
     const lifeA = g.players.A.life;
     const lifeB = g.players.B.life;
@@ -132,7 +132,7 @@ describe('FAQ 028 跨卡联动', () => {
   it('28.2.1：「陨落」下对方用攻击骰抵挡 = 使用攻击骰 → 触发其「电刑」（在攻击方回合反击）', () => {
     const g = mkGame(['028', '029', '030'], ['013', '002', '003']);
     arm(g, 'B', '013', 'left'); // 013 电刑·触发
-    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
     g.players.A.areas.attack = [die('a1', 1, 'attack')];
     g.players.B.areas.attack = [die('ba', 5, 'attack')];
     g.players.B.areas.meditation = [die('bm1', 2, 'meditation'), die('bm2', 3, 'meditation')];

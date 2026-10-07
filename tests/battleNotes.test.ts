@@ -318,12 +318,12 @@ describe('显示时机（用户反馈：被问"是否抵挡"时不该显示自�
 describe('战斗提示：028 天罚 / 030 寰宇飞升', () => {
   it('028：白昼之火 / 陨落按当前状态显示（可用 → 精确文案）', () => {
     const g = mk(['028', '029', '030']);
-    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     expect(notes(g, 'A')).toContainEqual({
       label: '白昼之火',
       text: '本回合攻击点数视为 6，且对方只能用冥想骰抵挡',
     });
-    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
     expect(notes(g, 'A')).toContainEqual({
       label: '陨落',
       text: '本回合攻击点数视为 6，且对方只能用攻击骰抵挡',

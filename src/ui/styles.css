@@ -320,6 +320,9 @@ body {
   padding: 6px 10px;
 }
 .lifeline-who { flex: 0 0 auto; font-weight: 700; font-size: 13px; }
+/* 联机：对方在线/掉线状态点（名字右上角） */
+.lifeline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6ee7a0; margin-left: 6px; vertical-align: middle; box-shadow: 0 0 0 2px rgba(110, 231, 160, .25); }
+.lifeline-dot--off { background: #e06b6b; box-shadow: 0 0 0 2px rgba(224, 107, 107, .25); }
 .lifeline-hp { flex: 0 0 auto; font-weight: 700; font-size: 13px; color: #f3f0e8; white-space: nowrap; }
 .lifeline-track {
   flex: 1 1 auto;
@@ -457,6 +460,15 @@ body {
   font-size: 14px;
   font-weight: 700;
   color: #7a5a1e;
+}
+/* 确认语后的"发动前预览"（如 L12「立地成佛」会造成几点伤害）：次要色、紧跟其后、可换行 */
+.confirm-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a6a2e;
+  overflow-wrap: anywhere;
 }
 
 /* 操作列表 */
@@ -809,6 +821,8 @@ button.pay-die {
 .tactic-choose-name { font-weight: 800; font-size: 17px; color: #111014; }
 .tactic-choose-eff { font-size: 12.5px; line-height: 1.6; color: #4b5563; }
 @media (prefers-reduced-motion: reduce) { .tactic-choose-card { transition: none; } }
+.tactic-choose-modal--wait { max-width: min(420px, 92vw); text-align: center; }
+.tactic-choose-wait { font-size: 13px; color: #6b7280; margin-top: 6px; }
 
 /* ── 战术牌·T02「先机」：指定先手 ── */
 .tactic-first-card { width: 200px; align-items: center; text-align: center; }
@@ -1160,6 +1174,7 @@ button.pay-die {
 
 /* ===== 中央操作区：提示栏 + 操作栏合并 ===== */
 .actionzone {
+  position: relative; /* 供倒计时进度条定位到"下框线" */
   display: flex;
   /* 横向流式：内部面板"够位就同行"（如 操作列表 + 取消/确认条）；放不下才换行。提示栏见下方仍独占一行 */
   flex-direction: row;
@@ -1170,6 +1185,12 @@ button.pay-die {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 12px;
+}
+/* 联机·行动倒计时进度条：细紫、融进下框线、不改变高度；transform 由 turnTimer.ts 逐帧更新 */
+.actionzone .turn-timer {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  transform-origin: left center; transform: scaleX(1);
+  background: #6d28d9; border-radius: 0 0 10px 10px; pointer-events: none;
 }
 .actionzone .hint {
   background: transparent;
@@ -1419,6 +1440,19 @@ button.pay-die {
   --fs-3: clamp(15px, 2vh, 18px);
   --fs-4: clamp(12px, 1.6vh, 14px);
 }
+/* 联机战斗页的聊天/设置浮层挂在 body 的 #online-layer（在 #app 之外，renderGame 清空 #app 不会波及）——需自带下列变量 */
+#online-layer {
+  --menu-brush: "Zhi Mang Xing", "STKaiti", "KaiTi", "Kaiti SC", "楷体", serif;
+  --menu-sans: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --t2: #c9c3b6;
+  --line-strong: rgba(255,255,255,.34);
+  --green: #3c6b4a;
+  --r-md: 9px;
+  --fs-2: clamp(18px, 2.7vh, 27px);
+  --fs-3: clamp(15px, 2vh, 18px);
+  --fs-4: clamp(12px, 1.6vh, 14px);
+  position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 60;
+}
 #app.setup-page .menu-surface { position: relative; width: 100%; min-height: calc(100vh - 24px); }
 
 /* 左上：标题 */
@@ -1520,6 +1554,240 @@ button.pay-die {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   联机大厅（第 1 批）+ 创建房间窗口（第 2 批）
+   深色蒙版 + 大字号(vh) + 大长方形房间区 + 药丸(选中=绿)
+   ───────────────────────────────────────────────────────────── */
+#app.setup-page .lobby-surface { min-height: calc(100vh - 24px); display: flex; flex-direction: column; }
+/* 整页暗色蒙版：封面上叠一层 → 白字处处可读（贴近深色参考图） */
+#app.setup-page .lobby-surface::before {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: rgba(0, 0, 0, .55); pointer-events: none;
+}
+#app.setup-page .lobby-nick {
+  display: inline-flex; align-items: center; gap: 8px; margin-left: auto;
+  font-family: var(--menu-sans); font-size: var(--fs-3); color: rgba(255, 255, 255, .85);
+}
+#app.setup-page .lobby-nick-input {
+  width: clamp(120px, 16vw, 180px); padding: 8px 12px; min-height: clamp(36px, 5vh, 46px);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(10, 10, 11, .55); color: #fff;
+  font-family: var(--menu-sans); font-size: var(--fs-3);
+}
+#app.setup-page .lobby-nick-input:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+#app.setup-page .lobby-btn {
+  cursor: pointer; user-select: none; font-family: var(--menu-sans);
+  font-weight: 700; font-size: var(--fs-3); letter-spacing: .04em;
+  min-height: clamp(44px, 6vh, 56px); padding: 8px clamp(20px, 3vh, 30px); border-radius: var(--r-md);
+  border: 1px solid var(--line-strong); background: rgba(10, 10, 11, .72); color: #f3f0e8;
+  transition: transform .12s var(--pick-ease), background .12s ease;
+}
+#app.setup-page .lobby-btn:hover { background: rgba(10, 10, 11, .9); }
+#app.setup-page .lobby-btn:active { transform: scale(.96); }
+#app.setup-page .lobby-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+#app.setup-page .lobby-create { background: var(--green); border-color: var(--green); color: #fff; }
+#app.setup-page .lobby-create:hover { background: #457a55; }
+#app.setup-page .lobby-leave { background: rgba(196, 61, 48, .92); border-color: rgba(255, 255, 255, .22); color: #fff; }
+
+#app.setup-page .lobby-wrap {
+  position: relative; z-index: 1; flex: 1 1 auto; min-height: 0; box-sizing: border-box;
+  padding: clamp(12px, 2vh, 20px) clamp(16px, 3vw, 40px) clamp(84px, 14vh, 128px);
+  display: flex; flex-direction: column; gap: clamp(10px, 1.6vh, 16px);
+}
+#app.setup-page .lobby-box {
+  flex: 1 1 auto; width: min(1040px, 94vw); margin: 0 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  border-radius: var(--r-md); background: var(--panel); border: 1px solid var(--line);
+  padding: clamp(14px, 2.2vh, 24px);
+}
+#app.setup-page .lobby-box-title {
+  font-family: var(--menu-brush); font-size: var(--fs-2); color: #fff; letter-spacing: .06em;
+  margin-bottom: clamp(8px, 1.4vh, 14px);
+}
+#app.setup-page .lobby-list { flex: 1 1 auto; display: flex; flex-direction: column; gap: clamp(6px, 1vh, 10px); overflow: auto; }
+#app.setup-page .lobby-empty { font-family: var(--menu-sans); font-size: var(--fs-3); color: var(--t2); padding: 16px 6px; }
+#app.setup-page .lobby-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  text-align: left; cursor: pointer; font-family: var(--menu-sans); font-size: var(--fs-3); color: #f3f0e8;
+  padding: clamp(12px, 1.8vh, 18px) clamp(14px, 2vh, 22px); border-radius: var(--r-md);
+  border: 1px solid var(--line-strong); background: rgba(255, 255, 255, .07);
+  animation: lobby-row-in .2s var(--pick-ease) both;
+}
+@keyframes lobby-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+#app.setup-page .lobby-row:hover { background: rgba(255, 255, 255, .13); }
+#app.setup-page .lobby-row--mine { border-color: var(--green); background: rgba(60, 107, 74, .28); cursor: default; }
+#app.setup-page .lobby-row-main { display: flex; flex-wrap: wrap; gap: 6px 8px; flex: 1 1 auto; min-width: 0; }
+#app.setup-page .lobby-chip {
+  padding: 3px 10px; border-radius: var(--r-pill); border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .10); font-size: var(--fs-4); white-space: nowrap;
+}
+#app.setup-page .lobby-row-side { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; color: var(--t2); font-size: var(--fs-4); }
+#app.setup-page .lobby-seats { font-variant-numeric: tabular-nums; }
+#app.setup-page .lobby-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12em; }
+#app.setup-page .lobby-state { font-weight: 700; }
+#app.setup-page .lobby-state--join { color: #8fd0a2; }
+#app.setup-page .lobby-state--full { color: #f0b34a; }
+#app.setup-page .lobby-state--mine { color: #8fd0a2; }
+#app.setup-page .lobby-row-note { flex: 1 1 100%; font-size: var(--fs-4); color: var(--t2); }
+#app.setup-page .lobby-status { font-family: var(--menu-sans); font-size: var(--fs-4); color: var(--t2); text-align: center; }
+
+#app.setup-page .lobby-actions {
+  position: absolute; right: clamp(14px, 2vh, 22px); bottom: clamp(12px, 2vh, 20px); z-index: 5;
+  display: flex; flex-direction: column; gap: clamp(8px, 1.4vh, 12px); align-items: flex-end;
+}
+#app.setup-page .lobby-online { display: inline-flex; align-items: center; gap: 8px; }
+#app.setup-page .lobby-online-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--green); color: #fff; font-size: var(--fs-4); font-weight: 700;
+}
+#app.setup-page .lobby-online-pop {
+  position: absolute; right: clamp(14px, 2vh, 22px); bottom: clamp(66px, 9vh, 82px); z-index: 6;
+  width: clamp(160px, 18vw, 220px); padding: 10px 12px; border-radius: var(--r-md);
+  background: rgba(10, 10, 11, .94); border: 1px solid var(--line-strong);
+}
+#app.setup-page .lobby-online-row { font-family: var(--menu-sans); font-size: var(--fs-3); color: #f3f0e8; padding: 4px 2px; }
+
+/* 创建房间窗口（第 2 批） */
+#app.setup-page .lobby-modal-mask {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;
+  background: rgba(0, 0, 0, .62);
+}
+#app.setup-page .lobby-modal {
+  width: min(720px, 94vw); max-height: 92vh; overflow: auto;
+  border-radius: var(--r-md); padding: clamp(18px, 2.6vh, 28px);
+  background: var(--panel-2); border: 1px solid var(--line-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  animation: lobby-modal-in .18s var(--pick-ease) both;
+}
+@keyframes lobby-modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.99); }
+  to { opacity: 1; transform: none; }
+}
+#app.setup-page .lobby-modal-title {
+  font-family: var(--menu-brush); font-size: var(--fs-1); color: #fff; letter-spacing: .06em;
+  margin-bottom: clamp(12px, 2vh, 18px);
+}
+#app.setup-page .room-rows { display: flex; flex-direction: column; gap: clamp(10px, 1.6vh, 16px); }
+#app.setup-page .room-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#app.setup-page .room-lab { flex: 0 0 auto; min-width: 4.5em; font-family: var(--menu-sans); font-size: var(--fs-3); color: var(--t2); }
+#app.setup-page .room-opts { display: flex; flex-wrap: wrap; gap: clamp(6px, 1vh, 10px); }
+
+/* 药丸：未选中＝可见深底 + 浅字（不点也能看清）；选中＝绿底 + 白字 */
+#app.setup-page .pill {
+  cursor: pointer; user-select: none; font-family: var(--menu-sans); font-weight: 700;
+  font-size: var(--fs-3); min-height: clamp(38px, 5.2vh, 48px); padding: 7px clamp(16px, 2.4vh, 24px);
+  border-radius: var(--r-pill); border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, .12); color: #f3f0e8;
+  transition: transform .12s var(--pick-ease), background .12s ease, border-color .12s ease;
+}
+#app.setup-page .pill:hover { background: rgba(255, 255, 255, .2); }
+#app.setup-page .pill:active { transform: scale(.96); }
+#app.setup-page .pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .pill.on { background: var(--green); border-color: var(--green); color: #fff; }
+
+#app.setup-page .room-note {
+  flex: 1 1 220px; min-height: clamp(40px, 5.4vh, 50px); padding: 8px 14px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .08); color: #fff;
+  font-family: var(--menu-sans); font-size: var(--fs-3);
+}
+#app.setup-page .room-note:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#app.setup-page .room-foot { display: flex; justify-content: flex-end; gap: 12px; margin-top: clamp(14px, 2.4vh, 22px); }
+
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.setup-page .lobby-wrap { padding: 8px 14px 72px; }
+  #app.setup-page .lobby-box-title { font-size: var(--fs-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app.setup-page .lobby-modal { animation: none; }
+}
+
+/* 联机外壳（3a）：选择页顶栏的联机控件 + 聊天/房间设置浮层（挂 document.body） */
+.online-names { margin-left: auto; display: inline-flex; align-items: center; gap: clamp(8px, 1.6vh, 16px); }
+.online-name {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: var(--fs-3); background: rgba(255, 255, 255, .10);
+  border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 12px;
+}
+.online-name-side { opacity: .85; font-weight: 700; }
+.online-name-txt { max-width: 7em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.online-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, .3); }
+.online-dot--on { background: #6ee7a0; box-shadow: 0 0 0 2px rgba(110, 231, 160, .25); }
+.online-btn { margin-left: 6px; }
+.online-wait { font-family: var(--menu-sans); font-size: var(--fs-3); font-weight: 700; color: #f0b34a; padding: 0 10px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 双方已到位 → 亮绿（与在线点同色，明确"可用"） */
+.online-wait--ready { color: #6ee7a0; }
+
+.online-pop {
+  position: fixed; right: clamp(14px, 2vh, 22px); top: clamp(58px, 8vh, 76px); z-index: 30;
+  width: clamp(220px, 24vw, 300px); max-height: 62vh; overflow: auto;
+  padding: 12px 14px; border-radius: var(--r-md);
+  background: rgba(10, 10, 11, .96); border: 1px solid var(--line-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  font-family: var(--menu-sans); color: #f3f0e8;
+}
+.online-pop-title { font-family: var(--menu-brush); font-size: var(--fs-2); color: #fff; margin-bottom: 8px; }
+.online-chat-list { display: flex; flex-direction: column; gap: 4px; max-height: 34vh; overflow: auto; margin-bottom: 8px; }
+.online-chat-line { font-size: var(--fs-4); line-height: 1.4; }
+.online-chat-who { color: #9ec5ff; margin-right: 6px; }
+.online-chat-row { display: flex; gap: 6px; }
+.online-chat-input {
+  flex: 1 1 auto; min-width: 0; min-height: 34px; padding: 6px 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .08); color: #fff; font: inherit;
+}
+.online-chat-input:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.online-btn--send {
+  min-height: 34px; padding: 0 14px; border-radius: var(--r-md); border: 1px solid var(--green);
+  background: var(--green); color: #fff; font: 700 var(--fs-4) var(--menu-sans); cursor: pointer;
+}
+.online-set-row { display: flex; gap: 10px; font-size: var(--fs-4); padding: 3px 0; }
+.online-set-k { flex: 0 0 auto; min-width: 4em; color: var(--t2); }
+.online-set-v { flex: 1 1 auto; }
+.online-start {
+  margin-left: 8px; cursor: pointer; font-family: var(--menu-sans); font-weight: 700;
+  font-size: var(--fs-3); min-height: clamp(36px, 5vh, 44px); padding: 6px 20px;
+  border-radius: var(--r-md); border: 1px solid var(--green); background: var(--green); color: #fff;
+}
+.online-start:disabled { opacity: .4; cursor: default; }
+
+/* 「对方掉线」弹框（**共用样式**：选择页 / 战斗界面；由 session.peerOnline 驱动） */
+.online-modal-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; box-sizing: border-box;
+}
+.online-modal-overlay[hidden] { display: none; }
+.online-modal {
+  background: #fffdf8; border: 1px solid var(--line); border-radius: 14px;
+  padding: 24px 32px; text-align: center; min-width: 260px; max-width: min(440px, 92vw);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, .35);
+}
+.online-modal-title { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.online-modal-text { font-size: 16px; font-weight: 700; color: #b23a3a; margin-bottom: 18px; line-height: 1.5; }
+.online-modal-btn {
+  cursor: pointer; font-family: var(--menu-sans); font-weight: 700; font-size: 15px;
+  padding: 10px 24px; border-radius: var(--r-md); border: 1px solid #6d28d9;
+  background: #6d28d9; color: #fff; transition: transform .12s ease;
+}
+.online-modal-btn:active { transform: scale(.96); }
+.online-modal-foot { display: flex; gap: 10px; justify-content: center; }
+.online-modal-btn--ghost { background: transparent; color: var(--t1); border-color: var(--line-strong); }
+
+/* 联机战斗界面（4a）：操作者淡黄外光圈（不占布局）/ 对方操作只读提示 */
+#app .player--acting { box-shadow: 0 0 0 2px rgba(242, 203, 92, .55), 0 0 16px 3px rgba(242, 203, 92, .35); transition: box-shadow .22s ease-out; }
+@media (prefers-reduced-motion: reduce) { #app .player--acting { transition: none; } }
+#app .actionlist-readonly { font-size: 14px; color: #6b7280; padding: 12px 8px; }
+.gameover-foot { display: flex; gap: 10px; justify-content: center; }
+.gameover-lobby { background: #6d28d9; color: #fff; border-color: #6d28d9; }
+
+/* ─────────────────────────────────────────────────────────────
    预设模式（3 栏）/ 构筑模式（5 栏）「分栏选择器」
    仅作用于 #app.setup-page，绝不影响对战页/卡牌样式。
    ───────────────────────────────────────────────────────────── */
@@ -1559,6 +1827,11 @@ button.pay-die {
 
 /* 分栏（预设 3 栏 / 构筑 5 栏）*/
 #app.setup-page .pick-board { position: relative; z-index: 2; flex: 1 1 auto; min-height: 0; padding: 4px 18px 14px; display: grid; gap: 10px; }
+/* 联机·不可选（来客未到）→ 整块板面降到"禁用按钮"透明度；不改 pointer-events，右键/长按看卡面详情仍可用 */
+#app.setup-page .pick-board--locked { opacity: var(--disabled); transition: opacity .18s ease; }
+@media (prefers-reduced-motion: reduce) {
+  #app.setup-page .pick-board--locked { transition: none; }
+}
 #app.setup-page .pick-board.yuxuan { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1.55fr); }
 #app.setup-page .pick-board.gouzu { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.15fr); }
 
@@ -1703,6 +1976,15 @@ button.pay-die {
 #app.setup-page .pick-step-txt { opacity: .9; }
 #app.setup-page .pick-reroll { margin-left: auto; padding: 8px 14px; min-height: 40px; display: inline-flex; align-items: center; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--panel-flat); color: var(--t1); font: 600 var(--fs-3) var(--pick-ui); cursor: pointer; transition: transform .12s var(--pick-ease); }
 #app.setup-page .pick-reroll:active { transform: scale(.96); }
+#app.setup-page .pick-reroll:disabled { opacity: var(--disabled); cursor: default; }
+#app.setup-page .pick-reroll:disabled:active { transform: none; }
+/* 轮选·联机：等待房主发牌占位 / 非操作者"还没被选走"的格子置灰（不设 pointer-events → 右键/长按看技能保留） */
+#app.setup-page .pick-gridwait {
+  grid-column: 2;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 140px; font-family: var(--pick-ui); font-size: var(--fs-3); color: var(--t2);
+}
+#app.setup-page .pick-slot--wait .pick-art { opacity: .5; cursor: not-allowed; }
 
 /* 步骤条动作强调 + 准备态面板 */
 #app.setup-page .pick-step-txt b { font-weight: 800; color: #fff; }
@@ -1956,6 +2238,7 @@ html[data-theme] .actionzone .paypanel-title { color: var(--tb-cell-ink); }
 html[data-theme] .actionzone .slot-name { color: var(--tb-cell-ink); }
 html[data-theme] .actionzone .slot-summary { color: var(--tb-cell-muted); }
 html[data-theme] .actionzone .confirm-label { color: var(--tb-cell-ink); }
+html[data-theme] .actionzone .confirm-hint { color: var(--tb-cell-muted); }
 html[data-theme] .actionzone .convertpick-title { color: var(--tb-cell-ink); }
 html[data-theme] .actionzone .convertpick-hint { color: var(--tb-cell-muted); }
 html[data-theme] .actionzone .dustflow-title,
@@ -2061,6 +2344,12 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
   border-radius: 2px;
   pointer-events: none;
   will-change: transform, opacity;
+}
+/* 真伤墨线：**白色**主芯 + 极淡深色描边（黑白主题的浅底/深底都看得见） */
+.fx-line--truth {
+  height: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(20, 20, 20, .4);
 }
 
 /* 攻击池里"停在中间等响应"的实体骰（物理攻击＝被支付骰的残影，玩家色） */

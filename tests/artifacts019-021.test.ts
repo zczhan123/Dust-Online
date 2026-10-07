@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
 import { effectiveSpeed, totalDice } from '../src/core/engine/derive';
 import { attackDamageBuff, pumpAttackQueue } from '../src/core/engine/combat';
+import { fxTake } from '../src/core/engine/fx';
 import type { DiceKind, GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 019/020/021（荒野行者 尼萨），B 持 004/005/006（永暗之刃 影） */
@@ -297,7 +298,7 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
       t: 'skill',
       artifactId: '019',
       side: 'right',
-      params: { costSlots: [{ dieIds: ['k1'] }, { dieIds: ['k2'] }, { dieIds: ['k3'] }], picks },
+      params: { costSlots: [{ dieIds: ['k1'] }, { dieIds: ['k2'] }, { dieIds: ['k3'] }], picks, discardIds: ['b1'] },
     });
     // ①×1：弃置对方 1 个防御骰；②×2：获得 2 个 3 点攻击骰
     expect(g.players.B.areas.defense.length).toBe(1);
@@ -306,6 +307,50 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
     // 刷新启动次数（本回合可再次启动）+ 标记移到另一侧
     expect(g.skillsUsedThisTurn.includes('A:chenai.fang')).toBe(false);
     expect(card.activeMarkerSide).toBe('left');
+  });
+
+  it('蛮王之牙：①「弃置对方 1 个防御骰」由发动者指定弃哪一颗（可选非第一颗）', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '019', 'right');
+    g.players.A.areas.attack = [{ id: 'k1', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'b1', value: 3, kind: 'defense' }, { id: 'b2', value: 4, kind: 'defense' }];
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '019',
+      side: 'right',
+      params: { costSlots: [{ dieIds: ['k1'] }], picks: ['discard'], discardIds: ['b2'] },
+    });
+    // 弃的是指定的 b2，而不是防御区第一颗 b1
+    expect(g.players.B.areas.defense.map((d) => d.id)).toEqual(['b1']);
+  });
+
+  it('蛮王之牙：① 缺 discardIds / 指定的不是对方防御骰 → 抛错且不改变状态', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '019', 'right');
+    g.players.A.areas.attack = [{ id: 'k1', value: 2, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'b1', value: 3, kind: 'defense' }];
+    const before = g.players.B.areas.defense.length;
+    // 选了 ① 却没给 discardIds
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '019',
+        side: 'right',
+        params: { costSlots: [{ dieIds: ['k1'] }], picks: ['discard'] },
+      }),
+    ).toThrow();
+    // 指定的 id 不是对方的防御骰
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '019',
+        side: 'right',
+        params: { costSlots: [{ dieIds: ['k1'] }], picks: ['discard'], discardIds: ['nope'] },
+      }),
+    ).toThrow();
+    expect(g.players.B.areas.defense.length).toBe(before);
   });
 
   it('蛮王之牙：种类重复 / 项数不符 → 抛错且不改变状态', () => {
@@ -414,5 +459,52 @@ describe('兽魂：多段攻击中「取消伤害」后后续段必须继续（�
     applyAction(g, { t: 'block' }); // 第二段：计数1 < 2 → 不再提示
     expect(g.pending?.kind ?? null).not.toBe('shouhunCancel');
     expect(g.players.A.life).toBe(life - 3);
+  });
+});
+
+// 兽魂（020 / A04）：取消伤害时**只弹"激活那一面"的技能名**。
+// 真实 bug：曾一次把 4 个 key 全发（xiong / lang / alt.xiong / alt.lang），
+// 而 020 同一张卡同时有 xiong + lang 两个 key → 一次动作弹两个不同技能名。
+describe('兽魂 · 取消伤害只弹"激活那一面"的技能名', () => {
+  const shouhunFired = (): (string | undefined)[] =>
+    fxTake()
+      .filter((e) => e.kind === 'skillFired' && (e.skillKey ?? '').startsWith('shouhun.'))
+      .map((e) => (e.kind === 'skillFired' ? e.skillKey : undefined));
+
+  const cancelOnce = (g: GameState): void => {
+    g.players.A.areas = { attack: [], defense: [], meditation: [] };
+    g.attackQueue = { player: 'B', values: [5] };
+    pumpAttackQueue(g);
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind).toBe('shouhunCancel');
+    applyAction(g, { t: 'shouhunCancel', cancel: true });
+  };
+
+  it('020 激活「熊之心」（左）→ 只发 shouhun.xiong.continuous', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '020', 'left');
+    art(g, 'A', '020').count = 2;
+    cancelOnce(g);
+    expect(shouhunFired()).toEqual(['shouhun.xiong.continuous']);
+  });
+
+  it('020 激活「狼之血」（右）→ 只发 shouhun.lang.continuous', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '020', 'right');
+    art(g, 'A', '020').count = 2;
+    cancelOnce(g);
+    expect(shouhunFired()).toEqual(['shouhun.lang.continuous']);
+  });
+
+  it('A04 激活「灵界熊魂」（左）→ 只发 shouhun.alt.xiong.continuous', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', 'A04', '003'], heroB: ['004', '005', '006'] });
+    skipInitialReroll(g);
+    toMain(g);
+    activate(g, 'A', 'A04', 'left');
+    art(g, 'A', 'A04').count = 2;
+    cancelOnce(g);
+    expect(shouhunFired()).toEqual(['shouhun.alt.xiong.continuous']);
   });
 });

@@ -24,6 +24,8 @@ export interface MotionTokens {
   emerge: number;
   bubbleHold: number;
   bubbleOut: number;
+  /** 阶段横幅停留时长（「回合开始 / 尘起阶段 / 主要阶段」） */
+  bannerHold: number;
   /** 徽标跳动（计数变化） */
   bump: number;
   /** 必杀横幅停留时长 */
@@ -41,6 +43,7 @@ export const MOTION: MotionTokens = {
   emerge: 220,
   bubbleHold: 1100,
   bubbleOut: 240,
+  bannerHold: 1400,
   bump: 180,
   ultimateHold: 1500,
 };
@@ -240,6 +243,8 @@ export interface LifeDelta {
   delta: number;
   /** 当前生命上限（用于"血条平滑变长"换算） */
   max: number;
+  /** 「非伤害的下降」（033 抹零）：面板**不抖**（其余反馈照旧）。 */
+  calm?: boolean;
 }
 
 interface LifeSnap {
@@ -367,6 +372,33 @@ function makeFlyingDie(kind: 'held' | 'virtual' | 'solid', player: PlayerId, val
   return kind === 'held' ? makeHeldEl(value) : kind === 'virtual' ? makeGhostEl(player, value) : makeDieEl(player, value);
 }
 
+/**
+ * 把一颗"真骰"临时换成 fx 层的**影子替身**（用于"飞中间"的**改点 / 换区 / 搬家**动画）。
+ * 影子在 `.fx-layer` → 天然压过**必杀横幅（层内最底）/技能名气泡**、也压过**快速操作栏**；
+ * 真骰先隐藏、动画收尾再揭出。若 `el` 已在 fx 层（如 027 已自建影子）→ 原样返回、不重复包装。
+ * 返回 `{ 可动画的元素, 收尾揭出真骰 }`。无布局（jsdom）时退回真骰。
+ */
+function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
+  if (el.closest('#fx-layer')) return { el, reveal: () => {} };
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return { el, reveal: () => {} };
+  const player: PlayerId | null = el.classList.contains('die-A') ? 'A' : el.classList.contains('die-B') ? 'B' : null;
+  const value = Number(el.textContent) || Number(el.dataset.value) || 1;
+  const g = makeFlyingDie('solid', player ?? 'A', value);
+  g.style.left = `${r.left}px`;
+  g.style.top = `${r.top}px`;
+  const layer = ensureFxLayer();
+  (layer ?? document.body).appendChild(g);
+  el.style.visibility = 'hidden';
+  return {
+    el: g,
+    reveal: () => {
+      el.style.visibility = '';
+      g.remove();
+    },
+  };
+}
+
 function fadeEl(el: HTMLElement, dur: number): void {
   if (typeof el.animate === 'function') {
     el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: dur, easing: 'ease-in', fill: 'forwards' });
@@ -376,43 +408,81 @@ function fadeEl(el: HTMLElement, dur: number): void {
   window.setTimeout(() => el.remove(), dur + 80);
 }
 
-/** 攻击**连接线**（攻击方攻击骰区中心 → 被攻击方生命条中心）；不是骰子的运动路径。 */
-function drawLinkLine(layer: HTMLElement, atk: HTMLElement | null, def: HTMLElement | null): void {
-  if (!atk || !def) return;
-  const start = atk.querySelector<HTMLElement>('.area[data-kind="attack"]') ?? atk;
-  const end = def.querySelector<HTMLElement>('.lifeline') ?? def;
-  const s = start.getBoundingClientRect();
-  const e = end.getBoundingClientRect();
-  const x1 = s.left + s.width / 2;
-  const y1 = s.top + s.height / 2;
-  const x2 = e.left + e.width / 2;
-  const y2 = e.top + e.height / 2;
+/** 画一条连接线：**画 160 → 停 200 → 淡出 180**（从起点向终点"划出"）。返回时长。`className` 决定颜色/粗细。 */
+function drawConnLine(
+  layer: HTMLElement,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  className: string,
+): number {
   const len = Math.max(1, Math.hypot(x2 - x1, y2 - y1));
   const ang = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
   const drawDur = ms(160);
   const holdDur = ms(200);
   const fadeDur = ms(180);
   const total = drawDur + holdDur + fadeDur;
+  const reduce = prefersReducedMotion();
   const line = document.createElement('div');
-  line.className = 'fx-line';
+  line.className = className;
   line.style.left = `${x1}px`;
   line.style.top = `${y1}px`;
   line.style.width = `${len}px`;
   line.style.transformOrigin = '0 50%';
-  line.style.transform = `rotate(${ang}deg) scaleX(0)`;
+  line.style.transform = reduce ? `rotate(${ang}deg)` : `rotate(${ang}deg) scaleX(0)`;
   layer.appendChild(line);
   if (typeof line.animate === 'function') {
     line.animate(
-      [
-        { transform: `rotate(${ang}deg) scaleX(0)`, opacity: 0, offset: 0 },
-        { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 1, offset: drawDur / total },
-        { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 1, offset: (drawDur + holdDur) / total },
-        { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 0, offset: 1 },
-      ],
+      reduce
+        ? [
+            { opacity: 0, offset: 0 },
+            { opacity: 1, offset: drawDur / total },
+            { opacity: 1, offset: (drawDur + holdDur) / total },
+            { opacity: 0, offset: 1 },
+          ]
+        : [
+            { transform: `rotate(${ang}deg) scaleX(0)`, opacity: 0, offset: 0 },
+            { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 1, offset: drawDur / total },
+            { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 1, offset: (drawDur + holdDur) / total },
+            { transform: `rotate(${ang}deg) scaleX(1)`, opacity: 0, offset: 1 },
+          ],
       { duration: total, easing: 'ease-out' },
     );
   }
   window.setTimeout(() => line.remove(), total + 80);
+  return total;
+}
+
+/** 攻击**连接线**（攻击方攻击骰区中心 → 被攻击方生命条中心）；不是骰子的运动路径。 */
+function drawLinkLine(layer: HTMLElement, atk: HTMLElement | null, def: HTMLElement | null): number {
+  if (!atk || !def) return 0;
+  const start = atk.querySelector<HTMLElement>('.area[data-kind="attack"]') ?? atk;
+  const end = def.querySelector<HTMLElement>('.lifeline') ?? def;
+  const s = start.getBoundingClientRect();
+  const e = end.getBoundingClientRect();
+  return drawConnLine(layer, s.left + s.width / 2, s.top + s.height / 2, e.left + e.width / 2, e.top + e.height / 2, 'fx-line');
+}
+
+/**
+ * 真伤**墨线**：**白色**从「发动卡图 / 战术栏中文名」中心 连到「受伤方生命条」中心。
+ * 与攻击线同一编排（画 160 / 停 200 / 淡出 180），只换颜色与锚点。返回时长（供"整组播完才切视角"取 max）。
+ * 位置**当场量取 DOM**、按**身份**取元素 → 联机 / 左右互搏都正确（不写死朝向）。
+ */
+export function drawTrueLine(root: HTMLElement, fromEl: HTMLElement | null, toEl: HTMLElement | null): number {
+  if (!canAnimate(root) || !fromEl || !toEl) return 0;
+  const layer = ensureFxLayer();
+  if (!layer) return 0;
+  const s = fromEl.getBoundingClientRect();
+  const e = toEl.getBoundingClientRect();
+  return drawConnLine(
+    layer,
+    s.left + s.width / 2,
+    s.top + s.height / 2,
+    e.left + e.width / 2,
+    e.top + e.height / 2,
+    'fx-line fx-line--truth',
+  );
 }
 
 /**
@@ -541,6 +611,79 @@ export interface AttackResolveOpts {
   blockDie: { value: number; rect: Rect; grey?: boolean } | null;
   /** 置换抵挡：2 颗源骰（先合并成灰「5」再与攻击骰并排淡出） */
   substitution: { rects: Rect[]; values: number[] } | null;
+  /** 攻击骰**先停在中间不淡出**（001/C01 裁雨流：等玩家决定；`dieId` 供落区判定） */
+  hold?: { dieId: string } | null;
+}
+
+/** 被"停在中间等裁雨流决定"的攻击骰（临时 fx 元素）。`ox/oy`＝该临时骰的**未平移中心**
+ *  （它的 `left/top` 就定在 `(ox,oy)`，再用 transform 平移到中间）——收尾飞回真骰时按它算**绝对平移**。 */
+let heldAttackDie: { el: HTMLElement; dieId: string; ox: number; oy: number } | null = null;
+
+/** 当前是否有"停在中间等裁雨流决定"的攻击骰（供 render 把真骰排除出普通获得动画）。 */
+export function heldAttackDieId(): string | null {
+  return heldAttackDie?.dieId ?? null;
+}
+
+/**
+ * 收尾"停在中间的攻击骰"时所需的 `transform: translate(dx,dy)`：
+ * 必须相对该临时骰的**未平移中心 `(ox,oy)`**（不是相对"当前位置"）——因为 `left/top` 定在 `(ox,oy)`、
+ * 位置全靠 transform 表达；终点＝`真骰中心 − (ox,oy)`。
+ * （真实事故：曾把"当前位置→真骰"的**差值**当 transform 设上去 → 少算"中间 − 原点"那一段，裁雨流飞偏、没落进区域。）
+ */
+export function heldReleaseOffset(
+  realX: number,
+  realY: number,
+  ox: number,
+  oy: number,
+): { dx: number; dy: number } {
+  return { dx: realX - ox, dy: realY - oy };
+}
+
+/**
+ * 收尾"停在中间等裁雨流决定"的攻击骰（待决策解决后调用）：
+ * - 已落区（发动）→ 在中间**翻面**（点数变了就翻滚）→ **飞回该区那颗真骰的位置**（期间真骰先隐身、到位再露）；
+ * - 未落区（不发动）→ 淡出消失。返回时长。
+ */
+export function releaseHeldAttackDie(root: HTMLElement): number {
+  if (!heldAttackDie) return 0;
+  const { el, dieId, ox, oy } = heldAttackDie;
+  heldAttackDie = null;
+  if (!canAnimate(root)) {
+    el.remove();
+    return 0;
+  }
+  const realEl = root.querySelector<HTMLElement>(`.die[data-id="${dieId}"]`);
+  if (!realEl) {
+    const d = ms(MOTION.fade);
+    fadeEl(el, d);
+    return d;
+  }
+  const oldVal = Number(el.textContent);
+  const newVal = Number(realEl.dataset.value);
+  const rr = realEl.getBoundingClientRect();
+  // **绝对平移**（相对临时骰的未平移中心 ox/oy）——不能用"当前位置→真骰"的差值（会飞偏）。
+  const { dx, dy } = heldReleaseOffset(rr.left + rr.width / 2, rr.top + rr.height / 2, ox, oy);
+  const needRoll = Number.isFinite(newVal) && Number.isFinite(oldVal) && newVal !== oldVal;
+  const rollDur = needRoll ? ms(MOTION.hold) : 0;
+  const flyDur = ms(MOTION.move) + ms(MOTION.settle);
+  realEl.style.opacity = '0'; // 真骰先隐身，临时骰飞到位再露
+  let timer: number | null = null;
+  if (needRoll) {
+    timer = window.setInterval(() => {
+      el.textContent = String(1 + Math.floor(Math.random() * 6));
+    }, 60);
+  }
+  window.setTimeout(() => {
+    if (timer != null) window.clearInterval(timer);
+    el.textContent = String(newVal);
+    el.style.transition = `transform ${flyDur}ms ${EASE.move}`;
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, rollDur);
+  window.setTimeout(() => {
+    el.remove();
+    realEl.style.opacity = '';
+  }, rollDur + flyDur + 40);
+  return rollDur + flyDur;
 }
 
 /** 响应解决：不抵挡 → 攻击骰淡出；抵挡 → 防御骰（真骰/置换灰 5）到中间**并排** → 一起淡出。 */
@@ -623,6 +766,12 @@ export function attackResolve(root: HTMLElement, opts: AttackResolveOpts): numbe
       fadeEl(bdie, fadeDur);
     }, moveDur);
     return moveDur + fadeDur;
+  }
+
+  // 001/C01 裁雨流：攻击骰先**停在中间、不淡出**（等玩家决定是否移回区域）
+  if (opts.hold) {
+    heldAttackDie = { el, dieId: opts.hold.dieId, ox: aox, oy: aoy };
+    return ms(MOTION.hold);
   }
 
   // 不抵挡（或池中已有并排骰未处理）：池里所有骰一起淡出
@@ -1061,7 +1210,8 @@ export function playPayments(root: HTMLElement, list: PayInfo[]): number {
 /**
  * 主入口（`renderGame` 收尾、`applyZoom` 之后调用）。
  * @param flipped 本帧相对上一帧切换了视角（左右互搏换手）。
- * @param holdAdds 本帧"获得"要延后到切换后再播（＝有换手且有获得）。
+ * @param deferAddOwner 本帧要换视角时＝**新视角那一方**：**它的获得延后到切换后再播**；
+ *   其余（旧视角那方，如"你这回合技能给的骰"）的获得**在切换前随阶段③播完**。`null`＝本帧不换视角 → 所有获得照旧随阶段③播。
  * @returns 本次动效最长时长（ms），供"两阶段：播完再切"计时。
  */
 export function runBoardMotions(
@@ -1069,11 +1219,15 @@ export function runBoardMotions(
   prev: PrevDice,
   lifeDeltas: LifeDelta[],
   flipped = false,
-  holdAdds = false,
+  deferAddOwner: PlayerId | null = null,
   excludeIds: string[] = [],
   prevStored: StoredDice = new Map(),
   rerollIds: Set<string> = new Set(),
   diceFx: DiceMoveFx = { moveIds: [], fromCard: [], hanguangs: [] },
+  /** 「获得」之前必须播完的额外时长（如支付整体 playPayments 的时长）→ 保证"代价先于获得" */
+  beforeAddsMs = 0,
+  /** L04 重开：本帧走"全部旧骰→中间合成一个→新骰冒出"的专用动画（覆盖通用 L→M→G） */
+  resetMerge = false,
 ): number {
   if (!canAnimate(root)) return 0;
   const layer0 = ensureFxLayer();
@@ -1158,29 +1312,60 @@ export function runBoardMotions(
     ? ms(MOTION.micro) + ms(MOTION.hold) + ms(MOTION.move) + ms(MOTION.settle)
     : 0;
 
-  // 阶段①：生命反馈 + 消耗/弃置/让位/改点/换区（旧坐标）
-  let dur = playLifeFloats(root, layer0, lifeDeltas);
-  if (!flipped) dur = Math.max(dur, playRemovalsAndFlip(root, layer0, prev, curIds, pool0, [...exAll], rerollIds));
+  // L04 重开：整盘重置 → 专用"合成再分回"动画（不走通用 L→M→G）
+  if (resetMerge) return playResetMerge(root, layer0, pool0, prev, prevStored, exAll, addedIds, addDur);
 
-  // 阶段②：获得（串行在阶段①之后；若要切视角则延后到切换后）
+  // 阶段①：离开（旧坐标）。按「代价 → 效果」排序：
+  //   ① 消耗/弃置（消失）→ ② 生命变化（如真伤 -N）→ ③ 改点/重掷（翻面）。
+  // 只有"本帧真的会播消失动画"（未切视角 + 有被移除的骰）才给后两者垫延时；否则一切照旧
+  // （普通攻击的支付骰在 excludeIds 里、重掷阶段无移除 → 顺序不变）。
+  const removedCount = [...prev.keys()].filter((id) => !curIds.has(id) && !exAll.has(id)).length;
+  const removalDur = !flipped && removedCount > 0 ? removalGroupMs() : 0;
+  const lifeSpan = playLifeFloats(root, layer0, lifeDeltas, removalDur); // 生命排在"消失"之后
+  let dur = Math.max(removalDur, lifeSpan);
+  // 「翻面（重掷/改点）」接在"消失 + 生命"之后；**只有本帧真有移除（代价）时才延后**，
+  // 无代价时保持原行为（翻面与生命同播），避免影响其它卡。
+  const flipsDelay = removalDur > 0 ? Math.max(removalDur, lifeSpan) : 0;
+  if (!flipped) dur = Math.max(dur, playRemovalsAndFlip(root, layer0, prev, curIds, pool0, [...exAll], rerollIds, flipsDelay));
+  dur = Math.max(dur, beforeAddsMs);
+  const leaveDur = dur;
+
+  // 阶段②：搬家（区域移动 / 027 寒光）——排在「离开」之后
+  const moveDur = Math.max(
+    playMoves(root, diceFx.moveIds, new Set(diceFx.fromCard), prev, prevStored, pool0, leaveDur),
+    playHanguang(layer0, root, diceFx.hanguangs, prev, prevStored, pool0, leaveDur),
+  );
+  dur = leaveDur + moveDur;
+
+  // 阶段③：获得——排在「离开 + 搬家」之后。**按归属拆分**：
+  //   · **新视角那一方**（`deferAddOwner`，如"下家的回合开始补充"）→ 延后到切换后播；
+  //   · **其余**（旧视角那方，如"你这回合技能给的骰"）→ **切换前随阶段③播完**。
   if (addedIds.length) {
-    if (holdAdds) {
-      pendingAddIds = addedIds;
-    } else {
+    const ownerOf = (id: string): PlayerId | null => {
+      const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
+      if (!el) return null;
+      return el.classList.contains('die-A') ? 'A' : el.classList.contains('die-B') ? 'B' : null;
+    };
+    const nowIds = deferAddOwner ? addedIds.filter((id) => ownerOf(id) !== deferAddOwner) : addedIds;
+    const deferIds = deferAddOwner ? addedIds.filter((id) => ownerOf(id) === deferAddOwner) : [];
+    if (nowIds.length) {
       const delay = dur;
-      window.setTimeout(() => {
-        playAdds(root, addedIds, poolPoint(root));
-      }, delay);
+      // 同步调用（延时交给 WAAPI `delay` + `fill:'backwards'`）→ 延时期间保持隐藏，不再"一起播"
+      playAdds(root, nowIds, poolPoint(root), delay);
       dur = delay + addDur;
+    }
+    if (deferIds.length) {
+      pendingAddIds = deferIds;
+      // 切视角前先把"要延后的"新骰藏起来：否则阶段①（旧视角）播放期间会提前显示
+      for (const id of deferIds) {
+        const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
+        if (el) el.style.visibility = 'hidden';
+      }
     }
   }
 
-  // 存放骰：中间 ↔ 卡头/战术栏
+  // 存放骰：中间 ↔ 卡头/战术栏（与上并行；不参与 L→M→G 排序）
   dur = Math.max(dur, playStored(root, layer0, pool0, prevStored, exAll));
-  // 区域移动/重排（029 全知等）：整体"聚中间 → 分体飞新位"
-  dur = Math.max(dur, playMoves(root, diceFx.moveIds, new Set(diceFx.fromCard), prev, prevStored, pool0));
-  // 027 寒光·必杀：移入对应区 / 与对方同点骰一起消失
-  dur = Math.max(dur, playHanguang(layer0, root, diceFx.hanguangs, prev, prevStored, pool0));
   return dur;
 }
 
@@ -1193,6 +1378,8 @@ function playRemovalsAndFlip(
   pool: { x: number; y: number },
   excludeIds: string[],
   rerollIds: Set<string>,
+  /** 「翻面（重掷/改点）」延后多少毫秒再播（排在"消失/生命"之后 → 代价先于效果）。 */
+  flipsDelayMs = 0,
 ): number {
   const reduce = prefersReducedMotion();
   const dist = moveScale();
@@ -1203,6 +1390,8 @@ function playRemovalsAndFlip(
   const holdDur = ms(MOTION.hold);
   const ex = new Set(excludeIds);
   let maxDur = 0;
+  // 本帧要"翻面"的骰（重掷 / 改点）：先收集，随后**并排**在中间翻滚（避免多颗叠在同一点）
+  const flipItems: { el: HTMLElement; oldVal: number; newVal: number; center: { x: number; y: number } }[] = [];
 
   root.querySelectorAll<HTMLElement>('.die[data-id]').forEach((el) => {
     const id = el.dataset.id;
@@ -1221,20 +1410,29 @@ function playRemovalsAndFlip(
     const newVal = Number(el.dataset.value);
     if (rerollIds.has(id)) {
       // 本次被重掷（**无论点数是否变化**）→ 移中间翻滚再飞回
-      maxDur = Math.max(
-        maxDur,
-        playValueFlip(el, Number.isFinite(p.value) ? p.value : newVal, newVal, n, pool, moveDur, holdDur),
-      );
+      flipItems.push({ el, oldVal: Number.isFinite(p.value) ? p.value : newVal, newVal, center: n });
       return;
     }
     if (p.owner !== curOwner || p.kind !== curKind) {
-      // 区域互换 / 移动：旧位 → 中间 → 停 → 分体飞新位
-      maxDur = Math.max(maxDur, playAreaMove(el, p.rect, n, pool, moveDur, holdDur));
+      // 区域互换 / 移动：旧位 → 中间 → 停 → 分体飞新位（**值也变了就在中间翻面**）
+      maxDur = Math.max(
+        maxDur,
+        playAreaMove(
+          el,
+          p.rect,
+          n,
+          pool,
+          moveDur,
+          holdDur,
+          Number.isFinite(p.value) ? p.value : undefined,
+          Number.isFinite(newVal) ? newVal : undefined,
+        ),
+      );
       return;
     }
     if (Number.isFinite(p.value) && p.value !== newVal) {
       // 骰面翻转（改点 / 重投）：旧值 → 中间翻滚 → 新值 → 飞回
-      maxDur = Math.max(maxDur, playValueFlip(el, p.value, newVal, n, pool, moveDur, holdDur));
+      flipItems.push({ el, oldVal: p.value, newVal, center: n });
       return;
     }
     // 普通让位 FLIP
@@ -1268,6 +1466,18 @@ function playRemovalsAndFlip(
 
   if (reduce) return maxDur;
 
+  // 多颗翻面 → 到中间**并排**（复用"多颗消耗/获得"的 sideBySideXs）；单颗时退化为正中
+  if (flipItems.length > 0) {
+    const wmax = Math.max(...flipItems.map((it) => it.el.getBoundingClientRect().width || DIE_W));
+    const xs = sideBySideXs(cx, flipItems.length, wmax);
+    flipItems.forEach((it, i) => {
+      maxDur = Math.max(
+        maxDur,
+        playValueFlip(it.el, it.oldVal, it.newVal, it.center, { x: xs[i], y: cy }, moveDur, holdDur, flipsDelayMs),
+      );
+    });
+  }
+
   const ghostDur = ms(MOTION.move) + ms(MOTION.hold) + ms(MOTION.fade);
   const removed = [...prev.entries()].filter(([id]) => !curIds.has(id) && !ex.has(id));
   if (removed.length === 0) return maxDur;
@@ -1282,7 +1492,8 @@ function playRemovalsAndFlip(
   return maxDur;
 }
 
-/** 区域互换/移动：旧位 → 中间 → 停 → 分体飞新位（骰子元素当前在新位）。返回时长。 */
+/** 区域互换/移动：旧位 → 中间 → 停 → 分体飞新位（骰子元素当前在新位）。返回时长。
+ *  `oldVal`/`newVal` 给出且不同 → 到中间**翻面**（＝"已有骰变点 + 换区"，如 005 影袭：去中间不消失、变值、回新区域）。 */
 function playAreaMove(
   el: HTMLElement,
   fromRect: Rect,
@@ -1290,25 +1501,50 @@ function playAreaMove(
   pool: { x: number; y: number },
   moveDur: number,
   holdDur: number,
+  oldVal?: number,
+  newVal?: number,
+  delayMs = 0,
 ): number {
   const dist = moveScale();
   const fc = rectCenter(fromRect);
   const total = moveDur + holdDur + moveDur;
-  el.style.transition = 'none';
-  el.style.transform = `translate(${(fc.x - center.x) * dist}px, ${(fc.y - center.y) * dist}px)`;
-  raf(() => {
-    el.style.transition = `transform ${moveDur}ms ${EASE.move}`;
-    el.style.transform = `translate(${(pool.x - center.x) * dist}px, ${(pool.y - center.y) * dist}px)`;
-  });
-  window.setTimeout(() => {
-    el.style.transition = `transform ${moveDur}ms ${EASE.enter}`;
-    el.style.transform = '';
-  }, moveDur + holdDur);
-  window.setTimeout(() => {
-    el.style.transition = '';
-    el.style.transform = '';
-  }, total + 60);
-  return total;
+  const flip = oldVal != null && newVal != null && oldVal !== newVal && !prefersReducedMotion();
+  const d0 = Math.max(0, delayMs);
+  const g = ghostifyDie(el); // 影子在 fx 层 → 压过快速操作栏 / 必杀横幅
+  const t = g.el;
+  let timer: number | null = null;
+  const start = (): void => {
+    if (flip) t.textContent = String(oldVal);
+    t.style.transition = 'none';
+    t.style.transform = `translate(${(fc.x - center.x) * dist}px, ${(fc.y - center.y) * dist}px)`;
+    raf(() => {
+      t.style.transition = `transform ${moveDur}ms ${EASE.move}`;
+      t.style.transform = `translate(${(pool.x - center.x) * dist}px, ${(pool.y - center.y) * dist}px)`;
+    });
+    if (flip) {
+      window.setTimeout(() => {
+        timer = window.setInterval(() => {
+          t.textContent = String(1 + Math.floor(Math.random() * 6));
+        }, 60);
+      }, moveDur);
+    }
+    window.setTimeout(() => {
+      if (timer != null) window.clearInterval(timer);
+      if (flip) t.textContent = String(newVal);
+      t.style.transition = `transform ${moveDur}ms ${EASE.enter}`;
+      t.style.transform = '';
+    }, moveDur + holdDur);
+    window.setTimeout(() => {
+      if (timer != null) window.clearInterval(timer);
+      if (flip) t.textContent = String(newVal);
+      t.style.transition = '';
+      t.style.transform = '';
+    }, total + 60);
+  };
+  if (d0 > 0) window.setTimeout(start, d0);
+  else start();
+  window.setTimeout(() => g.reveal(), d0 + total + 90); // 收尾揭出真骰
+  return d0 + total;
 }
 
 /** 骰面翻转（改点/重投）：旧值 → 中间翻滚 → 新值 → 飞回。返回时长。 */
@@ -1320,39 +1556,47 @@ function playValueFlip(
   pool: { x: number; y: number },
   moveDur: number,
   holdDur: number,
+  delayMs = 0,
 ): number {
+  // `delayMs`：让"翻面（重掷/改点）"**排在它前面的动画之后**（如"消耗/真伤先播完"）；延时期间影子留原位显示旧值。
+  const d0 = Math.max(0, delayMs);
   const dist = moveScale();
   const dx = (pool.x - center.x) * dist;
   const dy = (pool.y - center.y) * dist;
-  const total = moveDur + holdDur + moveDur;
-  el.textContent = String(oldVal);
-  el.style.transition = `transform ${moveDur}ms ${EASE.move}`;
-  raf(() => {
-    el.style.transform = `translate(${dx}px, ${dy}px)`;
-  });
+  const flipDur = moveDur + holdDur + moveDur;
+  const g = ghostifyDie(el); // 影子在 fx 层 → 压过快速操作栏 / 必杀横幅
+  const t = g.el;
+  t.textContent = String(oldVal);
   let timer: number | null = null;
   window.setTimeout(() => {
+    t.style.transition = `transform ${moveDur}ms ${EASE.move}`;
+    raf(() => {
+      t.style.transform = `translate(${dx}px, ${dy}px)`;
+    });
+  }, d0);
+  window.setTimeout(() => {
     timer = window.setInterval(() => {
-      el.textContent = String(1 + Math.floor(Math.random() * 6));
+      t.textContent = String(1 + Math.floor(Math.random() * 6));
     }, 60);
-  }, moveDur);
+  }, d0 + moveDur);
   window.setTimeout(() => {
     if (timer != null) window.clearInterval(timer);
-    el.textContent = String(newVal);
-    el.style.transition = `transform ${moveDur}ms ${EASE.enter}`;
-    el.style.transform = '';
-  }, moveDur + holdDur);
+    t.textContent = String(newVal);
+    t.style.transition = `transform ${moveDur}ms ${EASE.enter}`;
+    t.style.transform = '';
+  }, d0 + moveDur + holdDur);
   window.setTimeout(() => {
     if (timer != null) window.clearInterval(timer);
-    el.textContent = String(newVal);
-    el.style.transition = '';
-    el.style.transform = '';
-  }, total + 60);
-  return total;
+    t.textContent = String(newVal);
+    t.style.transition = '';
+    t.style.transform = '';
+  }, d0 + flipDur + 60);
+  window.setTimeout(() => g.reveal(), d0 + flipDur + 90); // 收尾揭出真骰
+  return d0 + flipDur;
 }
 
 /** 阶段②：新获得的骰从"中间"**并排**飞入。返回时长。 */
-function playAdds(root: HTMLElement, ids: string[], pool: { x: number; y: number }): number {
+function playAdds(root: HTMLElement, ids: string[], pool: { x: number; y: number }, delayMs = 0, fromPool = false): number {
   const reduce = prefersReducedMotion();
   if (reduce) return 0;
   const dist = moveScale();
@@ -1378,11 +1622,14 @@ function playAdds(root: HTMLElement, ids: string[], pool: { x: number; y: number
   const wmax = Math.max(...items.map((x) => x.w));
   const xs = sideBySideXs(pool.x, items.length, wmax);
   items.forEach((it, i) => {
-    const el = it.el;
-    const sx = xs[i]; // 起点在中间**并排**
+    const g = ghostifyDie(it.el); // 影子在 fx 层 → 压过必杀横幅 / 快速操作栏；真骰先隐藏、收尾揭出
+    const el = g.el;
+    const sx = fromPool ? pool.x : xs[i]; // 起点在中间**并排**（fromPool＝从同一个点冒出）
     const dx = (sx - it.n.x) * dist;
     const dy = (pool.y - it.n.y) * dist;
     if (typeof el.animate === 'function') {
+      // delay + fill:'backwards' → **延时期间就套用首帧**（透明 + 停在中间），
+      // 从而"获得"不会在"离开/代价"动画播完前就提前显示在最终位置。
       el.animate(
         [
           { transform: `translate(${dx}px, ${dy}px) scale(.7)`, opacity: 0, offset: 0 },
@@ -1391,25 +1638,67 @@ function playAdds(root: HTMLElement, ids: string[], pool: { x: number; y: number
           { transform: 'translate(0, 0) scale(1.08)', opacity: 1, offset: (inDur + holdDur + flyDur) / d },
           { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: 1 },
         ],
-        { duration: d, easing: EASE.enter },
+        { duration: d, easing: EASE.enter, delay: delayMs, fill: 'backwards' },
       );
     } else {
+      const start = (): void => {
+        raf(() => {
+          el.style.transition = `transform ${d}ms ${EASE.enter}, opacity ${ms(MOTION.micro)}ms linear`;
+          el.style.transform = '';
+          el.style.opacity = '1';
+        });
+      };
       el.style.transition = 'none';
       el.style.transform = `translate(${dx}px, ${dy}px) scale(.7)`;
       el.style.opacity = '0';
-      raf(() => {
-        el.style.transition = `transform ${d}ms ${EASE.enter}, opacity ${ms(MOTION.micro)}ms linear`;
-        el.style.transform = '';
-        el.style.opacity = '1';
-      });
+      if (delayMs > 0) window.setTimeout(start, delayMs);
+      else start();
       window.setTimeout(() => {
         el.style.transition = '';
         el.style.transform = '';
         el.style.opacity = '';
-      }, d + 60);
+      }, delayMs + d + 60);
     }
+    window.setTimeout(() => g.reveal(), delayMs + d + 90); // 收尾揭出真骰
   });
-  return d;
+  return delayMs + d;
+}
+
+/** L04 重开：全部旧骰（区域 + 存放）→ **同一个中间点合成一个** → 消失；新骰从该点**冒出** → 分回各自区域。返回时长。 */
+function playResetMerge(
+  root: HTMLElement,
+  layer: HTMLElement,
+  pool: { x: number; y: number },
+  prev: PrevDice,
+  prevStored: StoredDice,
+  exAll: Set<string>,
+  addedIds: string[],
+  addDur: number,
+): number {
+  if (prefersReducedMotion()) return 0;
+  const dist = moveScale();
+  const moveDur = ms(MOTION.move);
+  const holdDur = ms(MOTION.hold);
+  const fadeDur = ms(MOTION.fade);
+  const ghostDur = moveDur + holdDur + fadeDur;
+
+  // 出：全部旧骰（区域 + 存放）飞到**同一个点**（重叠 = 合成一个）→ 停顿 → 淡出
+  const outItems: PrevDie[] = [];
+  prev.forEach((p, id) => {
+    if (!exAll.has(id)) outItems.push(p);
+  });
+  prevStored.forEach((p) => {
+    outItems.push({ rect: p.rect, html: p.html, owner: null, kind: null, value: p.value });
+  });
+  for (const p of outItems) spawnGhost(layer, p, pool.x, pool.y, dist, 0);
+
+  // 入：从**同一个点**冒出 → 分飞各自区域（延时到"出"播完）
+  if (addedIds.length > 0) {
+    window.setTimeout(() => {
+      playAdds(root, addedIds, pool, 0, true);
+    }, ghostDur);
+  }
+  return ghostDur + addDur;
 }
 
 /** 存放骰：新存放＝中间飞入卡头/战术栏凝住；移除＝从卡头飞中间淡出。返回时长。 */
@@ -1520,6 +1809,7 @@ function playMoves(
   prev: PrevDice,
   prevStored: StoredDice,
   pool: { x: number; y: number },
+  delayMs = 0,
 ): number {
   if (moveIds.length === 0 || prefersReducedMotion()) return 0;
   const moveDur = ms(MOTION.move);
@@ -1532,7 +1822,12 @@ function playMoves(
     if (!src) continue;
     const r = el.getBoundingClientRect();
     const center = rectCenter({ left: r.left, top: r.top, width: r.width, height: r.height });
-    maxDur = Math.max(maxDur, playAreaMove(el, src, center, pool, moveDur, holdDur));
+    const oldVal = prev.get(id)?.value;
+    const nv = Number(el.dataset.value);
+    maxDur = Math.max(
+      maxDur,
+      playAreaMove(el, src, center, pool, moveDur, holdDur, oldVal, Number.isFinite(nv) ? nv : undefined, delayMs),
+    );
   }
   return maxDur;
 }
@@ -1545,6 +1840,7 @@ function playHanguang(
   prev: PrevDice,
   prevStored: StoredDice,
   pool: { x: number; y: number },
+  delayMs = 0,
 ): number {
   if (hanguangs.length === 0 || prefersReducedMotion()) return 0;
   const dist = moveScale();
@@ -1556,11 +1852,28 @@ function playHanguang(
   for (const h of hanguangs) {
     if (h.mode === 'move') {
       const el = root.querySelector<HTMLElement>(`.die[data-id="${h.heldId}"]`);
-      const src = prevStored.get(h.heldId)?.rect;
-      if (el && src) {
+      const stored = prevStored.get(h.heldId);
+      if (el && stored) {
         const r = el.getBoundingClientRect();
         const center = rectCenter({ left: r.left, top: r.top, width: r.width, height: r.height });
-        maxDur = Math.max(maxDur, playAreaMove(el, src, center, pool, moveDur, holdDur));
+        // 用**残影**走 卡头→中间→对应区（真骰在残影落地前隐藏）；
+        // 残影在 .fx-layer，恒在"必杀"横幅（z-index:-1）之上 → 中间那一下看得见。
+        const ghost = document.createElement('div');
+        ghost.className = 'fx-ghost';
+        ghost.style.left = `${center.x - r.width / 2}px`;
+        ghost.style.top = `${center.y - r.height / 2}px`;
+        ghost.style.width = `${r.width}px`;
+        ghost.style.height = `${r.height}px`;
+        ghost.innerHTML = stored.html;
+        layer.appendChild(ghost);
+        el.style.visibility = 'hidden';
+        const d0 = Math.max(0, delayMs);
+        const total = moveDur + holdDur + moveDur;
+        window.setTimeout(() => {
+          el.style.visibility = '';
+        }, d0 + total - 40);
+        window.setTimeout(() => ghost.remove(), d0 + total + 60);
+        maxDur = Math.max(maxDur, playAreaMove(ghost, stored.rect, center, pool, moveDur, holdDur, undefined, undefined, delayMs));
       }
     } else {
       const items: PrevDie[] = [];
@@ -1573,14 +1886,68 @@ function playHanguang(
       if (items.length === 0) continue;
       const wmax = Math.max(...items.map((x) => x.rect.width || DIE_W));
       const xs = sideBySideXs(pool.x, items.length, wmax);
-      items.forEach((it, i) => spawnGhost(layer, it, xs[i], pool.y, dist));
-      maxDur = Math.max(maxDur, ghostDur);
+      items.forEach((it, i) => spawnGhost(layer, it, xs[i], pool.y, dist, delayMs));
+      maxDur = Math.max(maxDur, Math.max(0, delayMs) + ghostDur);
     }
   }
   return maxDur;
 }
 
-function spawnGhost(layer: HTMLElement, p: PrevDie, cx: number, cy: number, dist: number): number {
+/** A06 勾魂：攻击骰从中间飞向神器标题栏、落地现出灰色存放骰（参考裁雨流的"停在中间"观感）。返回时长。 */
+export function playGouhun(
+  root: HTMLElement,
+  list: { player: PlayerId; artifactId: string; chipId: string; value: number }[],
+): number {
+  if (list.length === 0 || prefersReducedMotion()) return 0;
+  const layer = ensureFxLayer();
+  if (!layer) return 0;
+  const pool = poolPoint(root);
+  const inDur = ms(MOTION.micro);
+  const holdDur = ms(MOTION.hold);
+  const flyDur = ms(MOTION.move);
+  const total = inDur + holdDur + flyDur;
+  let maxDur = 0;
+  for (const e of list) {
+    const dest = root.querySelector<HTMLElement>(
+      `.player[data-player="${e.player}"] .card[data-artifact="${e.artifactId}"] .card-head`,
+    );
+    const chip = root.querySelector<HTMLElement>(`.card-held--head .pay-die--held[data-id="${e.chipId}"]`);
+    if (!dest) continue;
+    const dr = dest.getBoundingClientRect();
+    const g = document.createElement('div');
+    g.className = 'fx-ghost';
+    g.style.left = `${pool.x - 12}px`;
+    g.style.top = `${pool.y - 12}px`;
+    g.style.width = '24px';
+    g.style.height = '24px';
+    g.innerHTML = chip ? chip.outerHTML : `<span class="pay-die pay-die--held">${e.value}</span>`;
+    layer.appendChild(g);
+    if (chip) chip.style.visibility = 'hidden';
+    const tx = dr.left + dr.width / 2 - pool.x;
+    const ty = dr.top + dr.height / 2 - pool.y;
+    if (typeof g.animate === 'function') {
+      g.animate(
+        [
+          { transform: 'scale(.7)', opacity: 0, offset: 0 },
+          { transform: 'scale(1.05)', opacity: 1, offset: inDur / total },
+          { transform: 'scale(1)', opacity: 1, offset: (inDur + holdDur) / total },
+          { transform: `translate(${tx}px, ${ty}px) scale(1)`, opacity: 1, offset: 1 },
+        ],
+        { duration: total, easing: EASE.enter },
+      );
+    } else {
+      g.style.opacity = '1';
+    }
+    window.setTimeout(() => {
+      if (chip) chip.style.visibility = '';
+    }, total - 40);
+    window.setTimeout(() => g.remove(), total + 80);
+    maxDur = Math.max(maxDur, total);
+  }
+  return maxDur;
+}
+
+function spawnGhost(layer: HTMLElement, p: PrevDie, cx: number, cy: number, dist: number, delayMs = 0): number {
   const wrap = document.createElement('div');
   wrap.className = 'fx-ghost';
   wrap.style.left = `${p.rect.left}px`;
@@ -1597,18 +1964,23 @@ function spawnGhost(layer: HTMLElement, p: PrevDie, cx: number, cy: number, dist
   const holdDur = ms(MOTION.hold);
   const fadeDur = ms(MOTION.fade);
   const total = moveDur + holdDur + fadeDur;
+  const d0 = Math.max(0, delayMs);
 
-  raf(() => {
-    wrap.style.transition = `transform ${moveDur}ms ${EASE.move}`;
-    wrap.style.transform = `translate(${dx}px, ${dy}px)`;
-    window.setTimeout(() => {
-      wrap.style.transition = `transform ${fadeDur}ms ${EASE.enter}, opacity ${fadeDur}ms ${EASE.enter}`;
-      wrap.style.transform = `translate(${dx}px, ${dy}px) scale(.72)`;
-      wrap.style.opacity = '0';
-    }, moveDur + holdDur);
-  });
-  window.setTimeout(() => wrap.remove(), total + 80);
-  return total;
+  const begin = (): void => {
+    raf(() => {
+      wrap.style.transition = `transform ${moveDur}ms ${EASE.move}`;
+      wrap.style.transform = `translate(${dx}px, ${dy}px)`;
+      window.setTimeout(() => {
+        wrap.style.transition = `transform ${fadeDur}ms ${EASE.enter}, opacity ${fadeDur}ms ${EASE.enter}`;
+        wrap.style.transform = `translate(${dx}px, ${dy}px) scale(.72)`;
+        wrap.style.opacity = '0';
+      }, moveDur + holdDur);
+    });
+  };
+  if (d0 > 0) window.setTimeout(begin, d0);
+  else begin();
+  window.setTimeout(() => wrap.remove(), d0 + total + 80);
+  return d0 + total;
 }
 
 function shakePanel(panel: HTMLElement): void {
@@ -1678,7 +2050,7 @@ function healSweep(layer: HTMLElement, rect: Rect): void {
 }
 
 /** 回血：生命条内层**平滑变长**（从旧比例过渡到新比例，封顶不溢出）。delta=0（满血 +0）时不动。 */
-function growHealBar(lifeline: HTMLElement, delta: number, max: number): void {
+function growHealBar(lifeline: HTMLElement, delta: number, max: number, delayMs = 0): void {
   if (delta <= 0) return;
   const fill = lifeline.querySelector<HTMLElement>('.lifeline-fill');
   if (!fill || max <= 0 || typeof fill.animate !== 'function') return;
@@ -1688,16 +2060,80 @@ function growHealBar(lifeline: HTMLElement, delta: number, max: number): void {
   const ratio = Math.max(0, Math.min(1, oldPct / newPct));
   if (ratio >= 0.999) return;
   fill.style.transformOrigin = 'left center';
+  // `fill:'backwards'` → 延时期间保持首帧（旧宽度），避免"血条先跳到新宽度、再回跳播放"
   fill.animate([{ transform: `scaleX(${ratio})` }, { transform: 'scaleX(1)' }], {
     duration: ms(360),
     easing: EASE.enter,
+    delay: Math.max(0, delayMs),
+    fill: 'backwards',
   });
 }
 
+/**
+ * 受伤·血条收缩起点：把"当前(新)宽度%"与掉血量换算成动画起点的 `scaleX`（＝旧宽/新宽，≥1）。
+ * 新宽为 0（掉到空）无意义 → 返回 1（不做）。纯函数，便于单测。
+ */
+export function hitShrinkScale(newPct: number, delta: number, max: number): number {
+  if (delta >= 0 || max <= 0 || !(newPct > 0)) return 1;
+  const lostPct = (Math.min(-delta, max) / max) * 100;
+  const oldPct = Math.min(100, newPct + lostPct);
+  const s = oldPct / newPct;
+  return s > 1 ? s : 1;
+}
+
+/** 受伤：生命条内层从"旧(更长)"平滑**收缩**到新比例（与 `growHealBar` 对称；轨道 `overflow:hidden` 裁掉溢出）。 */
+function shrinkLifeBar(lifeline: HTMLElement, delta: number, max: number, delayMs = 0): void {
+  if (delta >= 0) return;
+  const fill = lifeline.querySelector<HTMLElement>('.lifeline-fill');
+  if (!fill || typeof fill.animate !== 'function') return;
+  const newPct = parseFloat(fill.style.width || '0');
+  if (!(newPct > 0)) return;
+  const scale = hitShrinkScale(newPct, delta, max);
+  if (scale <= 1.001) return;
+  fill.style.transformOrigin = 'left center';
+  // `fill:'backwards'` → 延时期间保持首帧（旧宽度），避免"血条先跳到新宽度、再回跳播放"
+  fill.animate([{ transform: `scaleX(${scale})` }, { transform: 'scaleX(1)' }], {
+    duration: ms(360),
+    easing: EASE.enter,
+    delay: Math.max(0, delayMs),
+    fill: 'backwards',
+  });
+}
+
+/**
+ * 面板**彩光脉冲**（受伤红 / 回血绿通用）。与「操作者黄框」（`.player--acting`）**错时**：
+ * - 首/尾帧＝黄框（操作中）或透明（不操作）；
+ * - **中段帧＝只有红/绿彩光（不含黄）** → 彩光期间黄框**临时让位**、结束**平滑淡回**。
+ * 三帧阴影层数恒定（同形状）→ 可在同一条 `box-shadow` 通道插值。非位移 → 减弱动效下也保留。`rgb`＝"R, G, B"。
+ */
+export function panelGlow(panel: HTMLElement, rgb: string): void {
+  if (typeof panel.animate !== 'function') return;
+  const TRANSPARENT = '0 0 0 0 rgba(0, 0, 0, 0), 0 0 16px 3px rgba(0, 0, 0, 0)';
+  const YELLOW = '0 0 0 2px rgba(242, 203, 92, .55), 0 0 16px 3px rgba(242, 203, 92, .35)';
+  const glow = (a: number): string =>
+    `0 0 0 ${a > 0 ? 2 : 0}px rgba(${rgb}, ${a}), 0 0 16px 3px rgba(${rgb}, ${a * 0.6})`;
+  const base = panel.classList.contains('player--acting') ? YELLOW : TRANSPARENT;
+  panel.animate(
+    [{ boxShadow: base }, { boxShadow: glow(0.5), offset: 0.35 }, { boxShadow: base }],
+    { duration: ms(420), easing: 'ease-out' },
+  );
+}
+
+/** 受伤：面板淡红光圈（色＝掉血字 `#c0392b`）。 */
+function hitGlow(panel: HTMLElement): void {
+  panelGlow(panel, '192, 57, 43');
+}
+
+/** 回血：面板淡绿光圈（色＝回血字 `#1d7a4d`）。 */
+function healPanelGlow(panel: HTMLElement): void {
+  panelGlow(panel, '29, 122, 77');
+}
+
 /** 生命变化飘字 + 反馈。delta>=0 走"回血"（含 +0），delta<0 走"受伤"。返回时长。 */
-function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta[]): number {
+function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta[], delayMs = 0): number {
   if (deltas.length === 0) return 0;
   const reduce = prefersReducedMotion();
+  const d0 = Math.max(0, delayMs); // 生命变化排在"消耗/弃置"之后（代价先于效果）
   const popDur = ms(180);
   const holdDur = ms(300);
   const riseDur = ms(400);
@@ -1712,14 +2148,18 @@ function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta
     if (!anchor) continue;
     const r = anchor.getBoundingClientRect();
 
+    if (panel) window.setTimeout(() => (isHeal ? healPanelGlow : hitGlow)(panel), d0); // 受伤红 / 回血绿 面板彩光（非位移 → 减弱动效也保留）
     if (!reduce) {
       if (!isHeal) {
-        if (panel) shakePanel(panel);
+        if (panel && !d.calm) window.setTimeout(() => shakePanel(panel), d0); // 「非伤害的下降」（033 抹零）不抖；其余照抖
+        shrinkLifeBar(anchor, d.delta, d.max, d0); // 受伤：血条平滑收缩（与回血的"平滑变长"对称）
       } else {
-        pulseHeal(anchor);
-        healGlow(layer, { left: r.left, top: r.top, width: r.width, height: r.height });
-        healSweep(layer, { left: r.left, top: r.top, width: r.width, height: r.height });
-        growHealBar(anchor, d.delta, d.max);
+        window.setTimeout(() => {
+          pulseHeal(anchor);
+          healGlow(layer, { left: r.left, top: r.top, width: r.width, height: r.height });
+          healSweep(layer, { left: r.left, top: r.top, width: r.width, height: r.height });
+        }, d0);
+        growHealBar(anchor, d.delta, d.max, d0);
       }
     }
 
@@ -1731,6 +2171,7 @@ function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta
     layer.appendChild(t);
 
     if (!reduce && typeof t.animate === 'function') {
+      // `fill:'both'` + `delay` → 延时期间保持首帧（不可见），不被"代价"动画提前盖出
       t.animate(
         [
           { transform: 'translate(-50%, 0) scale(.6)', opacity: 0, offset: 0 },
@@ -1739,33 +2180,37 @@ function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta
           { transform: 'translate(-50%, 0) scale(1)', opacity: 1, offset: 0.62 },
           { transform: 'translate(-50%, -30px) scale(1)', opacity: 0, offset: 1 },
         ],
-        { duration: total, easing: 'ease-out', fill: 'forwards' },
+        { duration: total, delay: d0, easing: 'ease-out', fill: 'both' },
       );
     } else {
       t.style.transform = 'translate(-50%, 0)';
-      t.style.opacity = '1';
-      raf(() => {
-        t.style.transition = `transform ${total}ms linear, opacity ${total}ms linear`;
-        t.style.transform = 'translate(-50%, -16px)';
-        t.style.opacity = '0';
-      });
+      t.style.opacity = '0';
+      window.setTimeout(() => {
+        t.style.opacity = '1';
+        raf(() => {
+          t.style.transition = `transform ${total}ms linear, opacity ${total}ms linear`;
+          t.style.transform = 'translate(-50%, -16px)';
+          t.style.opacity = '0';
+        });
+      }, d0);
     }
-    window.setTimeout(() => t.remove(), total + 80);
+    window.setTimeout(() => t.remove(), d0 + total + 80);
   }
-  return total;
+  return d0 + total;
 }
 
 // ── P-D 状态类 · 阶段横幅 / 技能气泡 ─────────────────────────────────
 /** 阶段横幅：从操作栏中间滑出 → 停一下 → 淡出。返回时长。 */
-export function playBanner(root: HTMLElement, text: string): number {
+export function playBanner(root: HTMLElement, text: string, delayMs = 0): number {
   if (!canAnimate(root)) return 0;
   const layer = ensureFxLayer();
   if (!layer) return 0;
   const p = poolPoint(root);
   const inDur = ms(MOTION.micro);
-  const holdDur = ms(MOTION.emphasis);
+  const holdDur = ms(MOTION.bannerHold);
   const fadeDur = ms(MOTION.fade);
   const total = inDur + holdDur + fadeDur;
+  const delay = Math.max(0, delayMs);
   const b = document.createElement('div');
   b.className = 'fx-banner';
   b.textContent = text;
@@ -1788,13 +2233,13 @@ export function playBanner(root: HTMLElement, text: string): number {
             { transform: 'translate(-50%,-50%) translateY(0) scale(1)', opacity: 1, offset: (inDur + holdDur) / total },
             { transform: 'translate(-50%,-50%) translateY(0) scale(1)', opacity: 0, offset: 1 },
           ],
-      { duration: total, easing: EASE.enter, fill: 'forwards' },
+      { duration: total, delay, easing: EASE.enter, fill: 'both' },
     );
   } else {
     b.style.opacity = '1';
   }
-  window.setTimeout(() => b.remove(), total + 80);
-  return total;
+  window.setTimeout(() => b.remove(), delay + total + 80);
+  return delay + total;
 }
 
 /** 技能气泡：在目标元素上方冒出 → 停一下 → 淡出（技能名用玩家色）。返回时长。 */

@@ -95,13 +95,67 @@ export type FxEvent =
       kind: 'tacticFired';
       player: PlayerId;
       tacticId: string;
+    }
+  | {
+      /**
+       * 真实伤害·**发动即报**（供"白墨线：发动卡图 → 受伤方生命条"）。在**落血唯一处**
+       * `dealTrueDamage` 开头发一条（不管最终有没有真的扣血/被取消）。
+       * `card`＝当时结算中的"发动卡"上下文（可能为 null → 界面退回"来源方面板"锚点）。
+       */
+      kind: 'trueLine';
+      source: PlayerId;
+      target: PlayerId;
+      amount: number;
+      card: FxSource | null;
+      /** 非伤害的「生命下降」（033 抹零）：仍飞白墨线，但界面**不抖**面板（其余保留） */
+      drop?: boolean;
+    }
+  | {
+      /** 攻击骰"先别淡出、继续停在中间"（001/C01 裁雨流：命中后等玩家决定是否把攻击骰移回区域）。 */
+      kind: 'holdAttackDie';
+      player: PlayerId;
+      dieId: string;
+    }
+  | {
+      /** L04 重开：整盘重置（全部旧骰 → 中间合成一个 → 消失，新骰从中间冒出 → 分回各自区域）。界面据此走专用合成动画。 */
+      kind: 'reset';
+    }
+  | {
+      /** A06 勾魂：参考裁雨流——攻击骰从中间飞向该神器的标题栏（落地变灰存放骰）。`chipId`＝落地那颗存放骰的 id。 */
+      kind: 'gouhun';
+      player: PlayerId;
+      artifactId: string;
+      chipId: string;
+      value: number;
     };
 
 let buf: FxEvent[] = [];
 
+/**
+ * 「发动卡」上下文：某个技能/战术**结算期间**设置的来源卡（供真伤墨线锚点）。
+ * - 技能＝`{player, artifactId, side, skillKey?}`；战术＝`{player, tacticId}`。
+ * - 由各技能/战术结算处 `fxSetSource(...)` 设置；每次动作开始 `fxReset()` 清空。
+ */
+export type FxSource =
+  | { player: PlayerId; artifactId: string; side: 'left' | 'right' | 'only'; skillKey?: string }
+  | { player: PlayerId; tacticId: string };
+
+let curSource: FxSource | null = null;
+
+/** 记录"当前正在结算的发动卡"（各技能/战术结算处设置；`fxReset` 清空）。 */
+export function fxSetSource(s: FxSource | null): void {
+  curSource = s;
+}
+
 /** 每次动作开始前清空（由 `applyAction` 调用）。 */
 export function fxReset(): void {
   buf = [];
+  curSource = null;
+}
+
+/** 真实伤害·发动即报：记录"从哪张发动卡、打到谁"。`card` 取当前结算中的发动卡（无则 UI 退回来源面板）。 */
+export function fxTrueLine(source: PlayerId, target: PlayerId, amount: number, drop = false): void {
+  buf.push({ kind: 'trueLine', source, target, amount, card: curSource, ...(drop ? { drop: true } : {}) });
 }
 
 export function fxPush(e: FxEvent): void {
@@ -111,7 +165,10 @@ export function fxPush(e: FxEvent): void {
 /** 战术效果生效：发一条 tacticFired（tacticId 取持有者当前战术牌；无则不记）。 */
 export function fxTacticFired(g: GameState, player: PlayerId): void {
   const t = g.players[player].tactic;
-  if (t) buf.push({ kind: 'tacticFired', player, tacticId: t });
+  if (t) {
+    buf.push({ kind: 'tacticFired', player, tacticId: t });
+    curSource = { player, tacticId: t }; // 兼作真伤白墨线锚点（紧接着的 dealTrueDamage 取它）
+  }
 }
 
 /**
@@ -124,12 +181,14 @@ export function fxSkillFired(g: GameState, player: PlayerId, skillKey: string): 
   if (a) {
     const s = a.skills.find((x) => x.key === skillKey)!;
     buf.push({ kind: 'skillFired', player, artifactId: a.id, side: s.side, skillKey, auto: true });
+    curSource = { player, artifactId: a.id, side: s.side, skillKey }; // 兼作真伤白墨线锚点
     return;
   }
   const lg = p.legend;
   if (lg && lg.skills.some((s) => s.key === skillKey)) {
     const s = lg.skills.find((x) => x.key === skillKey)!;
     buf.push({ kind: 'skillFired', player, artifactId: lg.id, side: s.side, skillKey, auto: true });
+    curSource = { player, artifactId: lg.id, side: s.side, skillKey }; // 兼作真伤白墨线锚点
   }
 }
 

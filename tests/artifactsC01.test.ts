@@ -164,7 +164,7 @@ describe('C01 极之境·裁雨流（触发）：造成伤害后重掷该攻击�
     return { g };
   };
 
-  it('造成伤害 → 弹出 c01Caiyuliu；accept 后按 002 分布新增 1 颗骰（固定 seed 可确定点数与落区）', () => {
+  it('造成伤害 → 弹出 c01Caiyuliu；accept 后**重掷该攻击骰（复用其 id）**并按 002 分布落区（固定 seed）', () => {
     const { g } = attackSetup(4);
     const before = new Set(allDice(g, 'A').map((d) => d.id));
 
@@ -182,11 +182,10 @@ describe('C01 极之境·裁雨流（触发）：造成伤害后重掷该攻击�
     applyAction(g, { t: 'c01Caiyuliu', accept: true });
     expect(g.pending).toBeNull();
 
-    const added = allDice(g, 'A').filter((d) => !before.has(d.id));
-    expect(added).toHaveLength(1);
+    // 复用**攻击骰 id**（'atk'）——不再是"新增一颗"（界面才能"中间重掷翻面 → 飞回区域"）
+    expect(allDice(g, 'A')).toHaveLength(before.size); // 攻击骰被回收，总数回到开打前
     // seed=1 固定：重掷结果为 1 点；002 分布 防{1,6} 攻{3,4} 冥{2,5} → 落到防御区
-    expect(added[0]).toEqual({ id: expect.any(String), value: 1, kind: 'defense' });
-    expect(g.players.A.areas.defense).toEqual(added);
+    expect(g.players.A.areas.defense).toEqual([{ id: 'atk', value: 1, kind: 'defense' }]);
   });
 
   it('decline → 不新增骰子，战报写「放弃」', () => {

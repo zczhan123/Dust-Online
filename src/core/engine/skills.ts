@@ -5,7 +5,7 @@ import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
 import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
-import { fxPush, fxSkillFired } from './fx';
+import { fxPush, fxSkillFired, fxSetSource, fxTrueLine } from './fx';
 import { pumpPending, queuePending } from './pending';
 import { resetToBattleStart } from './reset';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
@@ -13,6 +13,25 @@ import { logLine, pname, vals } from './log';
 export { skillActive, hasActiveSkill };
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
+
+/**
+ * L12「知我心者立地成佛」：**双方 6 区中"有骰且仅有 1 种点数"的区域**（空区域不算、含多种点数不算）。
+ * **引擎与界面共用同一来源**（界面用它做"发动前预览：会造成几点伤害"，避免另抄一份规则）。
+ */
+export function lidichengfoRegions(
+  g: GameState,
+): { who: PlayerId; kind: DiceKind; ids: string[] }[] {
+  const regions: { who: PlayerId; kind: DiceKind; ids: string[] }[] = [];
+  for (const who of ['A', 'B'] as PlayerId[]) {
+    for (const k of KINDS) {
+      const arr = g.players[who].areas[k];
+      if (arr.length === 0) continue;
+      if (new Set(arr.map((d) => d.value)).size !== 1) continue;
+      regions.push({ who, kind: k, ids: arr.map((d) => d.id) });
+    }
+  }
+  return regions;
+}
 
 /**
  * 014 净化 / 数罪并罚 共用效果：
@@ -248,6 +267,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         )} ${lifeB}）与尘落（${dustfall}）及各技能计数，重置其余状态、重开一局；先手＝${pname(first)}；并失去本技能`,
       );
       resetToBattleStart(g, first);
+      // 动效旁路：整盘重置 → 界面走"全部旧骰→中间合成一个→新骰从中间冒出"的专用动画
+      fxPush({ kind: 'reset' });
     },
   },
   // L07「不屈咆哮」（必杀·尘落前置 2）：弃置对方数量＝你的「决意」**当前计数**的能力骰（多类型→**一次效果**），
@@ -465,6 +486,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const dist = p.artifacts.find((a) => a.column === 2)!.distribution!;
       const newKind = areaOf(newValue, dist);
       p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });
+      // 动效旁路：该骰"旧位 → 中间（翻面到新点数）→ 新区域"；并计入"代价时长" → 后面的虚拟攻击 + 黑线会等它播完
+      fxPush({ kind: 'move', player, dieIds: [dieId] });
       virtualAttack(g, player, x, { skill: '影袭', owner: player });
       logLine(
         g,
@@ -880,6 +903,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       const picks = (params.picks as string[] | undefined) ?? [];
+      const discardIds = (params.discardIds as string[] | undefined) ?? [];
       const x = fills.length;
       if (x < 1 || x > 3) throw new Error('costSlots must be 1..3');
       // 种类必须各不相同（由规格保证，这里校验）
@@ -892,18 +916,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       if (new Set(kinds).size !== kinds.length) throw new Error('消耗的能力骰种类必须各不相同');
       if (picks.length !== x) throw new Error(`必须选择 ${x} 项`);
       for (const pk of picks) if (pk !== 'discard' && pk !== 'gain') throw new Error(`invalid pick: ${pk}`);
+      // 每个「① 弃置」必须指定**具体**要弃置的那颗防御骰（由发动者选择）——先校验后落状态
+      const needDiscard = picks.filter((pk) => pk === 'discard').length;
+      if (discardIds.length !== needDiscard) throw new Error(`需指定 ${needDiscard} 个要弃置的对方防御骰`);
+      if (new Set(discardIds).size !== discardIds.length) throw new Error('要弃置的防御骰不能重复');
+      const oppDef = g.players[opp].areas.defense;
+      for (const id of discardIds) if (!oppDef.some((d) => d.id === id)) throw new Error(`不是对方的防御骰: ${id}`);
       const spec: SlotSpec[] = kinds.map((k) => ({ kind: k }));
       const effective = paySlots(g, player, spec, fills);
       let discarded = 0;
       let gained = 0;
       const gainedDice: Die[] = [];
+      let di = 0;
       for (const pk of picks) {
         if (pk === 'discard') {
-          const target = g.players[opp].areas.defense[0];
-          if (target) {
-            consumeDice(g, g.players[opp], 'defense', [target.id]);
-            discarded += 1;
-          }
+          const id = discardIds[di];
+          di += 1;
+          consumeDice(g, g.players[opp], 'defense', [id]);
+          discarded += 1;
         } else {
           const d = createDie(newDieId(`${player}-`), 3, 'attack');
           p.areas.attack.push(d);
@@ -1137,7 +1167,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 白昼之火（激活）：本回合攻击点数视为 6，且对方只能用冥想骰抵挡 */
   'tianfa.bairi': {
     run({ g, player }) {
-      g.tianfa[player] = { blockKind: 'meditation', value: 6, damageCount: 0 };
+      g.tianfa[player] = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
       logLine(
         g,
         `${pname(player)} 「白昼之火」激活：直到本回合结束前，你的攻击不可用防御骰抵挡（只能用冥想骰），且攻击点数始终视为 6`,
@@ -1147,7 +1177,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 陨落（激活）：本回合攻击点数视为 6，且对方只能用攻击骰抵挡 */
   'tianfa.yunluo': {
     run({ g, player }) {
-      g.tianfa[player] = { blockKind: 'attack', value: 6, damageCount: 0 };
+      g.tianfa[player] = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
       logLine(
         g,
         `${pname(player)} 「陨落」激活：直到本回合结束前，你的攻击不可用防御骰抵挡（只能用攻击骰），且攻击点数始终视为 6`,
@@ -1158,7 +1188,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 深空之火（激活）：本回合攻击不可用防御骰抵挡（只能用冥想骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
   'tianfa.alt.shenkong': {
     run({ g, player }) {
-      g.tianfa[player] = { blockKind: 'meditation', damageCount: 0 };
+      g.tianfa[player] = { blockKind: 'meditation', damageCount: 0, key: 'tianfa.alt.shenkong' };
       g.players[player].buffs.push({ attr: 'attackDamage', add: 3, duration: 'thisTurn', source: '深空之火' });
       logLine(
         g,
@@ -1169,7 +1199,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 陨落（激活·异相）：本回合攻击不可用防御骰抵挡（只能用攻击骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
   'tianfa.alt.yunluo': {
     run({ g, player }) {
-      g.tianfa[player] = { blockKind: 'attack', damageCount: 0 };
+      g.tianfa[player] = { blockKind: 'attack', damageCount: 0, key: 'tianfa.alt.yunluo' };
       g.players[player].buffs.push({ attr: 'attackDamage', add: 3, duration: 'thisTurn', source: '陨落' });
       logLine(
         g,
@@ -1315,7 +1345,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       checkLifeTens(g, oppId);
       checkLifeTens(g, player);
       // L11 邪灵序曲：抹零属于**非伤害的"生命下降"** → 依然计数（自己那条是"回复"、不计）
-      if (oppDrop > 0) noteLifeDrop(g, oppId, oppDrop);
+      if (oppDrop > 0) {
+        noteLifeDrop(g, oppId, oppDrop);
+        // 动效旁路：抹零＝非伤害的"生命下降" → 仍飞**白墨线**（从 033 卡图 → 对方生命条），但界面**不抖**（drop=true）
+        fxSetSource({ player, artifactId: '033', side: 'only', skillKey: 'diaoling.charge' });
+        fxTrueLine(player, oppId, oppDrop, true);
+      }
     },
   },
   /** 死亡亦逝（持续）：实际结算在「回合结束」事件点（game.ts advancePhase） */
@@ -1454,16 +1489,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'miyun.lidichengfo': {
     run({ g, player }) {
       const oppId: PlayerId = player === 'A' ? 'B' : 'A';
-      // 快照符合条件的区域（有骰 && 点数种类恰 1 种；空区域不算）
-      const regions: { who: PlayerId; kind: DiceKind; ids: string[] }[] = [];
-      for (const who of ['A', 'B'] as PlayerId[]) {
-        for (const k of KINDS) {
-          const arr = g.players[who].areas[k];
-          if (arr.length === 0) continue;
-          if (new Set(arr.map((d) => d.value)).size !== 1) continue;
-          regions.push({ who, kind: k, ids: arr.map((d) => d.id) });
-        }
-      }
+      const regions = lidichengfoRegions(g); // 快照符合条件的区域（与界面"发动前预览"共用同一来源）
       const n = regions.length;
       logLine(
         g,

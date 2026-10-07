@@ -4,6 +4,7 @@ import { gainRandomAbilityDice, withRngState } from './effects';
 import { effectiveWill, totalDice } from './derive';
 import { logLine, pname, vals } from './log';
 import { applyMolu } from './combat';
+import { fxSkillFired } from './fx';
 
 /** 012/015/018 通用的「失去持续式效果」判定：持续技能的 key + 神器标记 */
 function findArtifactWithSkill(g: GameState, player: PlayerId, key: string) {
@@ -27,6 +28,8 @@ function checkZhihaiForced(g: GameState): boolean {
     const x = card.count;
     g.ultimatesUsed.push(skillUseKey(id, 'zhihai.bloom.ultimate'));
     card.continuousLost = true;
+    // 动效旁路：强制发动也要走"居中必杀横幅"（此前该路径完全不发事件 → 既无横幅也无气泡）
+    fxSkillFired(g, id, 'zhihai.bloom.ultimate');
     withRngState(g, (rng) => {
       const gained = gainRandomAbilityDice(g, id, x, rng);
       logLine(
@@ -35,9 +38,17 @@ function checkZhihaiForced(g: GameState): boolean {
       );
     });
     logLine(g, `「${card.name}」：本神器失去持续式效果`);
-    g.pending = { kind: 'zhihaiReroll', player: id, x, forced: true };
-    // 战术牌 T04「末路」：此为"启动必杀式"，同样触发（放在设置待决策之后，避免覆盖 heal 的 L10 待决策）
+    // 战术牌 T04「末路」：此为「启动必杀式」，同样触发。
+    // **先结算它的真伤**（此刻无待决策 → 对方 009 高塔铁幕 / 己方 T09 慈悲 的"取消"钩子能正常挂起，
+    // 与"手动发动必杀"路径行为一致）；**再**把「漆黑绽放重掷」设为当前待决策
+    //（若已被上面的取消钩子占用 → 排进队列，不覆盖）。
+    //
+    // ⚠️ 技术债（2026-10-07 用户裁定 B）：FAQ 18.1.2「同一技能的不同部分优先结算完毕」原意是
+    // "018 自己的重掷先于其它触发"；这里为了让"末路真伤可被取消"把顺序反过来（真伤先、重掷后）。
+    // 详见 plans/开发待办与方向.md §O。
     applyMolu(g, id);
+    if (g.pending === null) g.pending = { kind: 'zhihaiReroll', player: id, x, forced: true };
+    else queuePending(g, { kind: 'zhihaiReroll', player: id, x, forced: true });
     return true;
   }
   return false;

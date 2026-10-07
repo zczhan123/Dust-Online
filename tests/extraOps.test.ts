@@ -209,6 +209,19 @@ describe('顺序发动 · L03 拔城（点「发动拔城」才弹）', () => {
     applyAction(g, { t: 'bacheng', accept: false });
     expect(firedKeys()).not.toContain('batton.bacheng');
   });
+  it('accept:true → 补「切换」动效事件（主宰卡，mode switch）', () => {
+    const g = armed();
+    fxReset();
+    applyAction(g, { t: 'bacheng', accept: true });
+    const rise = fxTake().find((e) => e.kind === 'rise');
+    expect(rise).toMatchObject({ kind: 'rise', player: 'A', artifactId: '007', mode: 'switch' });
+  });
+  it('accept:false → 无「切换」动效事件', () => {
+    const g = armed();
+    fxReset();
+    applyAction(g, { t: 'bacheng', accept: false });
+    expect(fxTake().some((e) => e.kind === 'rise')).toBe(false);
+  });
 });
 
 describe('开局 · L03 无敌（首帧弹一次）', () => {

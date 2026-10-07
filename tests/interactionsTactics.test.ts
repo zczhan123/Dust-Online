@@ -3,6 +3,7 @@
 // 支付触发（026 威压）、规则顺序（T09 慈悲 vs 009）。逐卡自身的规则见 tacticsT*.test.ts。
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
+import { pumpPending } from '../src/core/engine/pending';
 import { applyMolu, dealTrueDamage, noteFirstDamageFromOpponent } from '../src/core/engine/combat';
 import type { GameState, PlayerId } from '../src/core/model/types';
 
@@ -35,6 +36,37 @@ describe('战术牌 × 神器/传奇 兼容性（机制）', () => {
     expect(g.pending?.kind).toBe('guwangCancel'); // 009 挂起取消
     expect(g.players.B.life).toBe(40); // 真伤未落下
     expect(g.players.A.life).toBe(24); // 末路"回复"仍结算（造成与否两行）
+  });
+
+  it('T04 末路 × 018 强制必杀 × 009：强制路径下末路真伤**也能**被取消（回归 2026-10-07 裁定 B）', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      heroA: ['001', '002', '018'], // 018 漆黑绽放（第三列）
+      heroB: ['007', '008', '009'], // 009 高塔铁幕
+      tacticA: 'T04',
+      tacticB: 'T03',
+    });
+    const bloom = art(g, 'A', '018');
+    const req = bloom.chargeReq ?? 0;
+    expect(req).toBeGreaterThan(0);
+    g.players.A.life = 20;
+    g.players.A.lifeMax = 50;
+    g.players.B.life = 40;
+    g.players.B.lifeMax = 50;
+    arm(g, 'B', '009', 'left');
+    g.players.B.areas.defense = [{ id: 'bd', value: 3, kind: 'defense' }];
+    bloom.activeMarkerSide = 'left';
+    bloom.armedSide = 'left';
+    bloom.armedTurn = g.turnIndex;
+    bloom.count = 5;
+
+    pumpPending(g); // 触发 018 强制必杀
+    // 末路真伤**先**挂起 009 的「取消」待决策（修复前：待决策是 zhihaiReroll、真伤被无声打实）
+    expect(g.pending?.kind).toBe('guwangCancel');
+    expect(g.players.B.life).toBe(40);
+    // 「漆黑绽放重掷」排在队列里（不覆盖、不丢失）
+    expect(g.pendingQueue.some((q) => q.kind === 'zhihaiReroll')).toBe(true);
   });
 
   it('T04 末路 × L11 永恒女王：末路致死真伤被拦截 → 目标不死', () => {

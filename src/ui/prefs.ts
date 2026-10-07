@@ -18,13 +18,15 @@ export interface Prefs {
   zoomPercent: number;
   /** 动画速度：正常 / 快（时长减半）。可省略＝正常；不参与「预设组合」 */
   animSpeed?: AnimSpeed;
+  /** 联机昵称（缓存；上限 6 字）。可省略＝「无名玩家」；不参与「预设组合」 */
+  nickName?: string;
 }
 
 export type AnimSpeed = 'normal' | 'fast';
 
 export type PresetId = 'desktop' | 'touch' | 'custom';
 
-type PresetValues = Omit<Prefs, 'preset' | 'animSpeed'>;
+type PresetValues = Omit<Prefs, 'preset' | 'animSpeed' | 'nickName'>;
 
 /** 电脑模式建议组合：紧凑 + 战报显示 + 完整卡图 + 技能显示 */
 export const DESKTOP_PRESET: PresetValues = {
@@ -61,6 +63,7 @@ export function clonePrefs(p: Prefs): Prefs {
     zoomMode: p.zoomMode,
     zoomPercent: p.zoomPercent,
     animSpeed: p.animSpeed,
+    nickName: p.nickName,
   };
 }
 
@@ -110,6 +113,9 @@ export function loadPrefs(): Prefs {
     }
     if (data?.animSpeed === 'normal' || data?.animSpeed === 'fast') {
       out.animSpeed = data.animSpeed;
+    }
+    if (typeof data?.nickName === 'string') {
+      out.nickName = data.nickName.slice(0, 6);
     }
     if (data?.preset === 'desktop' || data?.preset === 'touch' || data?.preset === 'custom') {
       out.preset = data.preset;

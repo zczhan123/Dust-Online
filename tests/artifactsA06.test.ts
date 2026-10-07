@@ -5,6 +5,7 @@ import { battleNotes } from '../src/core/engine/battleNotes';
 import { doAttack, resolveBlock, virtualAttack } from '../src/core/engine/combat';
 import { consumeDice } from '../src/core/engine/skills';
 import { paySlots } from '../src/core/engine/effects';
+import { fxReset, fxTake } from '../src/core/engine/fx';
 import type { GameState, PlayerId } from '../src/core/model/types';
 
 /** A 持 A06 虚臾（异相版 016）+ 002（第二列提供分布）+ 003；B 持 004/005/006 */
@@ -70,6 +71,20 @@ describe('A06「勾魂」（左激活·持续）', () => {
     const held = art(g, 'A', 'A06').heldDice ?? [];
     expect(held.map((d) => d.value)).toEqual([5]);
     expect(g.players.B.life).toBe(g.players.B.lifeMax - 5);
+  });
+
+  it('发出 `gouhun` 动效事件（攻击骰飞向神器标题栏、变灰）', () => {
+    const g = gA06();
+    arm(g, 'A', 'A06', 'left');
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a5', value: 5, kind: 'attack' }];
+    fxReset();
+    doAttack(g, 'A', [{ dieIds: ['a5'] }]);
+    resolveBlock(g);
+    const e = fxTake().find((x) => x.kind === 'gouhun');
+    expect(e).toMatchObject({ kind: 'gouhun', player: 'A', artifactId: 'A06', value: 5 });
+    if (e && e.kind === 'gouhun') expect(e.chipId).toBe('A-A06-held-5');
   });
 
   it('同值（5）再次造成伤害不重复放置；用值 3 造成伤害则追加', () => {

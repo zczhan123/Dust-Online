@@ -2,9 +2,10 @@ import type { Artifact, GameState, PendingAttack, PlayerId, PlayerState } from '
 import { hasActiveSkill, skillActive, skillUseKey } from './skill-state';
 import { pumpPending, queuePending } from './pending';
 import { runChargeSkill } from './charge';
+import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
-import { fxPush, fxTacticFired, fxSkillFired } from './fx';
+import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -321,9 +322,14 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   const loneLastAttackDie =
     g.players[player].areas.attack.length === 1 && hasActiveSkill(g.players[player], 'nisa.wujinzhulie');
   const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
+  // 025 屠虎·奇袭：本次攻击用「视为攻击骰」的骰发起 → 弹「奇袭」技能名
+  if (eff.some((d) => d.source === 'treated')) fxSkillFired(g, player, 'tuohu.qixi');
   const effDie = eff[0];
   // 028 天罚（激活·本回合）：攻击点数「始终视为固定值」（FAQ 28.1.1）；A05 异相无固定值（value 未设）→ 用骰点
   const tianfa = g.tianfa[player];
+  // 028 / A05：本回合"让对方**只能用非防御骰抵挡**"（白昼之火/深空之火→冥骰；陨落→攻击骰）＋点数视为6 / 伤害+3
+  // → **每次攻击**都弹其技能名（这是"抵消规则被改"的特殊效果；不是单纯加伤害）
+  if (tianfa) fxSkillFired(g, player, tianfa.key);
   const rawPoint = tianfa && tianfa.value !== undefined ? tianfa.value : effDie.value;
   const attackPoint = applyWuguang(g.players[player], rawPoint); // L06 无光领域：攻击点数 ±1（钳制 1–6）
   const base = attackDamageBonus(g, player);
@@ -652,11 +658,15 @@ export function afterAttackResolved(
     const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
     const def = g.players[defenderId];
     if (hasActiveSkill(def, 'batton.tongyuzhancang')) {
-      const guwang = def.artifacts.find((a) => a.skills.some((s) => s.key === 'guwang.charge'));
+      // 「孤王」＝第三列：009 用 `guwang.charge`、异相 A01 用 `guwang.alt.charge`——两种 key 都要认
+      const guwang = def.artifacts.find((a) =>
+        a.skills.some((s) => s.key === 'guwang.charge' || s.key === 'guwang.alt.charge'),
+      );
       if (guwang) {
         const cap = guwang.chargeReq ?? 0;
         if (guwang.chargeLayer < cap) {
-          guwang.chargeLayer += 1;
+          // **走唯一充能入口**（达标即设 activeMarkerSide 完成激活）→ 009 的触发/必杀、A01 的必杀才会就绪
+          chargeLayerUp(g, guwang);
           logLine(
             g,
             `${pname(defenderId)} 「统御战场」：受到攻击伤害 → 「${guwang.name}」充能 +1（${guwang.chargeLayer}/${cap}）`,
@@ -694,21 +704,26 @@ export function afterAttackResolved(
     if (gou && gsk && skillActive(gou, gsk)) {
       const held = gou.heldDice ?? (gou.heldDice = []);
       if (!held.some((h) => h.value === pa.sourceValue)) {
-        held.push({ id: `${pa.attacker}-${gou.id}-held-${pa.sourceValue}`, value: pa.sourceValue as number });
+        const chipId = `${pa.attacker}-${gou.id}-held-${pa.sourceValue}`;
+        held.push({ id: chipId, value: pa.sourceValue as number });
         logLine(g, `${pname(pa.attacker)} 「勾魂」：将本次攻击骰（${pa.sourceValue} 点）置于「${gou.name}」上`);
         fxSkillFired(g, pa.attacker, 'xuyu.alt.gouhun');
+        // 动效旁路：参考裁雨流——攻击骰从中间飞向该神器标题栏、变灰存放
+        fxPush({ kind: 'gouhun', player: pa.attacker, artifactId: gou.id, chipId, value: pa.sourceValue as number });
       }
     }
   }
   // 001 裁雨流：当你使用攻击骰造成伤害后（每回合最多 3 次）
   if (res.damageDealt > 0 && pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined) {
     if (hasActiveSkill(atk, 'yuqie.caiyuliu') && g.caiyuliuUsed < 3) {
+      fxPush({ kind: 'holdAttackDie', player: pa.attacker, dieId: pa.sourceDieId }); // 攻击骰先停在中间，等玩家决定
       queuePending(g, { kind: 'caiyuliu', player: pa.attacker, dieId: pa.sourceDieId, value: pa.sourceValue });
     }
   }
   // C01 特典·极之境·裁雨流（触发）：使用攻击骰造成伤害后，可重掷该骰并按新点数落区（无次数上限）
-  if (res.damageDealt > 0 && pa.physical && pa.sourceValue !== undefined && hasActiveSkill(atk, 'c01.caiyuliu')) {
-    queuePending(g, { kind: 'c01Caiyuliu', player: pa.attacker });
+  if (res.damageDealt > 0 && pa.physical && pa.sourceDieId !== undefined && pa.sourceValue !== undefined && hasActiveSkill(atk, 'c01.caiyuliu')) {
+    fxPush({ kind: 'holdAttackDie', player: pa.attacker, dieId: pa.sourceDieId });
+    queuePending(g, { kind: 'c01Caiyuliu', player: pa.attacker, dieId: pa.sourceDieId });
   }
   // 019 尘哀·尘起：你在自己的回合中通过攻击造成伤害后（每回合最多 1 次）
   if (
@@ -811,9 +826,11 @@ export function dealTrueDamage(
   target: PlayerId,
   amount: number,
   source: PlayerId,
-  opts?: { skipCibei?: boolean },
+  opts?: { skipCibei?: boolean; skipLine?: boolean },
 ): void {
   const p = g.players[target];
+  // 动效旁路：真伤"发动即报"（白墨线）——在**任何取消/延后判定之前**发，保证"不管最终有没有造成伤害"都飞线
+  if (!opts?.skipLine && amount > 0) fxTrueLine(source, target, amount);
   // 战术牌 T09「慈悲」：**造成者**可将"将造成的真实伤害"取消并改为回复等量生命（整局 1 次）；
   //   `skipCibei` 用于"不发动"后按原路重走（避免再次挂起）。
   if (
@@ -826,7 +843,6 @@ export function dealTrueDamage(
     !g.players[source].tacticOnceUsed
   ) {
     g.pending = { kind: 'ciBei', player: source, target, amount };
-    fxTacticFired(g, source);
     return; // 伤害延后到决策解决时结算
   }
   // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）

@@ -9,6 +9,7 @@ import {
   validateQuanzhiAssign,
 } from '../src/core/engine/game';
 import { SKILL_HANDLERS } from '../src/core/engine/skills';
+import { fxTake } from '../src/core/engine/fx';
 import { battleNotes } from '../src/core/engine/battleNotes';
 import { effectiveSpeed } from '../src/core/engine/derive';
 import { SeededRng } from '../src/core/rng/rng';
@@ -48,15 +49,15 @@ describe('028 天罚（白昼之火 / 陨落）', () => {
     const g = mateGame();
     toMain(g);
     runSkill(g, 'A', '028', 'tianfa.bairi');
-    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', value: 6, damageCount: 0 });
+    expect(g.tianfa.A).toEqual({ blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' });
     runSkill(g, 'A', '028', 'tianfa.yunluo');
-    expect(g.tianfa.A).toEqual({ blockKind: 'attack', value: 6, damageCount: 0 });
+    expect(g.tianfa.A).toEqual({ blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' });
   });
 
   it('白昼之火：攻击点数视为 6（与骰面无关），对方只能用冥想骰抵挡', () => {
     const g = mateGame();
     toMain(g);
-    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     clear(g, 'A');
     clear(g, 'B');
     g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
@@ -80,7 +81,7 @@ describe('028 天罚（白昼之火 / 陨落）', () => {
   it('陨落：对方用攻击骰抵挡（= “使用攻击骰” 的路径）；若没有则必须显式“不抵挡”并直接受伤', () => {
     const g = mateGame();
     toMain(g);
-    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
     clear(g, 'A');
     clear(g, 'B');
     g.players.A.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' }];
@@ -98,7 +99,7 @@ describe('028 天罚（白昼之火 / 陨落）', () => {
   it('本回合通过攻击造成 2 次伤害后，立即结束主要阶段', () => {
     const g = mateGame();
     toMain(g);
-    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     clear(g, 'A');
     clear(g, 'B');
     g.players.A.areas.attack = [
@@ -117,16 +118,42 @@ describe('028 天罚（白昼之火 / 陨落）', () => {
   it('战斗提示：白昼之火 / 陨落按当前状态登记', () => {
     const g = mateGame();
     toMain(g);
-    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
     expect(battleNotes(g, 'A')).toContainEqual({
       label: '白昼之火',
       text: '本回合攻击点数视为 6，且对方只能用冥想骰抵挡',
     });
-    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0 };
+    g.tianfa.A = { blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' };
     expect(battleNotes(g, 'A')).toContainEqual({
       label: '陨落',
       text: '本回合攻击点数视为 6，且对方只能用攻击骰抵挡',
     });
+  });
+});
+
+// 028 / A05：生效期间**每次攻击**都弹其技能名（"让对方只能用非防御骰抵挡"的特殊效果）
+describe('028 攻击时弹技能名', () => {
+  it('白昼之火生效期间攻击 → fxTake 含 {skillFired, tianfa.bairi}', () => {
+    const g = mateGame();
+    toMain(g);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tianfa.bairi')).toBe(true);
+  });
+
+  it('未发动（tianfa=null）时攻击 → 不发 tianfa 技能名', () => {
+    const g = mateGame();
+    toMain(g);
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    expect(
+      fxTake().some((e) => e.kind === 'skillFired' && (e.skillKey ?? '').startsWith('tianfa.')),
+    ).toBe(false);
   });
 });
 

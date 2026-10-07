@@ -9,6 +9,9 @@ import {
   renderSetup,
   type SetupOptions,
 } from '../src/ui/setupScreen';
+import { NetSession } from '../src/net/session';
+import { InMemoryBus } from '../src/net/memory';
+import type { RoomConfig } from '../src/net/protocol';
 
 type El = HTMLElement;
 const q = <T extends El = El>(root: El, sel: string): T | null => root.querySelector<T>(sel);
@@ -474,6 +477,92 @@ describe('renderRotationSetup（轮选模式）', () => {
     expect(q(root, '.pick-step-n')!.textContent).toBe('第 1/6 步');
     expect(qa(root, '.pick-boardwrap .pick-slot.removed')).toHaveLength(0);
     expect(legal()).toHaveLength(9);
+  });
+});
+
+describe('联机 · 轮选（setupScreen）', () => {
+  const cfg: RoomConfig = {
+    mode: 'draft',
+    first: 'host',
+    alt: false,
+    legend: false,
+    tactics: false,
+    turnSeconds: 30,
+    allowSpectators: true,
+    note: '',
+  };
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  const second = (): El => document.body.appendChild(document.createElement('div'));
+
+  it('来客首帧牌池为空 → 占位「等待房主发牌…」（不建格、不报错）；房主重随广播到达后出 9 格', async () => {
+    const bus = new InMemoryBus();
+    const host = new NetSession(bus.connect(), '房主');
+    const guest = new NetSession(bus.connect(), '来客');
+    await flush();
+    const roomId = host.createRoom(cfg);
+    await flush();
+    renderRotationSetup(root, () => {}, { session: host, onExit: () => {} }); // 房主先渲染（无来客）
+    const rootG = second();
+    guest.joinRoom(roomId);
+    renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} }); // 立刻挂来客 UI（广播未到）
+    expect(q(rootG, '.pick-gridwait')!.textContent).toContain('等待房主发牌');
+    expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(0);
+    await flush(); // 房主"来客加入→重随+广播"到达
+    expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(9);
+    host.close();
+    guest.close();
+  });
+
+  it('非操作者（来客）九宫格"还没被选走"的置灰、不可点（无 legal），仍带 data-card-id（可看技能）', async () => {
+    const bus = new InMemoryBus();
+    const host = new NetSession(bus.connect(), '房主');
+    const guest = new NetSession(bus.connect(), '来客');
+    await flush();
+    const roomId = host.createRoom(cfg);
+    await flush();
+    renderRotationSetup(root, () => {}, { session: host, onExit: () => {} });
+    const rootG = second();
+    guest.joinRoom(roomId);
+    renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} });
+    await flush();
+    // 来客＝非操作者（先手 A）：9 格全置灰、无可点框、仍可右键看技能
+    expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(9);
+    expect(qa(rootG, '.pick-boardwrap .pick-slot--wait')).toHaveLength(9);
+    expect(qa(rootG, '.pick-boardwrap .pick-slot.legal')).toHaveLength(0);
+    expect(q(rootG, '.pick-boardwrap .pick-slot--wait[data-card-id]')).not.toBeNull();
+    // 房主＝操作者：不置灰、9 格可点
+    expect(qa(root, '.pick-boardwrap .pick-slot--wait')).toHaveLength(0);
+    expect(qa(root, '.pick-boardwrap .pick-slot.legal')).toHaveLength(9);
+    host.close();
+    guest.close();
+  });
+
+  it('「重新随机」门禁：来客禁用；房主(来客已到·未开始)可点；房主单人(无来客)禁用', async () => {
+    const bus = new InMemoryBus();
+    const host = new NetSession(bus.connect(), '房主');
+    const guest = new NetSession(bus.connect(), '来客');
+    await flush();
+    const roomId = host.createRoom(cfg);
+    await flush();
+    renderRotationSetup(root, () => {}, { session: host, onExit: () => {} });
+    const rootG = second();
+    guest.joinRoom(roomId);
+    renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} });
+    await flush();
+    expect(q<HTMLButtonElement>(rootG, '.pick-reroll')!.disabled).toBe(true); // 来客不能重随
+    expect(q<HTMLButtonElement>(root, '.pick-reroll')!.disabled).toBe(false); // 房主可
+    host.close();
+    guest.close();
+
+    const bus2 = new InMemoryBus();
+    const host2 = new NetSession(bus2.connect(), '房主');
+    await flush();
+    host2.createRoom(cfg);
+    await flush();
+    const rootH = second();
+    renderRotationSetup(rootH, () => {}, { session: host2, onExit: () => {} });
+    expect(q<HTMLButtonElement>(rootH, '.pick-reroll')!.disabled).toBe(true); // 来客未到 → 禁用
+    host2.close();
   });
 });
 

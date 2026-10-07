@@ -449,6 +449,8 @@ export function paySlots(
         source: found ? (treated ? 'treated' : 'real') : 'artifact',
         realIds: [ids[0]],
       });
+      // 034/A03 金刚·破障：用「神器上的存放骰」当能力骰支付 → 弹「破障」技能名
+      if (!found) fxSkillFired(g, player, 'jingang.pozhang.continuous');
       if (treated && actualKind !== kind) {
         logLine(
           g,
@@ -488,6 +490,9 @@ export function paySlots(
       ...(fromCard.length > 0 ? { fromCard } : {}),
     });
   }
+  // 010/A02「真实之剑」：本次支付**用了置换** → 弹其技能名。
+  // （攻击/抵挡/尘起 时只弹它；某技能用剑代价时 → 与那个技能名**同帧各弹一个**。）
+  if (converted.length > 0) fxSkillFired(g, player, 'shenhong.sword');
   // 战术牌 T15「影子」：**使用**（攻击/抵挡/尘起支付；不含「消耗」）与存放骰同点数的能力骰后 →
   //   立即把存放骰移入"该点数对应的区域"（整局 1 次）。存放骰本身不属于任何区域。
   if (reason === 'attack' || reason === 'defense' || reason === 'dustRise') {

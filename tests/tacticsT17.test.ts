@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { finalizeAttackResolution, dealTrueDamage } from '../src/core/engine/combat';
+import { fxTake } from '../src/core/engine/fx';
 import { TACTIC_POOL } from '../src/core/content/tactics';
 import type { GameState, PendingAttack } from '../src/core/model/types';
 
@@ -42,6 +43,8 @@ describe('T17「诱敌」', () => {
     expect(g.players.A.areas.attack).toHaveLength(0);
     expect(g.players.A.areas.defense.map((d) => d.value).sort()).toEqual([3, 5]); // 保留点数
     expect(g.players.A.tacticOnceUsed).toBe(true);
+    // O-2：换区走统一入口 `moveDice` → 必须发 `move` 旁路事件（不再靠界面"对比 DOM 猜"）
+    expect(fxTake()).toContainEqual({ kind: 'move', player: 'A', dieIds: ['x', 'y'] });
   });
 
   it('不发动：不消耗整局 1 次（下次受伤可再挂）', () => {
