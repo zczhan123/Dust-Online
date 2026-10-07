@@ -496,37 +496,46 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
   // 007 战争横扫：消耗 1 攻 + 1 防 + 1 冥（**合并为一步**）→ 弃对方 0–1 攻/防/冥（**合并为一步**）。
   // 注意：007 为第一列，与 010「真实之剑」永不同队 → 无置换路径（故不涉及 slots）。
   'zhuzai.sweep': {
-    steps: () => [
-      {
-        kind: 'dice',
-        label: '选择消耗的 3 颗能力骰（攻击 / 防御 / 冥想 各 1 颗）',
-        owner: 'self',
-        areas: ['attack', 'defense', 'meditation'],
-        min: 3,
-        max: 3,
-        allowArtifact: true,
-        validate: (dice) => {
-          const kinds = dice.map((d) => d.kind);
-          return kinds.length === 3 && new Set(kinds).size === 3
-            ? { ok: true, hint: '三类各 1 颗 ✓' }
-            : { ok: false, hint: '必须攻击 / 防御 / 冥想 各选 1 颗' };
+    steps: ({ state, player }) => {
+      const oppAreas = state.players[oppOf(player)].areas;
+      const haveKinds = (['attack', 'defense', 'meditation'] as DiceKind[]).filter(
+        (k) => oppAreas[k].length > 0,
+      );
+      const steps: SelectStep[] = [
+        {
+          kind: 'dice',
+          label: '选择消耗的 3 颗能力骰（攻击 / 防御 / 冥想 各 1 颗）',
+          owner: 'self',
+          areas: ['attack', 'defense', 'meditation'],
+          min: 3,
+          max: 3,
+          allowArtifact: true,
+          validate: (dice) => {
+            const kinds = dice.map((d) => d.kind);
+            return kinds.length === 3 && new Set(kinds).size === 3
+              ? { ok: true, hint: '三类各 1 颗 ✓' }
+              : { ok: false, hint: '必须攻击 / 防御 / 冥想 各选 1 颗' };
+          },
         },
-      },
-      {
-        kind: 'dice',
-        label: '选择弃置对方的能力骰（攻 / 防 / 冥想 各 0–1 颗，不足可跳过）',
-        owner: 'opponent',
-        areas: ['attack', 'defense', 'meditation'],
-        min: 0,
-        max: 3,
-        validate: (dice) => {
-          const kinds = dice.map((d) => d.kind);
-          return new Set(kinds).size === kinds.length
-            ? { ok: true }
-            : { ok: false, hint: '每种类型最多弃 1 颗' };
-        },
-      },
-    ],
+      ];
+      // 「能弃则必须弃」：对方**有**的类别各必弃 1 颗（缺类自动跳过；对方全空 → 无此步）
+      if (haveKinds.length > 0) {
+        const names = haveKinds.map((k) => KIND_CN[k]).join(' / ');
+        steps.push({
+          kind: 'dice',
+          label: `选择弃置对方的能力骰（${names} 各 1 颗）`,
+          owner: 'opponent',
+          areas: haveKinds,
+          min: haveKinds.length,
+          max: haveKinds.length,
+          validate: (dice) =>
+            new Set(dice.map((d) => d.kind)).size === dice.length
+              ? { ok: true }
+              : { ok: false, hint: '每种类型各 1 颗' },
+        });
+      }
+      return steps;
+    },
     buildParams: ({ state, player, chosenDice }) => {
       const oppId = oppOf(player);
       const byKind = (ids: string[], owner: PlayerId): Partial<Record<DiceKind, string>> => {
@@ -552,7 +561,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
   },
   // 007 震荡斩击：选类型 → 消耗 4 颗同类型（显式）→ 弃对方 0–4 颗同类型（显式）
   'zhuzai.smash': {
-    steps: ({ options }) => {
+    steps: ({ state, player, options }) => {
       const kind = options[0];
       const name = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
       const steps: SelectStep[] = [
@@ -568,7 +577,16 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       ];
       if (kind === 'attack' || kind === 'defense' || kind === 'meditation') {
         steps.push({ kind: 'dice', label: `选择消耗的 4 个${name}骰`, owner: 'self', areas: [kind], min: 4, max: 4, allowArtifact: true });
-        steps.push({ kind: 'dice', label: `选择弃置对方的${name}骰（0–4 颗，不足可跳过）`, owner: 'opponent', areas: [kind], min: 0, max: 4 });
+        // 「能弃则必须弃」：恰弃 min(4, 对方该类骰数) 颗
+        const need = Math.min(4, state.players[oppOf(player)].areas[kind].length);
+        steps.push({
+          kind: 'dice',
+          label: `选择弃置对方的${name}骰（恰好 ${need} 颗${need === 4 ? '' : '（对方只有这么多）'}）`,
+          owner: 'opponent',
+          areas: [kind],
+          min: need,
+          max: need,
+        });
       }
       return steps;
     },

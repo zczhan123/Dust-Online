@@ -1919,13 +1919,16 @@ describe('renderGame (interaction)', () => {
     expect(ok2.disabled).toBe(false);
     ok2.click();
 
-    // step 3: pick opponent attack dice (0-4); choose one
-    const od = root.querySelector<HTMLElement>('.player--enemy .die[data-id="o1"]')!;
-    expect(od).not.toBeNull();
-    od.click();
+    // step 3: 弃置对方（「能弃则必须弃」→ 恰好 min(4, 对方 2 颗)＝2 颗）
+    for (const id of ['o1', 'o2']) {
+      const od = root.querySelector<HTMLElement>(`.player--enemy .die[data-id="${id}"]`)!;
+      expect(od).not.toBeNull();
+      od.click();
+    }
     const ok3 = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
       (b) => b.textContent === '确认',
     )!;
+    expect(ok3.disabled).toBe(false);
     ok3.click();
 
     expect(onAction).not.toHaveBeenCalled();
@@ -1937,7 +1940,7 @@ describe('renderGame (interaction)', () => {
       params: {
         kind: 'attack',
         costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['c4'] }],
-        opponentDiscardIds: ['o1'],
+        opponentDiscardIds: ['o1', 'o2'],
       },
     });
   });

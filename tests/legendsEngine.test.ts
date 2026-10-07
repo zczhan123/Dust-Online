@@ -380,7 +380,9 @@ describe('L03 拔城 + 统御战场', () => {
     p.areas.attack.push(die('a1', 3, 'attack'));
     p.areas.defense.push(die('d1', 1, 'defense'));
     p.areas.meditation.push(die('m1', 2, 'meditation'));
-    g.players.B.areas.defense.push(die('b1', 6, 'defense')); // 对方只有 1 颗防御骰可弃（< 我消耗的 3）
+    // 对方**只剩** 1 颗防御骰（攻/冥清空）→「弃置数 1 < 消耗数 3」→ 拔城可发动（**合法缺类**路径）
+    for (const k of ['attack', 'defense', 'meditation'] as const) g.players.B.areas[k] = [];
+    g.players.B.areas.defense.push(die('b1', 6, 'defense'));
     const act: Action = {
       t: 'skill',
       artifactId: '007',

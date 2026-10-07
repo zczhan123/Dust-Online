@@ -669,6 +669,19 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'zhuzai.sweep': {
     run({ g, player, params, reportConsumed }) {
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const discard = (params.discard ?? {}) as { attack?: string; defense?: string; meditation?: string };
+      // 「能弃则必须弃」（卡面未写"可少弃"；FAQ 7.1.1 只免"对方缺该类"）→ **先校验、后落状态**
+      const CN7: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
+      for (const k of ['attack', 'defense', 'meditation'] as const) {
+        const area = g.players[opp].areas[k];
+        const id = discard[k];
+        if (area.length > 0 && !(id && area.some((d) => d.id === id))) {
+          throw new Error(`「战争横扫」：对方有${CN7[k]}骰，必须弃置 1 颗`);
+        }
+        if (area.length === 0 && id) {
+          throw new Error(`「战争横扫」：对方没有${CN7[k]}骰，不能指定弃置`);
+        }
+      }
       const effective = paySlots(
         g,
         player,
@@ -676,14 +689,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         (params.costSlots as SlotFill[] | undefined) ?? [],
         reportConsumed,
       );
-      const discard = (params.discard ?? {}) as { attack?: string; defense?: string; meditation?: string };
       let sum = 0;
       for (const e of effective) sum += e.value;
       let discarded = 0;
       const oppByKind: Partial<Record<DiceKind, string[]>> = {};
       for (const k of ['attack', 'defense', 'meditation'] as const) {
         const id = discard[k];
-        if (id && g.players[opp].areas[k].some((d) => d.id === id)) {
+        if (id) {
           (oppByKind[k] ??= []).push(id);
           discarded++;
         }
@@ -704,6 +716,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
       const kind = params.kind as DiceKind;
       if (kind !== 'attack' && kind !== 'defense' && kind !== 'meditation') throw new Error('invalid kind');
+      // 「能弃则必须弃」：恰弃 `min(4, 对方该类骰数)` 颗 → **先校验、后落状态**
+      const oppArea = g.players[opp].areas[kind];
+      const required = Math.min(4, oppArea.length);
+      const oppIds = ((params.opponentDiscardIds as string[]) ?? []).filter((id) =>
+        oppArea.some((d) => d.id === id),
+      );
+      if (oppIds.length !== required || new Set(oppIds).size !== oppIds.length) {
+        throw new Error(`「震荡斩击」：需弃置对方恰好 ${required} 颗同类型能力骰`);
+      }
       const effective = paySlots(
         g,
         player,
@@ -713,9 +734,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
       let sum = 0;
       for (const e of effective) sum += e.value;
-      const oppIds = ((params.opponentDiscardIds as string[]) ?? [])
-        .filter((id) => g.players[opp].areas[kind].some((d) => d.id === id))
-        .slice(0, 4);
       if (oppIds.length) consumeDice(g, g.players[opp], kind, oppIds);
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg, player);

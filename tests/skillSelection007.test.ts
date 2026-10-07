@@ -34,8 +34,25 @@ describe('007 战争横扫 · 2 步交互', () => {
     expect(cost.max).toBe(3);
     expect(cost.areas).toEqual(['attack', 'defense', 'meditation']);
     expect(disc.owner).toBe('opponent');
-    expect(disc.min).toBe(0);
+    // 「能弃则必须弃」：对方有的类别各必弃 1 颗 → 本例对方三类都有 → 3 颗
+    expect(disc.min).toBe(3);
     expect(disc.max).toBe(3);
+  });
+
+  it('「能弃则必须弃」：对方缺类 → 只列有的类别且必弃数=类别数；对方全空 → 无弃置步', () => {
+    const g = mk();
+    g.players.B.areas.attack = [];
+    g.players.B.areas.meditation = [];
+    const s1 = stepsOf(g);
+    expect(s1.map((x) => x.kind)).toEqual(['dice', 'dice']);
+    const disc1 = s1[1];
+    if (disc1.kind !== 'dice') throw new Error('expect dice');
+    expect(disc1.areas).toEqual(['defense']);
+    expect(disc1.min).toBe(1);
+    expect(disc1.max).toBe(1);
+
+    for (const k of ['attack', 'defense', 'meditation'] as const) g.players.B.areas[k] = [];
+    expect(stepsOf(g).map((x) => x.kind)).toEqual(['dice']); // 对方全空 → 整步省略
   });
 
   it('代价校验：三类各 1 颗 ✓；缺类 / 重复类 / 不足 3 颗 ✗', () => {

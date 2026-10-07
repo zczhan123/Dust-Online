@@ -469,7 +469,7 @@ describe('007 主宰', () => {
     expect(g.players.A.areas.meditation).toHaveLength(0);
   });
 
-  it('震荡斩击: consumes 4 same-type dice, discards up to 4 opponent same-type, deals floor(sum/2)', () => {
+  it('震荡斩击: consumes 4 same-type dice, discards exactly min(4, 对方该类数) 颗, deals floor(sum/2)', () => {
     const g = setup007('right');
     g.players.A.areas.attack = [
       { id: 'c1', value: 2, kind: 'attack' },
@@ -493,13 +493,43 @@ describe('007 主宰', () => {
       params: {
         kind: 'attack',
         costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['c4'] }],
-        opponentDiscardIds: ['o1', 'o2', 'o3'],
+        opponentDiscardIds: ['o1', 'o2', 'o3', 'o4'],
       },
     });
-    // sum = 2+3+4+5 = 14 -> 7 true damage; c5 remains; o4/o5 remain
+    // sum = 2+3+4+5 = 14 -> 7 true damage；「能弃则必须弃」→ 对方有 5 颗，恰弃 4 颗；c5/o5 留下
     expect(g.players.B.life).toBe(lifeBefore - 7);
     expect(g.players.A.areas.attack.map((d) => d.id)).toEqual(['c5']);
-    expect(g.players.B.areas.attack.map((d) => d.id)).toEqual(['o4', 'o5']);
+    expect(g.players.B.areas.attack.map((d) => d.id)).toEqual(['o5']);
+  });
+
+  it('震荡斩击（能弃则必须弃）：少弃 → 抛错且状态不变', () => {
+    const g = setup007('right');
+    g.players.A.areas.attack = [
+      { id: 'c1', value: 2, kind: 'attack' },
+      { id: 'c2', value: 3, kind: 'attack' },
+      { id: 'c3', value: 4, kind: 'attack' },
+      { id: 'c4', value: 5, kind: 'attack' },
+    ];
+    g.players.B.areas.attack = [
+      { id: 'o1', value: 1, kind: 'attack' },
+      { id: 'o2', value: 1, kind: 'attack' },
+    ];
+    const lifeBefore = g.players.B.life;
+    expect(() =>
+      applyAction(g, {
+        t: 'skill',
+        artifactId: '007',
+        side: 'right',
+        params: {
+          kind: 'attack',
+          costSlots: [{ dieIds: ['c1'] }, { dieIds: ['c2'] }, { dieIds: ['c3'] }, { dieIds: ['c4'] }],
+          opponentDiscardIds: ['o1'], // 对方有 2 颗 → 必须弃 2 颗
+        },
+      }),
+    ).toThrow();
+    expect(g.players.A.areas.attack).toHaveLength(4); // 代价未消耗
+    expect(g.players.B.areas.attack).toHaveLength(2);
+    expect(g.players.B.life).toBe(lifeBefore);
   });
 
   it('震荡斩击: rejects fewer than 4 dice and dice not owned by the player', () => {
