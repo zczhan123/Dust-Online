@@ -31,6 +31,10 @@ export interface ChallengeCard {
   life?: number;
   defenseCap?: number;
   defenseRule?: string;
+  /** 回合开始投掷的驱动骰数量（必须与 skills[0] 的卡面文字一致——有测试锁） */
+  rollDice?: number;
+  /** 传奇「计数」上限（Z02「锋芒」X / 「暗夜凶神」+1 用）；无计数的卡不填 */
+  countCap?: number;
   skills?: ChallengeSkill[];
 }
 
@@ -50,6 +54,7 @@ export const CHALLENGES: ChallengeCard[] = [
   {
     id: 'Z02', legacy: '永暗之刃', artifacts: ['004', '005', '006'],
     life: 50, defenseCap: 4, defenseRule: '只抵挡伤害 ≥ 3 的攻击',
+    rollDice: 8, countCap: 3,
     skills: [
       { id: 'z02-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },
       { id: 'z02-1', name: '锋芒', marker: '∞', slots: null, effect: '「永暗之刃」的攻击伤害 +X。X 为「永暗之刃」叠加的计数。' },

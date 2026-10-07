@@ -45,4 +45,15 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
     expect(slotPhrase(z2.skills![3].slots)).toBe('（满足〔1点、4点、6点〕驱动骰时发动）');
     expect(slotPhrase(z2.skills![5].slots)).toBe('（满足 2 个任意相同点数驱动骰时发动）');
   });
+
+  it('Z02 元数据：投 8 个驱动骰、计数上限 3、防御骰上限 4、生命 50', () => {
+    const z2 = CHALLENGES.find((c) => c.id === 'Z02')!;
+    expect(z2.rollDice).toBe(8);
+    expect(z2.countCap).toBe(3);
+    expect(z2.defenseCap).toBe(4);
+    expect(z2.life).toBe(50);
+    // 与"回合开始"那条的卡面文字必须一致（防两处漂移）
+    expect(z2.skills![0].name).toBe('回合开始');
+    expect(z2.skills![0].effect).toContain('8');
+  });
 });
