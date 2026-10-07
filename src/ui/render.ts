@@ -16,6 +16,7 @@ import { isAltArtifact } from '../core/content/artifacts';
 import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
+import { CHALLENGE_RULE_NOTES } from '../core/content/challenges';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
@@ -151,6 +152,8 @@ export interface UiState {
   prefs: Prefs;
   /** 设置面板是否打开 */
   settingsOpen: boolean;
+  /** 挑战模式：是否打开「挑战模式特殊规则」浮窗 */
+  challengeRulesOpen?: boolean;
   /** 联机·战斗界面「退出对局」二次确认弹框是否打开 */
   onlineLeaveOpen?: boolean;
   /** 战报抽屉是否打开（战报栏收起时用） */
@@ -4267,6 +4270,47 @@ function resetPrefs(ctx: Ctx): void {
 }
 
 /** 设置面板（左上角「设置」按钮打开） */
+/** 挑战模式「特殊规则（技能削弱）」浮窗：数据唯一来源 `CHALLENGE_RULE_NOTES`。 */
+function challengeRulesPanel(ctx: Ctx): HTMLElement {
+  const ui = ctx.hooks.ui;
+  const overlay = el('div', 'settings-overlay');
+  overlay.dataset.act = 'challengeRulesOverlay';
+  const box = el('div', 'settings-panel');
+
+  const head = el('div', 'settings-head');
+  const title = el('div', 'settings-title');
+  title.textContent = '挑战模式特殊规则';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel settings-close';
+  close.dataset.act = 'challengeRulesClose';
+  close.textContent = '✕';
+  close.addEventListener('click', () => {
+    ui.challengeRulesOpen = false;
+    ctx.hooks.requestRender();
+  });
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const lead = el('div', 'confirm-hint');
+  lead.textContent = '本模式下以下技能按 FAQ 特殊处理（点设置旁的按钮随时可看）。';
+  box.appendChild(lead);
+
+  for (const note of CHALLENGE_RULE_NOTES) {
+    const row = el('div', 'settings-row');
+    const lab = el('span', 'settings-label');
+    lab.textContent = note.title;
+    row.appendChild(lab);
+    const txt = el('div', 'hint-notes');
+    txt.textContent = note.text;
+    row.appendChild(txt);
+    box.appendChild(row);
+  }
+  overlay.appendChild(box);
+  return overlay;
+}
+
 function settingsPanel(ctx: Ctx): HTMLElement {
   const ui = ctx.hooks.ui;
   const overlay = el('div', 'settings-overlay');
@@ -5719,6 +5763,19 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 中段右侧槽：保留原先"双方生命"的占地（留空），放置「设置」按钮；高度随 stretch 与操作栏齐平
   const right = el('div', 'centerband-right');
   right.appendChild(settingsBtn);
+  // 挑战模式：设置旁加「挑战模式特殊规则」（浮窗＝本模式技能削弱清单）
+  if (state.mode === 'challenge') {
+    const rulesBtn = document.createElement('button');
+    rulesBtn.type = 'button';
+    rulesBtn.className = 'btn btn-settings';
+    rulesBtn.dataset.act = 'challengeRulesOpen';
+    rulesBtn.textContent = '挑战模式特殊规则';
+    rulesBtn.addEventListener('click', () => {
+      hooks.ui.challengeRulesOpen = true;
+      hooks.requestRender();
+    });
+    right.appendChild(rulesBtn);
+  }
   // 联机：设置旁加「聊天」按钮（开右上聊天浮层）；再加「退出对局」（对局中途可退出，不会被困住）
   if (hooks.online && hooks.online.onChat) {
     const chatBtn = document.createElement('button');
@@ -5767,6 +5824,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   if (hooks.ui.settingsOpen) {
     root.appendChild(settingsPanel(ctx));
+  }
+  if (hooks.ui.challengeRulesOpen) {
+    root.appendChild(challengeRulesPanel(ctx));
   }
   if (hooks.ui.logOpen) {
     root.appendChild(logDrawer(ctx));
