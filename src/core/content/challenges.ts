@@ -31,6 +31,8 @@ export interface ChallengeCard {
   life?: number;
   defenseCap?: number;
   defenseRule?: string;
+  /** 防御规则的门槛（只会抵挡**伤害 ≥ 该值**的攻击）；缺省＝0（都挡） */
+  defenseMin?: number;
   /** 回合开始投掷的驱动骰数量（必须与 skills[0] 的卡面文字一致——有测试锁） */
   rollDice?: number;
   /** 传奇「计数」上限（Z02「锋芒」X / 「暗夜凶神」+1 用）；无计数的卡不填 */
@@ -41,7 +43,7 @@ export interface ChallengeCard {
 export const CHALLENGES: ChallengeCard[] = [
   {
     id: 'Z01', legacy: '雨中剑圣', artifacts: ['001', '002', '003'],
-    life: 50, defenseCap: 5, defenseRule: '只抵挡伤害 ≥ 2 的攻击',
+    life: 50, defenseCap: 5, defenseRule: '只抵挡伤害 ≥ 2 的攻击', defenseMin: 2,
     skills: [
       { id: 'z01-0', name: '回合开始', slots: null, effect: '投掷 7 个驱动骰。' },
       { id: 'z01-1', name: '龙游万象', marker: '∞', slots: null, effect: '将所有 1 点 和 6 点 的驱动骰重新投掷 1 次。' },
@@ -53,7 +55,7 @@ export const CHALLENGES: ChallengeCard[] = [
   },
   {
     id: 'Z02', legacy: '永暗之刃', artifacts: ['004', '005', '006'],
-    life: 50, defenseCap: 4, defenseRule: '只抵挡伤害 ≥ 3 的攻击',
+    life: 50, defenseCap: 4, defenseRule: '只抵挡伤害 ≥ 3 的攻击', defenseMin: 3,
     rollDice: 8, countCap: 3,
     skills: [
       { id: 'z02-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },

@@ -15,7 +15,7 @@ import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
 import { CHALLENGES, type ChallengeCard, type ChallengeSkill } from '../content/challenges';
-import { matchSlots } from './challenge';
+import { matchSlots, legendCanBlock } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
@@ -1979,8 +1979,14 @@ export function getLegalActions(g: GameState): Action[] {
   if (g.pendingAttack) {
     const pa = g.pendingAttack;
     const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+    // 单人挑战：传奇按「防御规则」抵挡（伤害 < 门槛 → 不给任何抵挡动作＝自动不挡）
+    const card =
+      g.mode === 'challenge' && defender === 'B'
+        ? CHALLENGES.find((c) => c.id === g.challenge?.cardId)
+        : undefined;
+    const legendBlocks = card == null || legendCanBlock(card, pa.value);
     const acts: Action[] = [{ t: 'block' }];
-    if (!pa.unblockable) {
+    if (!pa.unblockable && legendBlocks) {
       // 028 天罚：只能用指定类型的骰抵挡（白昼之火=冥想 / 陨落=攻击）；否则用防御骰
       const kind = pa.blockKind ?? 'defense';
       for (const d of g.players[defender].areas[kind]) {
@@ -3241,11 +3247,18 @@ function applyActionCore(g: GameState, action: Action): GameState {
       const kind = pd.areaKind;
       const kindCn = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
       if (action.pick === 'gain') {
+        // 单人挑战：传奇没有冥想骰区 → 跳过给它的冥想骰（FAQ 23.2.3）
+        const skipLegend = g.mode === 'challenge' && opp === 'B' && kind === 'meditation';
         withRng(g, (rng) => {
           gainRandomDice(g, me, kind, 2, rng);
-          gainRandomDice(g, opp, kind, 2, rng);
+          if (!skipLegend) gainRandomDice(g, opp, kind, 2, rng);
         });
-        logLine(g, `「共振」：${pname(me)} 与 ${pname(opp)} 各获得 2 个随机点数的${kindCn}骰`);
+        logLine(
+          g,
+          skipLegend
+            ? `「共振」：${pname(me)} 获得 2 个随机点数的${kindCn}骰（单人挑战：跳过「昔日传奇」的那份）`
+            : `「共振」：${pname(me)} 与 ${pname(opp)} 各获得 2 个随机点数的${kindCn}骰`,
+        );
         break;
       }
       // ② 双方各弃置最多 2 颗该类型（由发起者选择；不足则尽可能，FAQ 23.2.2）

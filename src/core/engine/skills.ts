@@ -2,6 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
+import { isInertSkill } from './challenge';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
 import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
@@ -1185,6 +1186,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 白昼之火（激活）：本回合攻击点数视为 6，且对方只能用冥想骰抵挡 */
   'tianfa.bairi': {
     run({ g, player }) {
+      // 单人挑战：本模式下没有任何效果（见 CHALLENGE_RULE_NOTES / FAQ 28.1.2）
+      if (isInertSkill(g, 'tianfa.bairi')) {
+        logLine(g, `${pname(player)} 「白昼之火」：单人挑战中没有效果`);
+        return;
+      }
       g.tianfa[player] = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
       logLine(
         g,
@@ -1206,6 +1212,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 深空之火（激活）：本回合攻击不可用防御骰抵挡（只能用冥想骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
   'tianfa.alt.shenkong': {
     run({ g, player }) {
+      // 单人挑战：本模式下没有任何效果（A05 的「白昼之火」等价物；见 CHALLENGE_RULE_NOTES / FAQ 41.1.1）
+      if (isInertSkill(g, 'tianfa.alt.shenkong')) {
+        logLine(g, `${pname(player)} 「深空之火」：单人挑战中没有效果`);
+        return;
+      }
       g.tianfa[player] = { blockKind: 'meditation', damageCount: 0, key: 'tianfa.alt.shenkong' };
       g.players[player].buffs.push({ attr: 'attackDamage', add: 3, duration: 'thisTurn', source: '深空之火' });
       logLine(

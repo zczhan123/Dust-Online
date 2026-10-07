@@ -1,5 +1,5 @@
-import type { Die } from '../model/types';
-import type { ChallengeSlot } from '../content/challenges';
+import type { Die, GameState } from '../model/types';
+import { challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
 
 /** 从小到大、按 id 稳定排序（保证"确定性默认分配"可测）。 */
 function sortedDice(dice: Die[]): Die[] {
@@ -88,4 +88,14 @@ export function matchSlots(slots: ChallengeSlot[], driven: Die[]): string[] | nu
     return false;
   };
   return dfs(0) ? used : null;
+}
+
+/** 传奇按「防御规则」是否**愿意/可以**抵挡这次攻击（伤害 < 门槛 → 不挡）。 */
+export function legendCanBlock(card: ChallengeCard, damage: number): boolean {
+  return damage >= (card.defenseMin ?? 0);
+}
+
+/** 该神器技能在本局是否**整条失效**（挑战模式的"特殊规则"；唯一来源 `CHALLENGE_RULE_NOTES`）。 */
+export function isInertSkill(g: GameState, key: string): boolean {
+  return g.mode === 'challenge' && challengeInertSkills().has(key);
 }
