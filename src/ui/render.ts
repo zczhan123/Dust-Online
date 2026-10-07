@@ -25,8 +25,9 @@ import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
-import { anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
+import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
+import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
 
 const AREA_LABEL: Record<DiceKind, string> = {
@@ -5342,6 +5343,34 @@ function dustFlowView(ctx: Ctx): HTMLElement {
   return box;
 }
 
+/**
+ * 本帧要播的**阶段横幅序列**（纯函数，便于测试）。
+ *
+ * - 引擎会「没得做就自动翻页」，一次动作可能跨过多个阶段 → 这里按 `STANDARD_PHASES` 顺序
+ *   把**跨过/经过**的阶段横幅依次列出；`transient=true` ＝被跨越的**过渡段**（短停留）。
+ * - 换手（`prev.active !== now.active`）→ 首段 `${玩家名} · 回合开始`，且从新回合的头算起。
+ * - `prev = null`（首帧）或当前阶段不在标准阶段内（setup/tactics/initialReroll/gameOver）→ 空。
+ */
+export function phaseBannerSegs(
+  prev: { active: PlayerId; phase: Phase } | null,
+  now: { active: PlayerId; phase: Phase },
+  nameOf: (p: PlayerId) => string,
+): { text: string; transient: boolean }[] {
+  const segs: { text: string; transient: boolean }[] = [];
+  const idxOf = (p: Phase): number => STANDARD_PHASES.indexOf(p as (typeof STANDARD_PHASES)[number]);
+  const toIdx = idxOf(now.phase);
+  if (!prev || toIdx < 0) return segs;
+  const turnChanged = prev.active !== now.active;
+  if (turnChanged) segs.push({ text: `${nameOf(now.active)} · 回合开始`, transient: false });
+  const fromIdx = turnChanged ? -1 : idxOf(prev.phase);
+  for (let i = Math.max(0, fromIdx + 1); i <= toIdx; i++) {
+    const ph = STANDARD_PHASES[i];
+    if (ph === 'dustRise') segs.push({ text: '尘起阶段', transient: i < toIdx });
+    else if (ph === 'main') segs.push({ text: '主要阶段', transient: i < toIdx });
+  }
+  return segs;
+}
+
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   root.classList.remove('setup-page'); // 离开设置页 → 恢复普通背景
   const legal = getLegalActions(state);
@@ -6030,22 +6059,29 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     });
   }
 
-  // P-D · 阶段横幅：只在「换手（回合开始）/ 进尘起 / 进主要」弹（其余阶段自动，不弹）
-  // 时机：**延后到本帧其它动画播完 + 视角切换之后**再弹（避免「骰子还在飞、回合开始就冒出来」）
-  let bannerText = '';
+  // P-D · 阶段横幅（「回合开始 / 尘起阶段 / 主要阶段」）。
+  // 引擎会「没得做就自动翻页」——一次动作可能跨过多个阶段 → 这里按阶段顺序**依次补播**被跨过的阶段横幅
+  // （短停留），最后一段＝当前真实阶段（正常停留）。**三段绝不互相吞、绝不重叠**（串行）。
+  // 时机：延后到本帧其它动画播完 + 视角切换之后开始。
   const prevSnap = lastPhaseSnap.get(state);
   lastPhaseSnap.set(state, { active: state.activePlayer, phase: state.phase });
-  const IN_GAME: GameState['phase'][] = ['refill', 'reroll', 'dustRise', 'main', 'end'];
-  if (prevSnap && IN_GAME.includes(state.phase)) {
-    if (prevSnap.active !== state.activePlayer) bannerText = `${playerName(ctx, state.activePlayer)} · 回合开始`;
-    else if (state.phase === 'dustRise' && prevSnap.phase !== 'dustRise') bannerText = '尘起阶段';
-    else if (state.phase === 'main' && prevSnap.phase !== 'main') bannerText = '主要阶段';
-  }
+  const bannerSegs = phaseBannerSegs(
+    prevSnap ?? null,
+    { active: state.activePlayer, phase: state.phase },
+    (p) => playerName(ctx, p),
+  );
 
   // 切换等待：普通动效 / 支付整体 / 攻击池 / 畏惧响应池 / 气泡 … 取最大（整组播完才切 AB）
   // 注：阶段横幅**不计入** settle（切换不去等横幅）；横幅在「切换之后」另起延后播。
   const settle = Math.max(settleDice, payDur, attackDur, weijuDur, bubbleDur, joinDur, ultimateDur, trueLineDur, heldReleaseDur, gouhunDur);
-  if (bannerText) playBanner(root, bannerText, settle + 30);
+  if (bannerSegs.length > 0) {
+    let at = settle + 30;
+    for (const seg of bannerSegs) {
+      const end = playBanner(root, seg.text, at, seg.transient ? MOTION.bannerHoldTransient : undefined);
+      // 串行：下一段从本段结束点开始（无动画环境返回 0 → 用等长步长兜底；反正无视觉）
+      at = end > 0 ? end : at + (MOTION.micro + MOTION.bannerHold + MOTION.fade);
+    }
+  }
 
   if (holdView) {
     // 两阶段：先在本视角把动效播完，再瞬间切到新视角（切的那一帧无动效）

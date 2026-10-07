@@ -26,6 +26,8 @@ export interface MotionTokens {
   bubbleOut: number;
   /** 阶段横幅停留时长（「回合开始 / 尘起阶段 / 主要阶段」） */
   bannerHold: number;
+  /** 被自动跳过的阶段：横幅停留时长（比 bannerHold 短，供"顺序补播"用） */
+  bannerHoldTransient: number;
   /** 徽标跳动（计数变化） */
   bump: number;
   /** 必杀横幅停留时长 */
@@ -44,6 +46,7 @@ export const MOTION: MotionTokens = {
   bubbleHold: 1100,
   bubbleOut: 240,
   bannerHold: 1400,
+  bannerHoldTransient: 600,
   bump: 180,
   ultimateHold: 1500,
 };
@@ -2201,13 +2204,13 @@ function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta
 
 // ── P-D 状态类 · 阶段横幅 / 技能气泡 ─────────────────────────────────
 /** 阶段横幅：从操作栏中间滑出 → 停一下 → 淡出。返回时长。 */
-export function playBanner(root: HTMLElement, text: string, delayMs = 0): number {
+export function playBanner(root: HTMLElement, text: string, delayMs = 0, holdMs?: number): number {
   if (!canAnimate(root)) return 0;
   const layer = ensureFxLayer();
   if (!layer) return 0;
   const p = poolPoint(root);
   const inDur = ms(MOTION.micro);
-  const holdDur = ms(MOTION.bannerHold);
+  const holdDur = ms(holdMs ?? MOTION.bannerHold);
   const fadeDur = ms(MOTION.fade);
   const total = inDur + holdDur + fadeDur;
   const delay = Math.max(0, delayMs);

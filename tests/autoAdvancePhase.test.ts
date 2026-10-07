@@ -116,6 +116,27 @@ describe('自动推进阶段：没得做就自动翻页', () => {
     ).toBe(true);
   });
 
+  it('真实之剑（010）已开启 + 无冥想骰 + ≥2 颗骰 → **不**跳过（可 2→1 置换支付）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
+    const sword = g.players.A.artifacts.find((a) => a.id === '010')!;
+    sword.activeMarkerSide = 'left'; // 真实之剑（持续）
+    g.phase = 'dustRise';
+    g.activePlayer = 'A';
+    g.dustRiseNormalCount = 0;
+    g.dustRiseActed = false;
+    g.players.A.hasDustSeal = false;
+    g.players.A.areas = {
+      attack: [die('a1', 2, 'attack'), die('a2', 3, 'attack')],
+      defense: [],
+      meditation: [],
+    };
+    expect(autoAdvanceAction(g)).toBeNull(); // 能置换支付 → 有得做
+    expect(getLegalActions(g).some((a) => a.t === 'dustRise')).toBe(true);
+    // 反例：只剩 1 颗骰（凑不出 2→1）→ 确实没得做 → 才自动跳过
+    g.players.A.areas = { attack: [die('a1', 2, 'attack')], defense: [], meditation: [] };
+    expect(autoAdvanceAction(g)).toEqual({ t: 'advance' });
+  });
+
   // ── 与 T07「保守」的先后（关键：自动判定必须在补骰之后） ─────
   it('T07「保守」补的骰在自动判定之前 → 尘起阶段不被误判为空', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A', tacticA: 'T07' });
