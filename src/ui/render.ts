@@ -1330,6 +1330,13 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
 }
 
 /** 玩家面板：只保留骰区与神器卡（不显示「玩家A/B」归属标签——身份由生命值栏/面板边线呈现） */
+/** 挑战卡图 URL：卡 id（如 'Z02'）→ `./challenges/Z002.jpg`（**入库文件名是 3 位编号**，两处引用必须走这里）。 */
+export function challengeImageUrl(id: string): string {
+  const num = id.replace(/^Z/, '');
+  const padded = /^\d+$/.test(num) ? num.padStart(3, '0') : num;
+  return `./challenges/Z${padded}.jpg`;
+}
+
 /** 挑战模式 · 对手面板（D 方案）：面板头（含点数分布/计数）＋ 卡图缩略（点开放大）＋ 技能列（高亮"正在结算"）
  *  ＋ 三区（防御骰区 / 攻击骰区 / **驱动骰槽**＝原冥想骰区槽位）＋ 生命条。 */
 function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
@@ -1368,7 +1375,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   thumb.dataset.act = 'challengeCardOpen';
   thumb.title = '点击看大图';
   const im = document.createElement('img');
-  im.src = card ? `./challenges/${card.id}.jpg` : '';
+  im.src = card ? challengeImageUrl(card.id) : '';
   im.alt = card ? card.legacy : '';
   thumb.appendChild(im);
   thumb.addEventListener('click', () => {
@@ -1438,7 +1445,7 @@ function challengeCardOverlay(ctx: Ctx): HTMLElement {
   const box = el('div', 'challenge-card-box');
   const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
   const im = document.createElement('img');
-  im.src = card ? `./challenges/${card.id}.jpg` : '';
+  im.src = card ? challengeImageUrl(card.id) : '';
   im.alt = card ? card.legacy : '';
   box.appendChild(im);
   const close = document.createElement('button');

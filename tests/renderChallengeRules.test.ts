@@ -82,7 +82,7 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(panel.querySelector('.player-header .skill-type')?.textContent).toBe('昔日传奇 · Z02');
     expect(panel.querySelector('.card-sub')?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
     const img = panel.querySelector('.challenge-thumb img');
-    expect(img?.getAttribute('src')).toBe('./challenges/Z02.jpg');
+    expect(img?.getAttribute('src')).toBe('./challenges/Z002.jpg');
     expect(panel.querySelectorAll('.challenge-skill').length).toBe(6);
     expect(panel.querySelector('.area--driven .area-label')?.textContent).toContain('驱动骰槽');
     // 标准模式下不出现该面板
