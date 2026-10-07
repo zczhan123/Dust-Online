@@ -2534,7 +2534,7 @@ describe('renderGame (interaction)', () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it('offers 3 slots even with only 2 attack dice: 灵能脉冲 + 真实之剑 (N=3, M=1)', () => {
+  it('新版「真实之剑」代价：选真骰（点几颗＝几格）→ 选置换源 → 直接发动（灵能脉冲 N=3，1 组置换）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
     skipInitialReroll(state);
     applyAction(state, { t: 'advance' }); // 尘起 -> 主要
@@ -2553,13 +2553,9 @@ describe('renderGame (interaction)', () => {
     };
 
     const { ui, onAction } = mount(state, root);
-    const numberBtn = (label: string) =>
-      Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .number-btn')).find(
-        (b) => b.textContent === label,
-      );
     const okBtn = () =>
       Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find(
-        (b) => b.textContent === '确认',
+        (b) => b.textContent === '发动',
       )!;
     const clickDie = (id: string) =>
       root.querySelector<HTMLElement>(`.player--self .die[data-id="${id}"]`)!.click();
@@ -2571,36 +2567,19 @@ describe('renderGame (interaction)', () => {
       .click();
     expect(ui.selection!.key).toBe('dunwu.pulse.activate');
 
-    // ① 结算数量：应提供 1/2/3（不再被「只有 2 颗攻击骰」限制为 2 格）
-    expect(numberBtn('1 颗')).toBeTruthy();
-    expect(numberBtn('2 颗')).toBeTruthy();
-    expect(numberBtn('3 颗')).toBeTruthy();
-    numberBtn('3 颗')!.click();
-    okBtn().click();
-
-    // ② 置换数量：N=3 时 0 颗不可行（只有 2 颗真实攻击骰），只能置换 1–2 颗
-    expect(numberBtn('不置换')).toBeUndefined();
-    expect(numberBtn('置换 1 颗')).toBeTruthy();
-    expect(numberBtn('置换 2 颗')).toBeTruthy();
-    numberBtn('置换 1 颗')!.click();
-    okBtn().click();
-
-    // ③ 真实攻击骰：N−M = 2 颗
+    // 步①：选 2 颗真骰＝先凑 2 格（不再先问"几颗"）
     clickDie('atk1');
     clickDie('atk2');
     okBtn().click();
 
-    // ④ 置换用的任意骰：2M = 2 颗（不含已作真实骰的 atk1/atk2）
+    // 步②：再选恰好 2 颗任意骰＝1 组置换（视为 5）
     clickDie('def1');
     clickDie('med1');
     okBtn().click();
 
-    expect(onAction).not.toHaveBeenCalled();
-    expect(ui.pendingConfirm).not.toBeNull();
-    expect(ui.pendingConfirm!.label).toBe(
-      '发动「灵能脉冲」：消耗 3 颗攻击骰（2/3/5点），其中 1 颗攻击骰是用「真实之剑」置换',
-    );
-    expect(ui.pendingConfirm!.action).toEqual({
+    // S1：直接派发（不再弹确认条）
+    expect(ui.pendingConfirm).toBeNull();
+    expect(onAction).toHaveBeenCalledWith({
       t: 'skill',
       artifactId: '011',
       side: 'right',

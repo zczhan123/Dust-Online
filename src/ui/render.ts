@@ -23,7 +23,7 @@ import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
-import { SKILL_SELECTION, hasSword, type SelectStep } from './skillSelection';
+import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
@@ -3246,7 +3246,7 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const ok = document.createElement('button');
   ok.type = 'button';
   ok.className = 'btn btn-confirm';
-  ok.textContent = '确认';
+  ok.textContent = isDirectCost(spec, ctx.state, actorOf(ctx.state)) ? '发动' : '确认';
   ok.disabled = !satisfied;
   ok.addEventListener('click', () => confirmSelection(ctx));
   // 统一顺序：确认 → 取消（全站一致）
@@ -3425,7 +3425,9 @@ function confirmSelection(ctx: Ctx): void {
     const params = spec.buildParams({ state, player, chosenDice: sel.chosenDice, options: sel.options, numbers, slots: sel.slots });
     const action: SkillAction = { t: 'skill', artifactId: sel.artifactId, side: sel.side, params };
     hooks.ui.selection = null;
-    hooks.propose(action, skillActionLabel(ctx, action));
+    // S1：多颗「真实之剑」代价（持剑时）→ **直接派发**，不再弹确认条（代价汇总已写在该步标题里）
+    if (isDirectCost(spec, state, player)) hooks.onAction(action);
+    else hooks.propose(action, skillActionLabel(ctx, action));
   }
   hooks.requestRender();
 }

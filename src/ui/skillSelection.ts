@@ -1,6 +1,6 @@
 import type { DiceKind, Die, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
-import { abilityDicePool } from '../core/engine/effects';
+import { abilityDicePool, abilityDieInfo } from '../core/engine/effects';
 import { effectiveWill } from '../core/engine/derive';
 
 export type SelectStep =
@@ -38,6 +38,13 @@ export interface SelectionArgs extends StepArgs {
 export interface SkillSelection {
   steps: (args: StepArgs) => SelectStep[];
   buildParams: (args: SelectionArgs) => Record<string, unknown>;
+  /** 多颗「真实之剑」代价（S1 缩短）：向导最后一步**直接派发**，不再弹确认条（代价汇总已写在该步标题里） */
+  direct?: boolean;
+}
+
+/** 本次是否走「多颗真实之剑代价」的直发流程（S1）：需**持剑**且该技能有多颗代价。 */
+export function isDirectCost(spec: SkillSelection, state: GameState, player: PlayerId): boolean {
+  return !!spec.direct && hasSword(state, player);
 }
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
@@ -97,8 +104,122 @@ function mRangeFor(state: GameState, player: PlayerId, spec: CostSpec, N: number
 const chosenM = (spec: CostSpec, numbers: number[]): number =>
   spec.variable ? (numbers[1] ?? 0) : (numbers[0] ?? 0);
 
-/** 真实之剑激活时，「支付 N 个骰位」的统一向导步骤（①数量 ②置换数 ③真实骰 ④任意骰） */
+/**
+ * 是否存在「选置换源」这一步——决定 `chosenDice` 里代价之后的下标（`costPart.groups`）。
+ * 旧交互看 `numbers`；新交互按"真骰还差几格 + 可用骰数"现场判定。
+ */
+function swordHasSubStep(
+  state: GameState,
+  player: PlayerId,
+  spec: CostSpec,
+  numbers: number[],
+  chosenDice: string[][],
+): boolean {
+  if (spec.maxSlots === 1) return chosenM(spec, numbers) > 0;
+  const real = chosenDice[0] ?? [];
+  if (spec.variable) {
+    const room = spec.maxSlots - real.length;
+    const sources = payTotalDice(state, player) - real.length;
+    return room > 0 && sources >= 2;
+  }
+  return spec.maxSlots - real.length > 0;
+}
+
+/** 汇总句（P1 防呆用）：`真骰 2（冥2·冥4）＋ 置换 1 组（视为 5）＝ 3 格` */
+function swordSummary(
+  state: GameState,
+  player: PlayerId,
+  spec: CostSpec,
+  numbers: number[],
+  chosenDice: string[][],
+): string {
+  const real = chosenDice[0] ?? [];
+  const conv = swordHasSubStep(state, player, spec, numbers, chosenDice) ? (chosenDice[1] ?? []) : [];
+  const groups = Math.floor(conv.length / 2);
+  if (real.length === 0 && groups === 0) return '';
+  const vals = real
+    .map((id) => abilityDieInfo(state, player, id)?.value)
+    .filter((v): v is number => v !== undefined);
+  const parts: string[] = [];
+  if (real.length) parts.push(`真骰 ${real.length}${vals.length ? `（${vals.join('·')}）` : ''}`);
+  if (groups) parts.push(`置换 ${groups} 组（视为 5）`);
+  return `▸ 合计 ${real.length + groups} 格：${parts.join(' ＋ ')}`;
+}
+
+/**
+ * 「真实之剑」代价的**新交互（S3）**：① 选真骰（**点几颗＝几格**）→ ②（不足/想加）选置换源 → **直接发动**。
+ * 「恰好 1 颗」的技能走旧交互 `swordCostStepsOne`（保持不变）。
+ */
 function swordCostSteps(
+  state: GameState,
+  player: PlayerId,
+  spec: CostSpec,
+  numbers: number[],
+  chosenDice: string[][],
+): SelectStep[] {
+  if (spec.maxSlots === 1) return swordCostStepsOne(state, player, spec, numbers, chosenDice);
+  const typeName = KIND_CN[spec.kind];
+  const N = spec.maxSlots;
+  const real = chosenDice[0] ?? [];
+  // 防呆 P2（死路预防）：固定款"真骰至少要选几颗"，否则置换源凑不够（realMin = max(0, 2N − 可用骰总数)）
+  const minReal = spec.variable
+    ? 1
+    : Math.min(kindCount(state, player, spec.kind), Math.max(0, 2 * N - payTotalDice(state, player)));
+  const summary = swordSummary(state, player, spec, numbers, chosenDice);
+  const steps: SelectStep[] = [
+    {
+      kind: 'dice',
+      label:
+        (spec.variable
+          ? `选择消耗的${typeName}骰（${minReal}–${N} 颗；点几颗＝消耗几颗，不够可用「真实之剑」补）`
+          : `选择消耗的${typeName}骰（${minReal}–${N} 颗；不够的用「真实之剑」补）`) +
+        (summary ? `　${summary}` : ''),
+      owner: 'self',
+      areas: [spec.kind],
+      min: minReal,
+      max: N,
+      allowArtifact: true,
+    },
+  ];
+  const hasSub = swordHasSubStep(state, player, spec, numbers, chosenDice);
+  if (hasSub) {
+    const sources = payTotalDice(state, player) - real.length;
+    const room = N - real.length;
+    if (spec.variable) {
+      steps.push({
+        kind: 'dice',
+        label: `还需更多格？再选偶数颗任意骰（每 2 颗顶 1 颗${typeName}骰，视为 5 点；不选＝不置换）`,
+        owner: 'self',
+        areas: KINDS,
+        min: 0,
+        max: Math.min(2 * room, 2 * Math.floor(sources / 2)),
+        filter: (d) => !real.includes(d.id),
+        allowArtifact: true,
+        validate: (ds) =>
+          ds.length % 2 === 0
+            ? { ok: true, hint: ds.length ? `${ds.length / 2} 组置换（视为 5 点）` : '不置换' }
+            : { ok: false, hint: '需选偶数颗（每 2 颗＝1 格）' },
+      });
+    } else {
+      const needDice = room * 2;
+      steps.push({
+        kind: 'dice',
+        label: `再选恰好 ${needDice} 颗任意骰（每 2 颗顶 1 颗${typeName}骰，视为 5 点）`,
+        owner: 'self',
+        areas: KINDS,
+        min: needDice,
+        max: needDice,
+        filter: (d) => !real.includes(d.id),
+        allowArtifact: true,
+      });
+    }
+  }
+  return steps;
+}
+
+/** 「真实之剑」代价的**旧交互**（仅「恰好 1 颗」的技能用，按用户要求保持不变）：
+ *  ①置换几组 ②实际消耗的真骰 ③用于置换的任意骰 */
+function swordCostStepsOne(
   state: GameState,
   player: PlayerId,
   spec: CostSpec,
@@ -164,15 +285,15 @@ function costPart(
   if (!hasSword(state, player)) {
     return { costSlots: realSlots(chosenDice[0]), groups: 1 };
   }
-  const M = chosenM(spec, numbers);
   const real = chosenDice[0] ?? [];
-  const conv = M > 0 ? chosenDice[1] ?? [] : [];
+  const hasSub = swordHasSubStep(state, player, spec, numbers, chosenDice);
+  const conv = hasSub ? chosenDice[1] ?? [] : [];
   return {
     costSlots: [
       ...real.map((id) => ({ dieIds: [id] })),
       ...chunkPairs(conv).map((pair) => ({ dieIds: pair })),
     ],
-    groups: M > 0 ? 2 : 1,
+    groups: hasSub ? 2 : 1,
   };
 }
 
@@ -267,6 +388,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_TENGWAN, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   'yingle.qianxing': {
     steps: ({ state, player, chosenDice, numbers }) =>
@@ -276,6 +398,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_QIANXING, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   'buxiang.cuilian': {
     steps: ({ state, player }) =>
@@ -459,6 +582,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       const { costSlots, groups } = costPart(state, player, SPEC_FIST, numbers, chosenDice);
       return { costSlots, defenseDieIds: chosenDice[groups] ?? [] };
     },
+    direct: true,
   },
   // 011 灵能屏障·启动：消耗最多 3 颗防御骰 → 获得 2 倍冥想骰
   'dunwu.barrier.activate': {
@@ -479,6 +603,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_BARRIER, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   // 011 灵能脉冲·启动：消耗最多 3 颗攻击骰 → 获得 2 倍冥想骰
   'dunwu.pulse.activate': {
@@ -499,6 +624,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_PULSE, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   // 012 魔女·必杀 梦醒时分：选择目标区域 → 选择 1–3 颗冥想骰移动（保留点数）
   'monv.ultimate': {
@@ -629,6 +755,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_MINGJIE, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   // 019 尘哀·蛮王之牙（启动）：选 X（1–3）→ 选种类组合 → 每种类各 1 颗 → 选 X 项（①②可重复）
   // ①「弃置对方 1 个防御骰」由发动者**指定具体是哪颗**（页面末尾追加选骰步骤；对方没有防御骰时 ① 禁用）。
@@ -1188,6 +1315,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     buildParams: ({ state, player, chosenDice, numbers }) => ({
       costSlots: costPart(state, player, SPEC_HUANYU, numbers, chosenDice).costSlots,
     }),
+    direct: true,
   },
   // 031 恶兆·清算（激活）：由发动者弃置对方 X 颗（X=计数；不足则弃光）
   'ezhao.qingsuan': {

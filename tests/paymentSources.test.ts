@@ -138,14 +138,30 @@ describe('单类型交互回归（防未来多类型改动误伤）', () => {
   const stepsOf = (g: GameState, key: string) =>
     SKILL_SELECTION[key].steps({ state: g, player: 'A', chosenDice: [], options: [], numbers: [], slots: [] });
 
-  it('龙腾万丈（第二列）：持 010 → 数字向导（置换数 + 真骰）；无 010 → 单个 dice 步', () => {
+  it('龙腾万丈（第二列）：持 010 → 新交互「选真骰 → 选置换源」；无 010 → 单个 dice 步（恰好 3 颗）', () => {
     const g1 = mk(['010', '002', '003']);
     arm(g1, 'A', '010', 'left'); // 真实之剑
     const s1 = stepsOf(g1, 'youlong.tengwan');
-    expect(s1.map((s) => s.kind)).toEqual(['number', 'dice']);
-    const d1 = s1[1];
+    expect(s1.map((s) => s.kind)).toEqual(['dice', 'dice']); // 新交互：选真骰 →（不足）选置换源
+    const d1 = s1[0];
     expect(d1.kind === 'dice' ? d1.areas : null).toEqual(['meditation']);
     expect(d1.kind === 'dice' ? d1.allowArtifact : null).toBe(true);
+    expect(d1.kind === 'dice' ? d1.max : null).toBe(3); // 点几颗＝几格（最多 3）
+
+    // 选过若干真骰后：第二步恰好补 2×(3−真骰数) 颗任意骰（每 2 颗＝1 组置换）
+    const medIds = g1.players.A.areas.meditation.map((d) => d.id).slice(0, 2);
+    const s1b = SKILL_SELECTION['youlong.tengwan'].steps({
+      state: g1,
+      player: 'A',
+      chosenDice: [medIds],
+      options: [],
+      numbers: [],
+      slots: [],
+    });
+    expect(s1b.map((s) => s.kind)).toEqual(['dice', 'dice']);
+    const sub = s1b[1];
+    expect(sub.kind === 'dice' ? sub.min : null).toBe((3 - medIds.length) * 2);
+    expect(sub.kind === 'dice' ? sub.max : null).toBe((3 - medIds.length) * 2);
 
     const g2 = mk(['010', '002', '003']); // 未激活 010
     const s2 = stepsOf(g2, 'youlong.tengwan');
