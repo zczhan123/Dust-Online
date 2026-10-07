@@ -108,6 +108,8 @@ export type Action =
   | { t: 'gongzhenResolve'; pick: 'gain' | 'discard'; myIds?: string[]; oppIds?: string[] }
   /** 挑战模式·代决：挑战者替「昔日传奇」做的选择（模式 1）。`id` ∈ 该待决策 options 的 id */
   | { t: 'challengePick'; id: string }
+  /** 挑战模式·推进：让「昔日传奇」往下结算**一条**技能（界面按节奏自动派发，实现"逐条可见"） */
+  | { t: 'challengeStep' }
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
   | { t: 'shouhunCancel'; cancel: boolean }
   /** 026 哀歌·威压：使用能力骰后，令自己或对方的 1 颗能力骰点数变为固定值（保留区域）；dieId 省略 = 不发动 */
@@ -400,7 +402,10 @@ export interface GameState {
   challenge?: {
     cardId: string;
     count: number;
+    /** 临时驱动骰区域：回合开始投出的骰子（＝技能列最下方那一条）；某条技能发动时从这里取骰 */
     driven: Die[];
+    /** 驱动骰槽：当前结算的那条技能**临时**占用的驱动骰（面板第三区）；结算完清空或移入区域 */
+    slot: Die[];
     turn: number;
     resumeAt?: number | null;
     /** 正在结算的技能下标（界面高亮"正在结算"用）；不在回合内为 null */

@@ -17,6 +17,7 @@ import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
 import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase } from '../core/content/challenges';
+import { LEGEND_DISPLAY_NAME } from '../core/engine/log';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
@@ -204,8 +205,9 @@ type DiceStep = Extract<SelectStep, { kind: 'dice' }>;
 
 const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
 
-/** 名字：联机＝昵称；否则「玩家A/B」。（**只**用于"生命条/面板身份 / 回合开始横幅 / 胜者"；操作栏与引擎文案一律「玩家A/B」） */
+/** 名字：联机＝昵称；挑战模式＝「昔日传奇」（B 侧）；否则「玩家A/B」。 */
 function playerName(ctx: Ctx, id: PlayerId): string {
+  if (ctx.state.mode === 'challenge' && id === 'B') return LEGEND_DISPLAY_NAME;
   return ctx.hooks.online?.names[id] ?? `玩家${id}`;
 }
 
@@ -1346,14 +1348,22 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   panel.dataset.player = player.id;
   if (state.phase !== 'gameOver' && actorOf(state) === player.id) panel.classList.add('player--acting');
 
-  // ① 面板头：传奇名 ＋ 药丸 ＋ 点数分布（取它第二列神器；与玩家卡头同款写法）＋ 计数徽标
+  // ① 面板头：传奇名 ＋ 「昔日传奇」＋ 生命/防御骰上限/防御规则（放点数分布之前）＋ 点数分布 ＋ 计数
   const head = el('div', 'player-header');
   const title = el('span', 'player-title');
   title.textContent = card ? `传说中的「${card.legacy}」` : '昔日传奇';
   head.appendChild(title);
   const pill = el('span', 'skill-type');
-  pill.textContent = card ? `昔日传奇 · ${card.id}` : '昔日传奇';
+  pill.textContent = LEGEND_DISPLAY_NAME;
   head.appendChild(pill);
+  if (card) {
+    const meta = el('span', 'card-sub');
+    const life = card.life != null ? `生命 ${card.life}` : '生命 —';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
+    const rule = card.defenseRule ?? '防御规则 —';
+    meta.textContent = `${life}　｜　${cap}　｜　${rule}`;
+    head.appendChild(meta);
+  }
   const dist = player.artifacts.find((a) => a.column === 2)?.distribution;
   if (dist) {
     const sub = el('span', 'card-sub');
@@ -1367,7 +1377,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   }
   panel.appendChild(head);
 
-  // ② 卡图缩略（点开看大图）＋ 技能列
+  // ② 卡图缩略（点开看大图）＋ 技能表（一条一框、正在结算＝绿）＋ 最下方"临时驱动骰区域"
   const row = el('div', 'challenge-row');
   const thumb = document.createElement('button');
   thumb.type = 'button';
@@ -1384,7 +1394,8 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   });
   row.appendChild(thumb);
 
-  const list = el('div', 'challenge-skills');
+  const right = el('div', 'challenge-skills');
+  const table = el('div', 'challenge-skill-table');
   (card?.skills ?? []).forEach((sk, i) => {
     const r = el('div', `challenge-skill${state.challenge?.activeSkill === i ? ' is-active' : ''}`);
     const no = el('span', 'csk-no');
@@ -1401,9 +1412,26 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     const sl = el('span', 'csk-slot');
     sl.textContent = slotPhrase(sk.slots ?? null);
     r.appendChild(sl);
-    list.appendChild(r);
+    table.appendChild(r);
   });
-  row.appendChild(list);
+  right.appendChild(table);
+  // 临时驱动骰区域（一整条、跨全宽）：回合开始投出的骰子落在这里
+  const staging = el('div', 'challenge-staging');
+  staging.dataset.act = 'challengeStaging';
+  const slab = el('span', 'csk-staging-lab');
+  slab.textContent = `临时驱动骰区域（${state.challenge?.driven.length ?? 0}）`;
+  staging.appendChild(slab);
+  const sdice = el('div', 'dice');
+  for (const d of state.challenge?.driven ?? []) {
+    const chip = el('span', 'die die-drv');
+    chip.dataset.id = d.id;
+    chip.dataset.value = String(d.value);
+    chip.textContent = String(d.value);
+    sdice.appendChild(chip);
+  }
+  staging.appendChild(sdice);
+  right.appendChild(staging);
+  row.appendChild(right);
   panel.appendChild(row);
 
   // ③ 生命条（独占一行）
@@ -1418,10 +1446,10 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const driven = el('div', 'area area--driven');
   driven.dataset.kind = 'driven';
   const dlab = el('div', 'area-label');
-  dlab.textContent = `驱动骰槽（${state.challenge?.driven.length ?? 0}）`;
+  dlab.textContent = `驱动骰槽（${state.challenge?.slot.length ?? 0}）`;
   driven.appendChild(dlab);
   const ddice = el('div', 'dice');
-  for (const d of state.challenge?.driven ?? []) {
+  for (const d of state.challenge?.slot ?? []) {
     const chip = el('span', 'die die-drv');
     chip.dataset.id = d.id;
     chip.dataset.value = String(d.value);
@@ -1616,6 +1644,17 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       { text: `玩家${pd.player}`, color: pd.player },
       { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点）——随后比较双方消耗的能力骰点数大小；1 视为大于 6；请选择` },
     ];
+  }
+  // 挑战模式：传奇回合（逐条结算中）→ 提示"正在结算哪一条"
+  if (
+    ctx.state.mode === 'challenge' &&
+    ctx.state.activePlayer === 'B' &&
+    !pd &&
+    ctx.state.challenge?.resumeAt != null
+  ) {
+    const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
+    const sk = card?.skills?.[ctx.state.challenge.activeSkill ?? 0];
+    return [{ text: `「${LEGEND_DISPLAY_NAME}」正在结算：${sk?.name ?? '…'}` }];
   }
   if (pd && pd.kind === 'challengePick') {
     return [{ text: `挑战模式 · 代决：${pd.prompt}` }];

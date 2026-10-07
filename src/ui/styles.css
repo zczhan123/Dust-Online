@@ -2518,39 +2518,60 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 .challenge-skills {
   flex: 1 1 auto;
   min-width: 0;
-  background: #fff;
-  border: 1px solid #cfc8ba;
-  border-radius: 8px;
-  padding: 3px 5px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
+}
+.challenge-skill-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   overflow: hidden;
 }
 .challenge-skill {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  font-size: 12.5px;
-  line-height: 1.25;
-  padding: 1px 5px;
-  border-radius: 5px;
-  border-left: 3px solid transparent;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.3;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #cfc8ba;
+  background: #fff;
   min-width: 0;
 }
-.challenge-skill.is-active { background: #fbe8c8; border-left-color: #8a5a05; }
+.challenge-skill.is-active {
+  background: #e9f2ec;
+  border-color: #1d7a4d;
+  box-shadow: inset 0 0 0 1px #1d7a4d;
+}
+.challenge-skill.is-active .csk-name { color: #14532d; }
 .challenge-skill .csk-no { font-size: 11px; color: #918b7e; flex: 0 0 auto; }
 .challenge-skill .csk-name { font-weight: 700; flex: 0 0 auto; }
 .challenge-skill .csk-mark { color: #8a5a05; font-weight: 700; flex: 0 0 auto; }
 .challenge-skill .csk-slot {
   color: #6f6a60;
-  font-size: 11.5px;
+  font-size: 12px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.challenge-skill.is-active .csk-slot { color: #7a4a12; font-weight: 700; }
+.challenge-skill.is-active .csk-slot { color: #14532d; }
+.challenge-staging {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  min-height: 30px;
+  border: 1px dashed #e0c07a;
+  border-radius: 6px;
+  background: #fdf8ee;
+}
+.challenge-staging .csk-staging-lab { font-size: 11.5px; color: #7a4a12; flex: 0 0 auto; }
 html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; background: #fdf8ee; }
 html[data-theme] .die.die-drv { background: #8a8f98; color: #fff; }
 .playband--single > .lifeline { grid-row: 1; }

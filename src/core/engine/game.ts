@@ -211,14 +211,14 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
       return;
     }
     case 'z02-3': {
-      // 弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；未代决时默认第一颗）
+      // 卡面顺序：先发起 8 点「不可抵挡」攻击
+      virtualAttack(g, 'B', 8, { skill: '暗夜凶神', owner: 'B' }, { unblockable: true });
+      // 再弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；未代决时默认第一颗）
       const dropId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
       if (dropId) consumeDice(g, A, 'defense', [dropId]);
       const cap = card.countCap ?? Number.POSITIVE_INFINITY;
       g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
       syncLegendFengmang(g);
-      // 8 点「不可抵挡」攻击（单发）
-      virtualAttack(g, 'B', 8, { skill: '暗夜凶神', owner: 'B' }, { unblockable: true });
       return;
     }
     case 'z02-4': {
@@ -277,21 +277,24 @@ function runLegendTurn(g: GameState): void {
   g.dustRiseActed = false;
   const legacy = card.legacy;
   logLine(g, `——「${legacy}」的回合——`);
+  logLine(g, `「${legacy}」：回合开始`);
   rollDrivenDice(g, card.rollDice ?? 0);
   const rolled = [...g.challenge.driven]
     .map((d) => d.value)
     .sort((a, b) => a - b)
     .join('/');
   logLine(g, `「${legacy}」：投掷 ${card.rollDice ?? 0} 个驱动骰（${rolled}）`);
-  g.challenge.resumeAt = 0;
-  continueLegendTurn(g);
+  // 投完即"停一下"：骰子落在**临时驱动骰区域**（driven），由界面按节奏派发 challengeStep 逐条结算
+  g.challenge.slot = [];
+  g.challenge.activeSkill = 0; // 高亮「回合开始」
+  g.challenge.resumeAt = 1; // 下一条从技能 1 开始
 }
 
 /**
- * 从 `g.challenge.resumeAt` 继续逐条结算；遇"发起攻击"就记下续跑点并返回（等挑战者响应）。
- * 响应完由 `applyActionCore` 收尾自动再进来。
+ * 从 `g.challenge.resumeAt` 继续逐条结算；遇"发起攻击/代决"就记下续跑点并返回。
+ * `once = true`（界面按节奏派发 `challengeStep`）→ **只结算"一条真正要执行的技能"**就返回，让每条都看得见。
  */
-function continueLegendTurn(g: GameState): void {
+function continueLegendTurn(g: GameState, once = false): void {
   const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
   if (!g.challenge || !card || !card.skills) {
     endTurn(g);
@@ -302,6 +305,11 @@ function continueLegendTurn(g: GameState): void {
   for (let i = g.challenge.resumeAt; i < card.skills.length; i++) {
     if (g.pendingAttack) return; // 正在等挑战者响应
     const skill = card.skills[i];
+    // 纯被动（如「锋芒」＝按计数加伤害）：**不占"逐条结算"的步**，内部同步即可
+    if (skill.passive) {
+      applyChallengeSkill(g, card, skill, []);
+      continue;
+    }
     if (skill.marker === '怜悯*' && g.challenge.turn === 0) {
       logLine(g, `「${legacy}」：${skill.name} — 首次回合（怜悯*），跳过`);
       continue;
@@ -328,9 +336,11 @@ function continueLegendTurn(g: GameState): void {
       return;
     }
     g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
+    g.challenge.slot = consumed; // 临时移到**驱动骰槽**（界面看得见；结算后清空或已被移入区域）
     g.challenge.activeSkill = i; // 界面高亮"正在结算"
     applyChallengeSkill(g, card, skill, consumed);
     delete dec[skill.id];
+    g.challenge.slot = [];
     if (g.pendingAttack || g.virtualQueue) {
       g.challenge.resumeAt = i + 1; // 等挑战者响应完再续
       return;
@@ -339,8 +349,13 @@ function continueLegendTurn(g: GameState): void {
       logLine(g, `「${legacy}」：${skill.name} — 立即结束回合`);
       break;
     }
+    if (once) {
+      g.challenge.resumeAt = i + 1; // 只结算一条 → 交回界面，等下一次 challengeStep
+      return;
+    }
   }
   g.challenge.driven = [];
+  g.challenge.slot = [];
   g.challenge.resumeAt = null;
   g.challenge.activeSkill = null;
   g.challenge.turn += 1;
@@ -694,7 +709,7 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   // 传奇没有初始能力骰（它的骰是每回合投的"驱动骰"），也没有冥想骰区
   g.players.B.areas = { attack: [], defense: [], meditation: [] };
   if (card.life != null) g.players.B.life = g.players.B.lifeMax = card.life;
-  g.challenge = { cardId: card.id, count: 0, driven: [], turn: 0 };
+  g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0 };
   logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」（${card.id}）· 生命 ${g.players.B.life}`);
   // 挑战者的战术牌：构筑直接生效
   if (opts.tactic) applyTacticStart(g, 'A');
@@ -2064,6 +2079,19 @@ export function getLegalActions(g: GameState): Action[] {
     return acts;
   }
 
+  // 挑战模式：轮到传奇且它已"停一下"→ 唯一可枚举动作＝推进一条（界面按节奏自动派发）
+  if (
+    g.mode === 'challenge' &&
+    g.activePlayer === 'B' &&
+    !g.pending &&
+    !g.pendingAttack &&
+    !g.attackQueue &&
+    !g.virtualQueue &&
+    g.challenge?.resumeAt != null
+  ) {
+    return [{ t: 'challengeStep' }];
+  }
+
   const p = g.players[g.activePlayer];
   switch (g.phase) {
     case 'reroll': {
@@ -3304,6 +3332,14 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       break;
     }
+    case 'challengeStep': {
+      if (g.mode !== 'challenge') throw new Error('not challenge mode');
+      if (g.activePlayer !== 'B') throw new Error('not legend turn');
+      if (g.pending || g.pendingAttack || g.attackQueue || g.virtualQueue) throw new Error('legend turn busy');
+      if (g.challenge?.resumeAt == null) throw new Error('no challenge step pending');
+      continueLegendTurn(g, true);
+      break;
+    }
     case 'challengePick': {
       const pd = g.pending;
       if (!pd || pd.kind !== 'challengePick') throw new Error('no challengePick pending');
@@ -3775,18 +3811,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
   // 多段攻击（013 电刑等）被待决策打断后，解决该待决策应**自动继续下一段**（否则会停在半途，
   // 表现为"电刑后续各段不再触发任何'造成伤害后'类技能"）。
   pumpAttackQueue(g);
-  // 挑战模式：传奇回合在"发起攻击"处暂停 → 挑战者响应完自动续跑（无待决策且无攻击队列时）
-  if (
-    g.mode === 'challenge' &&
-    g.activePlayer === 'B' &&
-    !g.pendingAttack &&
-    !g.pending &&
-    !g.attackQueue &&
-    !g.virtualQueue &&
-    g.challenge?.resumeAt != null
-  ) {
-    continueLegendTurn(g);
-  }
+  // 挑战模式：传奇回合**不再在此自动续跑**——改由界面按节奏派发 `challengeStep` 逐条推进
+  // （这样每条技能都"看得见"；代决/待抵挡结束后同样由界面继续下一步）。
   // 若已进入「结束」阶段且无待决策 → 真正结算结束阶段并交出回合（供 032/033 的待决策解决后推进）
   finalizeTurnEnd(g);
   // 战术牌·战前：抽牌完、无待决策 → 结算生命修正并进入初始重掷

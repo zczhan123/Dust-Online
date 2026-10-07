@@ -15,3 +15,16 @@ export function toMain(g: GameState): void {
     applyAction(g, { t: 'advance' });
   }
 }
+
+/**
+ * 挑战模式：把「昔日传奇」的回合按节奏（`challengeStep`）驱动到结束。
+ * 遇待抵挡自动"不抵挡"；遇代决（`challengePick`）**抛错**——那种用例请自行逐步处理。
+ */
+export function driveLegendTurn(g: GameState): void {
+  let guard = 0;
+  while (g.activePlayer === 'B' && g.phase !== 'gameOver' && guard++ < 80) {
+    if (g.pendingAttack) applyAction(g, { t: 'block' });
+    else if (g.pending) throw new Error(`legend turn left a pending: ${(g.pending as { kind: string }).kind}`);
+    else applyAction(g, { t: 'challengeStep' });
+  }
+}

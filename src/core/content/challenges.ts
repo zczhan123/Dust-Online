@@ -21,6 +21,8 @@ export interface ChallengeSkill {
   slots: ChallengeSlot[] | null;
   effect: string;
   endsTurn?: boolean;
+  /** 纯被动（如 Z02「锋芒」＝按计数加伤害）：**不占"逐条结算"的步**，只在内部同步即可 */
+  passive?: boolean;
 }
 
 export interface ChallengeCard {
@@ -59,7 +61,7 @@ export const CHALLENGES: ChallengeCard[] = [
     rollDice: 8, countCap: 3,
     skills: [
       { id: 'z02-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },
-      { id: 'z02-1', name: '锋芒', marker: '∞', slots: null, effect: '「永暗之刃」的攻击伤害 +X。X 为「永暗之刃」叠加的计数。' },
+      { id: 'z02-1', name: '锋芒', marker: '∞', slots: null, passive: true, effect: '「永暗之刃」的攻击伤害 +X。X 为「永暗之刃」叠加的计数。' },
       { id: 'z02-2', name: '葬敌的完杀', slots: [{ kind: 'pips', count: 1, faces: [1] }, { kind: 'pips', count: 1, faces: [2] }, { kind: 'pips', count: 1, faces: [3] }, { kind: 'pips', count: 1, faces: [4] }], effect: '尽可能弃置挑战者的防御骰，直至数量降为 1。获得 1、2、3、4 点的攻击骰各 1 个。' },
       { id: 'z02-3', name: '暗夜凶神', slots: [{ kind: 'pips', count: 1, faces: [1] }, { kind: 'pips', count: 1, faces: [4] }, { kind: 'pips', count: 1, faces: [6] }], effect: '进行一次点数视为 8 点的不可抵挡的攻击，并弃置挑战者的 1 个防御骰。然后「永暗之刃」的计数 +1（最高叠加至 3 层）。' },
       { id: 'z02-4', name: '枭首', slots: [{ kind: 'pips', count: 1, faces: [6] }], effect: '将本技能上的驱动骰全部移动至攻击骰区。如果攻击骰的数量超过了挑战者的防御骰数量，则使用所有攻击骰发起攻击。' },

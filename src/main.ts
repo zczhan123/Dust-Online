@@ -1,5 +1,5 @@
 import './ui/styles.css';
-import { createGame, createChallengeGame, applyAction } from './core/engine/game';
+import { createGame, createChallengeGame, applyAction, getLegalActions } from './core/engine/game';
 import { renderGame, setLocalViewPlayer, actorOf, type UiState } from './ui/render';
 import { renderSetup, type SetupOptions } from './ui/setupScreen';
 import { renderLobby } from './ui/lobby';
@@ -77,6 +77,46 @@ const onlineUi = () => {
   };
 };
 
+/** 挑战模式：传奇回合"逐条结算"的节奏（毫秒）；界面按此节奏自动派发 `challengeStep` */
+const CHALLENGE_STEP_MS = 700;
+let challengeStepTimer: number | null = null;
+
+/** 统一派发（联机走 session、本地走引擎）+ 重置 UI + 重绘；供 onAction 与挑战模式自动推进共用 */
+const dispatchAction = (a: Action): void => {
+  if (!state) return;
+  // 联机·非本人操作 → 忽略（兜底：任何漏门禁的派发都不生效，防两端分叉）
+  if (online && actorOf(state) !== online.state.myPlayer) return;
+  // 联机·对方掉线/退出（暂停中）→ 忽略本地动作（锁步下防分叉）
+  if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
+  try {
+    if (online) online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
+    else applyAction(state, a);
+    ui.error = null;
+    resetUi();
+  } catch (e) {
+    ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
+  }
+  render();
+};
+
+/** 挑战模式：传奇回合会"停一下"等界面推进 → 按节奏自动派发下一步（让每条技能都看得见） */
+const scheduleChallengeStep = (): void => {
+  if (challengeStepTimer != null) {
+    window.clearTimeout(challengeStepTimer);
+    challengeStepTimer = null;
+  }
+  if (!state || state.mode !== 'challenge') return;
+  if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
+  if (online && actorOf(state) !== online.state.myPlayer) return;
+  if (!getLegalActions(state).some((a) => a.t === 'challengeStep')) return;
+  challengeStepTimer = window.setTimeout(() => {
+    challengeStepTimer = null;
+    if (!state) return;
+    if (!getLegalActions(state).some((a) => a.t === 'challengeStep')) return;
+    dispatchAction({ t: 'challengeStep' });
+  }, CHALLENGE_STEP_MS);
+};
+
 const render = (): void => {
   if (!state) return;
   renderGame(state, root, {
@@ -99,25 +139,9 @@ if (hasSavedRoom()) goLobby();
 else showSetup();
     },
     onPrefsChange: (p) => savePrefs(p),
-    onAction: (a) => {
-      if (!state) return;
-      // 联机·非本人操作 → 忽略（兜底：任何漏门禁的派发都不生效，防两端分叉）
-      if (online && actorOf(state) !== online.state.myPlayer) return;
-      // 联机·对方掉线/退出（暂停中）→ 忽略本地动作（锁步下防分叉）
-      if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
-      try {
-        if (online) online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
-        else applyAction(state, a);
-        ui.error = null;
-        resetUi();
-      }
-      // 非法操作只在 UI 层提示（不写进引擎状态/战报）
-      catch (e) {
-        ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
-      }
-      render();
-    },
+    onAction: (a) => dispatchAction(a),
   });
+  scheduleChallengeStep();
 };
 
 /** 到点超时：向导/确认条打开 → 关掉＝不发动（不派发）；否则派发引擎默认 / 放弃 / 结束阶段 */

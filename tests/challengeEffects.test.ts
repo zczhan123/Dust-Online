@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createChallengeGame, applyChallengeSkill, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { attackDamageBonus } from '../src/core/engine/combat';
 import { CHALLENGES } from '../src/core/content/challenges';
-import { toMain } from './helpers';
+import { toMain, driveLegendTurn } from './helpers';
 import type { Die, DiceKind } from '../src/core/model/types';
 
 const CARD = CHALLENGES.find((c) => c.id === 'Z02')!;
@@ -89,12 +89,11 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2, physical: false });
   });
 
-  it('暂停/续跑：传奇回合在攻击处停下；挑战者响应后自动续跑并把回合交还', () => {
+  it('逐条推进：传奇回合按 challengeStep 一条条走；攻击处停下等响应，响应后继续到交还', () => {
     const g = make();
     skipInitialReroll(g);
-    // 先把传奇的第一个回合打完（逐段不抵挡）
-    let guard0 = 0;
-    while (g.activePlayer === 'B' && guard0++ < 30) applyAction(g, { t: 'block' });
+    // 先把首个传奇回合驱动跑完
+    driveLegendTurn(g);
     expect(g.activePlayer).toBe('A');
     toMain(g);
     // 清空挑战者骰：避免结束回合时触发「意志上限弃骰」待决策（那是另一个机制）
@@ -109,15 +108,26 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
       die('p6', 4, 'meditation'),
       die('p7', 6, 'meditation'),
     ];
-    applyAction(g, { t: 'advance' }); // 结束挑战者回合 → 传奇回合
-    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 8, unblockable: true });
-    expect(g.challenge!.resumeAt).not.toBeNull();
-    const lifeA = g.players.A.life;
-    // 逐段响应，直到传奇回合真正结束、交还挑战者
+    applyAction(g, { t: 'advance' }); // 结束挑战者回合 → 传奇回合（投骰后停住）
+    expect(g.activePlayer).toBe('B');
+    expect(g.challenge!.driven.length).toBeGreaterThan(0); // 骰子停在"临时驱动骰区域"
+    // 逐条推进，直到"暗夜凶神"发起攻击处停下
     let guard = 0;
-    while (g.activePlayer === 'B' && guard++ < 40) applyAction(g, { t: 'block' });
+    while (g.activePlayer === 'B' && !g.pendingAttack && !g.pending && guard++ < 20) {
+      applyAction(g, { t: 'challengeStep' });
+    }
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 8, unblockable: true });
+    const lifeA = g.players.A.life;
+    applyAction(g, { t: 'block' }); // 挑战者不抵挡 → 受伤
     expect(g.players.A.life).toBeLessThan(lifeA);
+    // 继续推进到传奇回合结束（途中可能出现代决 → 取第一项）
+    let guard2 = 0;
+    while (g.activePlayer === 'B' && guard2++ < 80) {
+      if (g.pendingAttack) applyAction(g, { t: 'block' });
+      else if (g.pending?.kind === 'challengePick') applyAction(g, { t: 'challengePick', id: g.pending.options[0].id });
+      else applyAction(g, { t: 'challengeStep' });
+    }
     expect(g.activePlayer).toBe('A');
-    expect(g.challenge!.resumeAt ?? null).toBeNull();
+    expect(g.challenge!.slot).toEqual([]);
   });
 });

@@ -9,18 +9,17 @@ import {
 } from '../src/core/engine/game';
 import { legendCanBlock, isInertSkill } from '../src/core/engine/challenge';
 import { CHALLENGES } from '../src/core/content/challenges';
-import { toMain } from './helpers';
+import { toMain, driveLegendTurn } from './helpers';
 import type { Die, DiceKind } from '../src/core/model/types';
 
 const die = (id: string, value: number, kind: DiceKind): Die => ({ id, value, kind });
 const Z02 = CHALLENGES.find((c) => c.id === 'Z02')!;
 
-/** 建局并把传奇的首个回合跑完，回到挑战者的主要阶段 */
+/** 建局并把传奇的首个回合驱动跑完，回到挑战者的主要阶段 */
 const toChallengerMain = (challenger: [string, string, string]) => {
   const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger });
   skipInitialReroll(g);
-  let guard = 0;
-  while (g.activePlayer === 'B' && guard++ < 30) applyAction(g, { t: 'block' });
+  driveLegendTurn(g);
   toMain(g);
   return g;
 };
@@ -82,14 +81,18 @@ describe('挑战模式 · 规则与削弱', () => {
     };
     // 备好 完杀〔1/2/3/4〕的驱动骰（开回合时还会追加）
     g.challenge!.driven = [die('q1', 1, 'meditation'), die('q2', 2, 'meditation'), die('q3', 3, 'meditation'), die('q4', 4, 'meditation')];
-    applyAction(g, { t: 'advance' }); // 结束挑战者回合 → 传奇回合（跑到 完杀 的"留哪颗"处停下）
+    applyAction(g, { t: 'advance' }); // 结束挑战者回合 → 传奇回合（逐条推进）
+    // 一条一条推进，直到 完杀 的"留哪颗"代决弹出
+    let guard = 0;
+    while (g.activePlayer === 'B' && !g.pending && guard++ < 20) applyAction(g, { t: 'challengeStep' });
     const pd = g.pending;
     expect(pd?.kind).toBe('challengePick');
     if (pd?.kind !== 'challengePick') throw new Error('expect challengePick');
     expect(pd.player).toBe('A');
     expect(pd.options.map((o) => o.label)).toEqual(['防2', '防3', '防4']);
-    // 挑战者替传奇决定：留「防3」（d2）
+    // 挑战者替传奇决定：留「防3」（d2）→ 再推进一条，完杀才真正结算
     applyAction(g, { t: 'challengePick', id: 'd2' });
+    applyAction(g, { t: 'challengeStep' });
     expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['d2']);
   });
 

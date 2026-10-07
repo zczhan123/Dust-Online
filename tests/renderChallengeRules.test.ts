@@ -79,11 +79,13 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     const panel = root.querySelector('.panel--challenge')!;
     expect(panel).not.toBeNull();
     expect(panel.querySelector('.player-title')?.textContent).toContain('永暗之刃');
-    expect(panel.querySelector('.player-header .skill-type')?.textContent).toBe('昔日传奇 · Z02');
-    expect(panel.querySelector('.card-sub')?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
+    expect(panel.querySelector('.player-header .skill-type')?.textContent).toBe('昔日传奇');
+    expect(panel.textContent).toContain('生命 50　｜　防御骰上限 4　｜　只抵挡伤害 ≥ 3 的攻击');
+    expect(panel.querySelectorAll('.card-sub')[1]?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
     const img = panel.querySelector('.challenge-thumb img');
     expect(img?.getAttribute('src')).toBe('./challenges/Z002.jpg');
-    expect(panel.querySelectorAll('.challenge-skill').length).toBe(6);
+    expect(panel.querySelectorAll('.challenge-skill-table .challenge-skill').length).toBe(6);
+    expect(panel.querySelector('.challenge-staging')).not.toBeNull();
     expect(panel.querySelector('.area--driven .area-label')?.textContent).toContain('驱动骰槽');
     // 标准模式下不出现该面板
     const std = mount(createGame({ seed: 1, firstPlayer: 'A' }));
