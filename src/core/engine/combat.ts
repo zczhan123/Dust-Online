@@ -412,6 +412,7 @@ export function virtualAttack(
   player: PlayerId,
   baseValue: number,
   source?: { skill: string; owner: PlayerId },
+  opts?: { unblockable?: boolean },
 ): void {
   // 战术牌 T16「潜伏」：双方各自的第一个回合内，双方均不能进行攻击（技能发起的虚拟攻击同样被禁）
   if (attacksBanned(g)) {
@@ -423,7 +424,7 @@ export function virtualAttack(
   g.pendingAttack = {
     attacker: player,
     value: point + base.value,
-    unblockable: g.unblockableThisTurn,
+    unblockable: opts?.unblockable ?? g.unblockableThisTurn,
     physical: false,
     baseValue: point,
     bonusValue: base.value,
