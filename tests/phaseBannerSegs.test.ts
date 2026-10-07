@@ -41,6 +41,14 @@ describe('阶段横幅序列（「没得做就自动翻页」时依次补播，�
     expect(phaseBannerSegs(snap('A', 'tactics'), snap('A', 'tactics'), nameOf)).toEqual([]);
   });
 
+  it('传奇回合（legendActor）：只保留「回合开始」，不弹尘起/主要', () => {
+    expect(phaseBannerSegs(snap('A', 'main'), snap('B', 'main'), nameOf, { legendActor: true })).toEqual([
+      { text: '玩家B · 回合开始', transient: false },
+    ]);
+    // 同一位（视角/重绘）→ 什么都不弹
+    expect(phaseBannerSegs(snap('B', 'main'), snap('B', 'main'), nameOf, { legendActor: true })).toEqual([]);
+  });
+
   it('首回合直接进尘起（本无重掷阶段）→ 不产生「重掷」段', () => {
     expect(phaseBannerSegs(snap('B', 'initialReroll'), snap('A', 'dustRise'), nameOf)).toEqual([
       { text: '玩家A · 回合开始', transient: false },

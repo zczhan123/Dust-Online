@@ -92,6 +92,19 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(std.root.querySelector('.panel--challenge')).toBeNull();
   });
 
+  it('传奇骰子按身份上色：临时驱动骰区域 / 驱动骰槽 用 die-B（红），不用灰色 die-drv', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.challenge!.driven = [
+      { id: 'drv1', value: 3, kind: 'meditation' },
+      { id: 'drv2', value: 5, kind: 'meditation' },
+    ];
+    state.challenge!.slot = [{ id: 'sl1', value: 6, kind: 'meditation' }];
+    const { root } = mount(state);
+    expect(root.querySelectorAll('.challenge-staging .die.die-B').length).toBe(2);
+    expect(root.querySelectorAll('.area--driven .die.die-B').length).toBe(1);
+    expect(root.querySelector('.die.die-drv')).toBeNull();
+  });
+
   it('正在结算的技能高亮（activeSkill 下标）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     state.challenge!.activeSkill = 2;

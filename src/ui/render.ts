@@ -1423,7 +1423,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   staging.appendChild(slab);
   const sdice = el('div', 'dice');
   for (const d of state.challenge?.driven ?? []) {
-    const chip = el('span', 'die die-drv');
+    const chip = el('span', 'die die-B');
     chip.dataset.id = d.id;
     chip.dataset.value = String(d.value);
     chip.textContent = String(d.value);
@@ -1450,7 +1450,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   driven.appendChild(dlab);
   const ddice = el('div', 'dice');
   for (const d of state.challenge?.slot ?? []) {
-    const chip = el('span', 'die die-drv');
+    const chip = el('span', 'die die-B');
     chip.dataset.id = d.id;
     chip.dataset.value = String(d.value);
     chip.textContent = String(d.value);
@@ -5586,6 +5586,7 @@ export function phaseBannerSegs(
   prev: { active: PlayerId; phase: Phase } | null,
   now: { active: PlayerId; phase: Phase },
   nameOf: (p: PlayerId) => string,
+  opts?: { legendActor?: boolean },
 ): { text: string; transient: boolean }[] {
   const segs: { text: string; transient: boolean }[] = [];
   const idxOf = (p: Phase): number => STANDARD_PHASES.indexOf(p as (typeof STANDARD_PHASES)[number]);
@@ -5593,6 +5594,8 @@ export function phaseBannerSegs(
   if (!prev || toIdx < 0) return segs;
   const turnChanged = prev.active !== now.active;
   if (turnChanged) segs.push({ text: `${nameOf(now.active)} · 回合开始`, transient: false });
+  // 挑战模式：传奇没有「尘起/主要」阶段 → 只保留「回合开始」这一段，不硬套阶段横幅
+  if (opts?.legendActor) return segs;
   const fromIdx = turnChanged ? -1 : idxOf(prev.phase);
   for (let i = Math.max(0, fromIdx + 1); i <= toIdx; i++) {
     const ph = STANDARD_PHASES[i];
@@ -6323,6 +6326,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     prevSnap ?? null,
     { active: state.activePlayer, phase: state.phase },
     (p) => playerName(ctx, p),
+    // 挑战模式·传奇回合：不硬套「尘起/主要」阶段横幅
+    state.mode === 'challenge' && state.activePlayer === 'B' ? { legendActor: true } : undefined,
   );
 
   // 切换等待：普通动效 / 支付整体 / 攻击池 / 畏惧响应池 / 气泡 … 取最大（整组播完才切 AB）

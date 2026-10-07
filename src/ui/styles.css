@@ -2573,7 +2573,6 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 }
 .challenge-staging .csk-staging-lab { font-size: 11.5px; color: #7a4a12; flex: 0 0 auto; }
 html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; background: #fdf8ee; }
-html[data-theme] .die.die-drv { background: #8a8f98; color: #fff; }
 .playband--single > .lifeline { grid-row: 1; }
 .challenge-card-box {
   position: relative;
