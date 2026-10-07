@@ -493,44 +493,66 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       return { opponentDiceByKind: map };
     },
   },
-  // 007 战争横扫：各消耗 1 攻/防/冥（显式）；各弃对方 0–1 攻/防/冥（显式）
+  // 007 战争横扫：消耗 1 攻 + 1 防 + 1 冥（**合并为一步**）→ 弃对方 0–1 攻/防/冥（**合并为一步**）。
+  // 注意：007 为第一列，与 010「真实之剑」永不同队 → 无置换路径（故不涉及 slots）。
   'zhuzai.sweep': {
-    steps: ({ state, player }) => {
-      const oppDice: SelectStep[] = [
-        { kind: 'dice', label: '选择弃置对方的攻击骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['attack'], min: 0, max: 1 },
-        { kind: 'dice', label: '选择弃置对方的防御骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['defense'], min: 0, max: 1 },
-        { kind: 'dice', label: '选择弃置对方的冥想骰（0–1 颗，不足可跳过）', owner: 'opponent', areas: ['meditation'], min: 0, max: 1 },
-      ];
-      if (hasSword(state, player)) {
-        return [{ kind: 'slots', label: SLOTS_LABEL, kinds: ['attack', 'defense', 'meditation'] }, ...oppDice];
-      }
-      return [
-        { kind: 'dice', label: '选择消耗的 1 个攻击骰', owner: 'self', areas: ['attack'], min: 1, max: 1, allowArtifact: true },
-        { kind: 'dice', label: '选择消耗的 1 个防御骰', owner: 'self', areas: ['defense'], min: 1, max: 1, allowArtifact: true },
-        { kind: 'dice', label: '选择消耗的 1 个冥想骰', owner: 'self', areas: ['meditation'], min: 1, max: 1, allowArtifact: true },
-        ...oppDice,
-      ];
+    steps: () => [
+      {
+        kind: 'dice',
+        label: '选择消耗的 3 颗能力骰（攻击 / 防御 / 冥想 各 1 颗）',
+        owner: 'self',
+        areas: ['attack', 'defense', 'meditation'],
+        min: 3,
+        max: 3,
+        allowArtifact: true,
+        validate: (dice) => {
+          const kinds = dice.map((d) => d.kind);
+          return kinds.length === 3 && new Set(kinds).size === 3
+            ? { ok: true, hint: '三类各 1 颗 ✓' }
+            : { ok: false, hint: '必须攻击 / 防御 / 冥想 各选 1 颗' };
+        },
+      },
+      {
+        kind: 'dice',
+        label: '选择弃置对方的能力骰（攻 / 防 / 冥想 各 0–1 颗，不足可跳过）',
+        owner: 'opponent',
+        areas: ['attack', 'defense', 'meditation'],
+        min: 0,
+        max: 3,
+        validate: (dice) => {
+          const kinds = dice.map((d) => d.kind);
+          return new Set(kinds).size === kinds.length
+            ? { ok: true }
+            : { ok: false, hint: '每种类型最多弃 1 颗' };
+        },
+      },
+    ],
+    buildParams: ({ state, player, chosenDice }) => {
+      const oppId = oppOf(player);
+      const byKind = (ids: string[], owner: PlayerId): Partial<Record<DiceKind, string>> => {
+        const m: Partial<Record<DiceKind, string>> = {};
+        for (const id of ids) {
+          const k = abilityDieInfo(state, owner, id)?.kind;
+          if (k) m[k] = id;
+        }
+        return m;
+      };
+      const c = byKind(chosenDice[0] ?? [], player);
+      const d = byKind(chosenDice[1] ?? [], oppId);
+      return {
+        // costSlots 必须按 [攻击, 防御, 冥想] 顺序（引擎 spec 顺序）
+        costSlots: [
+          ...(c.attack ? [{ dieIds: [c.attack] }] : []),
+          ...(c.defense ? [{ dieIds: [c.defense] }] : []),
+          ...(c.meditation ? [{ dieIds: [c.meditation] }] : []),
+        ],
+        discard: { attack: d.attack, defense: d.defense, meditation: d.meditation },
+      };
     },
-    buildParams: ({ chosenDice, slots }) => ({
-      costSlots: slots.length
-        ? slotsParam(slots)
-        : [...realSlots(chosenDice[0]), ...realSlots(chosenDice[1]), ...realSlots(chosenDice[2])],
-      discard: slots.length
-        ? {
-            attack: chosenDice[0]?.[0],
-            defense: chosenDice[1]?.[0],
-            meditation: chosenDice[2]?.[0],
-          }
-        : {
-            attack: chosenDice[3]?.[0],
-            defense: chosenDice[4]?.[0],
-            meditation: chosenDice[5]?.[0],
-          },
-    }),
   },
   // 007 震荡斩击：选类型 → 消耗 4 颗同类型（显式）→ 弃对方 0–4 颗同类型（显式）
   'zhuzai.smash': {
-    steps: ({ state, player, options }) => {
+    steps: ({ options }) => {
       const kind = options[0];
       const name = kind === 'attack' ? '攻击' : kind === 'defense' ? '防御' : '冥想';
       const steps: SelectStep[] = [
@@ -545,19 +567,15 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         },
       ];
       if (kind === 'attack' || kind === 'defense' || kind === 'meditation') {
-        if (hasSword(state, player)) {
-          steps.push({ kind: 'slots', label: SLOTS_LABEL, kinds: repeatKind(kind, 4) });
-        } else {
-          steps.push({ kind: 'dice', label: `选择消耗的 4 个${name}骰`, owner: 'self', areas: [kind], min: 4, max: 4, allowArtifact: true });
-        }
+        steps.push({ kind: 'dice', label: `选择消耗的 4 个${name}骰`, owner: 'self', areas: [kind], min: 4, max: 4, allowArtifact: true });
         steps.push({ kind: 'dice', label: `选择弃置对方的${name}骰（0–4 颗，不足可跳过）`, owner: 'opponent', areas: [kind], min: 0, max: 4 });
       }
       return steps;
     },
-    buildParams: ({ chosenDice, options, slots }) => ({
+    buildParams: ({ chosenDice, options }) => ({
       kind: options[0],
-      costSlots: slots.length ? slotsParam(slots) : realSlots(chosenDice[1]),
-      opponentDiscardIds: slots.length ? (chosenDice[1] ?? []) : (chosenDice[2] ?? []),
+      costSlots: realSlots(chosenDice[1]),
+      opponentDiscardIds: chosenDice[2] ?? [],
     }),
   },
   // 008 王家之拳：消耗 2 颗冥想骰 → 弃置自己的 0–2 颗防御骰（不足可少弃，代价为真实伤害）
