@@ -1408,8 +1408,9 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     }),
   },
   // 035 千劫·超度（启动）：消耗 2 个同点数冥想骰 → 5 真伤 → 选任意玩家一区重掷
+  // 持「真实之剑」：① 选 2 颗【同点】冥想骰（0–2 颗）→（不足）② 选置换源 → 选区域（直发，不再确认）
   'qianjie.chaodu': {
-    steps: ({ state, player }) => {
+    steps: ({ state, player, chosenDice }) => {
       const targetSteps: SelectStep[] = [
         {
           kind: 'option',
@@ -1429,31 +1430,81 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
           ],
         },
       ];
-      if (hasSword(state, player)) {
-        return [{ kind: 'slots' as const, label: SLOTS_LABEL, kinds: repeatKind('meditation', 2) }, ...targetSteps];
+      if (!hasSword(state, player)) {
+        return [
+          {
+            kind: 'dice' as const,
+            label: '选择消耗的 2 颗【点数相同】的冥想骰',
+            owner: 'self' as const,
+            areas: ['meditation' as const],
+            min: 2,
+            max: 2,
+            allowArtifact: true,
+            validate: (dice: { value: number }[]) =>
+              dice.length === 2 && dice[0].value === dice[1].value
+                ? { ok: true, hint: `点数相同 ✓（${dice[0].value} 点）` }
+                : { ok: false, hint: dice.length === 2 ? '两颗点数必须相同' : '请选择 2 颗冥想骰' },
+          },
+          ...targetSteps,
+        ];
       }
-      return [
+      // 持真实之剑：① 选 2 颗同点冥想骰（0–2 颗；实时校验）→ ② 不足时选置换源
+      const real = chosenDice[0] ?? [];
+      const costSteps: SelectStep[] = [
         {
-          kind: 'dice' as const,
-          label: '选择消耗的 2 颗【点数相同】的冥想骰',
-          owner: 'self' as const,
-          areas: ['meditation' as const],
-          min: 2,
+          kind: 'dice',
+          label: '选择消耗的 2 颗【点数相同】的冥想骰（0–2 颗；不够用「真实之剑」补）',
+          owner: 'self',
+          areas: ['meditation'],
+          min: 0,
           max: 2,
           allowArtifact: true,
-          validate: (dice: { value: number }[]) =>
-            dice.length === 2 && dice[0].value === dice[1].value
-              ? { ok: true, hint: `点数相同 ✓（${dice[0].value} 点）` }
-              : { ok: false, hint: dice.length === 2 ? '两颗点数必须相同' : '请选择 2 颗冥想骰' },
+          validate: (dice: { value: number }[]) => {
+            if (dice.length === 2)
+              return dice[0].value === dice[1].value
+                ? { ok: true, hint: `点数相同 ✓（${dice[0].value} 点）` }
+                : { ok: false, hint: '两颗点数必须相同' };
+            if (dice.length === 1)
+              return dice[0].value === 5
+                ? { ok: true, hint: '1 颗真骰 + 1 组置换 → 须为 5 点 ✓' }
+                : { ok: false, hint: '只选 1 颗真骰时必须是 5 点（置换出的骰恒为 5）' };
+            return { ok: true, hint: '不选真骰 → 两组置换（视为 5、5）' };
+          },
         },
-        ...targetSteps,
       ];
+      if (real.length < 2) {
+        const needDice = (2 - real.length) * 2;
+        costSteps.push({
+          kind: 'dice',
+          label: `再选恰好 ${needDice} 颗任意骰（每 2 颗＝1 格，视为 5）`,
+          owner: 'self',
+          areas: KINDS,
+          min: needDice,
+          max: needDice,
+          filter: (d) => !real.includes(d.id),
+          allowArtifact: true,
+          validate: (ds: { value: number }[]) => {
+            const vals = real
+              .map((id) => ownDieValue(state, player, id))
+              .concat(Array(Math.floor(ds.length / 2)).fill(5))
+              .filter((v): v is number => v !== undefined);
+            return vals.length === 2 && vals[0] === vals[1]
+              ? { ok: true, hint: `两格均为 ${vals[0]} 点 ✓` }
+              : { ok: false, hint: `两格点数必须相同（当前 ${vals.join(' 与 ')}）` };
+          },
+        });
+      }
+      return [...costSteps, ...targetSteps];
     },
-    buildParams: ({ state, player, chosenDice, slots, options }) => ({
-      costSlots: hasSword(state, player) ? slotsParam(slots) : realSlots(chosenDice[0]),
-      targetOwner: options[1] === 'opponent' ? 'opponent' : 'self',
-      targetKind: options[2] ?? 'attack',
+    buildParams: ({ state, player, chosenDice, options }) => ({
+      costSlots: hasSword(state, player)
+        ? [...realSlots(chosenDice[0]), ...chunkPairs(chosenDice[1] ?? []).map((pair) => ({ dieIds: pair }))]
+        : realSlots(chosenDice[0]),
+      targetOwner: options.includes('opponent') ? 'opponent' : 'self',
+      targetKind: (['attack', 'defense', 'meditation'] as DiceKind[]).find((k) => options.includes(k)) ?? 'attack',
     }),
+    // 持剑时最后一步直发（与"真实之剑多颗代价"一致）；未持剑仍走确认条
+    direct: true,
   },
   // 结束阶段：能力骰总数超出「意志」上限 → 由当前回合玩家自选弃置哪 N 颗（非强制指定）
   '@endDiscard': {

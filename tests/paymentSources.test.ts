@@ -171,11 +171,11 @@ describe('单类型交互回归（防未来多类型改动误伤）', () => {
     expect(d2.kind === 'dice' ? d2.min : null).toBe(3);
   });
 
-  it('突破（第三列）/ 超度（第二列）：持 010 → slots 步；无 010 → dice 步', () => {
+  it('突破（第三列）持 010 → slots 步；超度（第二列）持 010 → 新版 dice 步；无 010 都是 dice 步', () => {
     const g1 = mk(['010', '035', '003']);
     arm(g1, 'A', '010', 'left');
     expect(stepsOf(g1, 'yuqie.breakthrough')[0].kind).toBe('slots');
-    expect(stepsOf(g1, 'qianjie.chaodu')[0].kind).toBe('slots');
+    expect(stepsOf(g1, 'qianjie.chaodu')[0].kind).toBe('dice'); // 035 改走"选 2 颗同点冥想骰"新流程（不再用分格）
 
     const g2 = mk(['010', '035', '003']);
     expect(stepsOf(g2, 'yuqie.breakthrough')[0].kind).toBe('dice');
