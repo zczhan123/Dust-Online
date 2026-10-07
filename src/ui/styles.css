@@ -1358,11 +1358,12 @@ button.pay-die {
 .actionzone > .hint {
   flex: 1 1 100%;
 }
-/* 选择器：**3 行式**——① 提示（上面 .hint 已独占一行）② 文字（标题 + 已选）③ 骰片与操作按钮 */
-.actionzone > .selector {
+/* 技能向导的**骰片步**：3 行式——① 提示（上面 .hint 已独占一行）② 文字（标题 + 已选）③ 骰片与操作按钮。
+   其余选择器面板（选项/数字/slots 步、全知/适应/寒光…）**保持原来的"够位就同行"**（不独占整行）。 */
+.actionzone > .selector--head-row {
   flex: 1 1 100%;
 }
-.actionzone .selector-head {
+.actionzone .selector--head-row .selector-head {
   flex: 1 1 100%;
 }
 .confirm-row { flex-wrap: wrap; }

@@ -3135,7 +3135,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
   const { state, hooks } = ctx;
     const steps = spec.steps({ state, player: actorOf(state), chosenDice: sel.chosenDice, options: sel.options, numbers: sel.numbers, slots: sel.slots });
     const step = steps[sel.stepIndex];
-  const panel = el('div', 'selector');
+  // **仅"骰片步"**用 3 行式（文字独占一行、骰片+按钮下一行）；选项/数字/点数/slots 步保持原样（与按钮同行）
+  const panel = el('div', step && step.kind === 'dice' ? 'selector selector--head-row' : 'selector');
   if (!step) return panel;
 
   const head = el('div', 'selector-head');

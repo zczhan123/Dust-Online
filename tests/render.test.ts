@@ -2589,6 +2589,43 @@ describe('renderGame (interaction)', () => {
     });
   });
 
+  it('布局：只有"骰片步"的选择器带 3 行修饰类；选项步不带（防回归）', () => {
+    // 骰片步：灵能脉冲（真实之剑）→ 带 .selector--head-row
+    const s1 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '011', '003'] });
+    skipInitialReroll(s1);
+    applyAction(s1, { t: 'advance' });
+    s1.players.A.artifacts.find((a) => a.id === '010')!.activeMarkerSide = 'left';
+    s1.players.A.artifacts.find((a) => a.id === '011')!.activeMarkerSide = 'right';
+    s1.players.A.areas = { attack: [{ id: 'a1', value: 2, kind: 'attack' }], defense: [], meditation: [] };
+    mount(s1, root);
+    root
+      .querySelector<HTMLElement>(
+        '.player--self .card[data-artifact="011"] .skill-part[data-side="right"].clickable',
+      )!
+      .click();
+    expect(root.querySelector('.selector--head-row')).not.toBeNull();
+
+    // 选项步：@kuyu（032 低语·宣称类型）→ **不**带该修饰类（恢复"够位就同行"）
+    const s2 = createGame({ seed: 1, firstPlayer: 'A', heroA: ['004', '032', '003'] });
+    skipInitialReroll(s2);
+    const m2 = mount(s2, root);
+    m2.ui.selection = {
+      key: '@kuyu',
+      artifactId: '032',
+      side: 'only',
+      stepIndex: 0,
+      chosenDice: [],
+      options: [],
+      currentSel: new Set<string>(),
+      numbers: [],
+      slots: [],
+      slotModes: [],
+    };
+    m2.hooks.requestRender();
+    expect(root.querySelector('.selector')).not.toBeNull();
+    expect(root.querySelector('.selector--head-row')).toBeNull();
+  });
+
   it('shows the active skill name in the card badge (已激活·技能名)', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['010', '002', '003'] });
     skipInitialReroll(state);
