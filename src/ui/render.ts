@@ -1419,7 +1419,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const staging = el('div', 'challenge-staging');
   staging.dataset.act = 'challengeStaging';
   const slab = el('span', 'csk-staging-lab');
-  slab.textContent = `临时驱动骰区域（${state.challenge?.driven.length ?? 0}）`;
+  slab.textContent = '临时驱动骰区域';
   staging.appendChild(slab);
   const sdice = el('div', 'dice');
   for (const d of state.challenge?.driven ?? []) {
@@ -1446,7 +1446,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const driven = el('div', 'area area--driven');
   driven.dataset.kind = 'driven';
   const dlab = el('div', 'area-label');
-  dlab.textContent = `驱动骰槽（${state.challenge?.slot.length ?? 0}）`;
+  dlab.textContent = '驱动骰槽';
   driven.appendChild(dlab);
   const ddice = el('div', 'dice');
   for (const d of state.challenge?.slot ?? []) {

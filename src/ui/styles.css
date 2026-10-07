@@ -2521,6 +2521,11 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 黑卡身（同神器）：框内的小技能框/临时驱动骰区域保持浅色 */
+  background: #111111;
+  border: 1px solid #111111;
+  border-radius: 8px;
+  padding: 5px;
 }
 .challenge-skill-table {
   flex: 1 1 auto;

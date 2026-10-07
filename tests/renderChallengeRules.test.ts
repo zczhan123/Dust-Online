@@ -86,7 +86,8 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(img?.getAttribute('src')).toBe('./challenges/Z002.jpg');
     expect(panel.querySelectorAll('.challenge-skill-table .challenge-skill').length).toBe(6);
     expect(panel.querySelector('.challenge-staging')).not.toBeNull();
-    expect(panel.querySelector('.area--driven .area-label')?.textContent).toContain('驱动骰槽');
+    expect(panel.querySelector('.challenge-staging .csk-staging-lab')?.textContent).toBe('临时驱动骰区域');
+    expect(panel.querySelector('.area--driven .area-label')?.textContent).toBe('驱动骰槽');
     // 标准模式下不出现该面板
     const std = mount(createGame({ seed: 1, firstPlayer: 'A' }));
     expect(std.root.querySelector('.panel--challenge')).toBeNull();
