@@ -54,6 +54,8 @@ export interface SetupOptions {
   /** 战术牌·直接指定（构筑）：该方本场战术牌 id */
   tacticA?: string;
   tacticB?: string;
+  /** 单人挑战：所选挑战卡 id（有则走 createChallengeGame；`heroA`＝挑战者构筑、`heroB` 忽略） */
+  challengeCardId?: string;
 }
 
 type Side = 'A' | 'B';
@@ -1760,7 +1762,20 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     }
     top.appendChild(g2);
     const start = button('pick-start', '开始挑战');
-    start.disabled = true;
+    start.dataset.act = 'challengeStart';
+    start.disabled = !slots.every((s) => s != null);
+    start.addEventListener('click', () => {
+      const card = CHALLENGES[legendIdx];
+      if (!slots.every((s) => s != null) || !card) return;
+      ac.abort();
+      onStart({
+        heroA: slots as [string, string, string],
+        heroB: card.artifacts,
+        firstPlayer: 'B', // 说明书：永远从「昔日传奇」回合开始
+        challengeCardId: card.id,
+        tacticA: tacticPick ?? undefined,
+      });
+    });
     top.appendChild(start);
     surface.appendChild(top);
   }

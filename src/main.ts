@@ -1,5 +1,5 @@
 import './ui/styles.css';
-import { createGame, applyAction } from './core/engine/game';
+import { createGame, createChallengeGame, applyAction } from './core/engine/game';
 import { renderGame, setLocalViewPlayer, actorOf, type UiState } from './ui/render';
 import { renderSetup, type SetupOptions } from './ui/setupScreen';
 import { renderLobby } from './ui/lobby';
@@ -141,17 +141,28 @@ const timeoutDispatch = (a: Action): void => {
 
 /** 本地对局开局（左右互搏；联机大厅进入的选择页也用它兜底） */
 const startLocal = (opts: SetupOptions): void => {
-  state = createGame({
-    seed: newSeed(),
-    firstPlayer: opts.firstPlayer,
-    heroA: opts.heroA,
-    heroB: opts.heroB,
-    legendA: opts.legendA,
-    legendB: opts.legendB,
-    tactics: opts.tactics,
-    tacticA: opts.tacticA,
-    tacticB: opts.tacticB,
-  });
+  if (opts.challengeCardId) {
+    // 单人挑战：对手＝挑战卡自动机；固定视角＝挑战者恒在下方（本模式**不做 A/B 换位**）
+    state = createChallengeGame({
+      seed: newSeed(),
+      cardId: opts.challengeCardId,
+      challenger: opts.heroA,
+      tactic: opts.tacticA,
+    });
+    setLocalViewPlayer('A');
+  } else {
+    state = createGame({
+      seed: newSeed(),
+      firstPlayer: opts.firstPlayer,
+      heroA: opts.heroA,
+      heroB: opts.heroB,
+      legendA: opts.legendA,
+      legendB: opts.legendB,
+      tactics: opts.tactics,
+      tacticA: opts.tacticA,
+      tacticB: opts.tacticB,
+    });
+  }
   resetUi();
   render();
 };
