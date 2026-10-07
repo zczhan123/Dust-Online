@@ -270,6 +270,7 @@ function continueLegendTurn(g: GameState): void {
       consumed = g.challenge.driven.filter((d) => m.includes(d.id));
       g.challenge.driven = g.challenge.driven.filter((d) => !m.includes(d.id));
     }
+    g.challenge.activeSkill = i; // 界面高亮"正在结算"
     applyChallengeSkill(g, card, skill, consumed);
     if (g.pendingAttack || g.virtualQueue) {
       g.challenge.resumeAt = i + 1; // 等挑战者响应完再续
@@ -282,6 +283,7 @@ function continueLegendTurn(g: GameState): void {
   }
   g.challenge.driven = [];
   g.challenge.resumeAt = null;
+  g.challenge.activeSkill = null;
   g.challenge.turn += 1;
   endTurn(g); // 交回合给挑战者（其 beginTurn 走正常流程）
 }

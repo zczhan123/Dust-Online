@@ -71,3 +71,41 @@ describe('挑战模式 · 战斗界面「特殊规则」入口', () => {
     expect(root.querySelector('[data-act="challengeRulesOverlay"]')).toBeNull();
   });
 });
+
+describe('挑战模式 · 对手面板（D 方案）', () => {
+  it('面板头含称号/点数分布；卡图缩略指向压缩后的挑战卡图；技能列 6 行；第三区＝驱动骰槽', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const panel = root.querySelector('.panel--challenge')!;
+    expect(panel).not.toBeNull();
+    expect(panel.querySelector('.player-title')?.textContent).toContain('永暗之刃');
+    expect(panel.querySelector('.player-header .skill-type')?.textContent).toBe('昔日传奇 · Z02');
+    expect(panel.querySelector('.card-sub')?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
+    const img = panel.querySelector('.challenge-thumb img');
+    expect(img?.getAttribute('src')).toBe('./challenges/Z02.jpg');
+    expect(panel.querySelectorAll('.challenge-skill').length).toBe(6);
+    expect(panel.querySelector('.area--driven .area-label')?.textContent).toContain('驱动骰槽');
+    // 标准模式下不出现该面板
+    const std = mount(createGame({ seed: 1, firstPlayer: 'A' }));
+    expect(std.root.querySelector('.panel--challenge')).toBeNull();
+  });
+
+  it('正在结算的技能高亮（activeSkill 下标）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.challenge!.activeSkill = 2;
+    const { root } = mount(state);
+    const rows = Array.from(root.querySelectorAll('.panel--challenge .challenge-skill'));
+    expect(rows[2].classList.contains('is-active')).toBe(true);
+    expect(rows.filter((r) => r.classList.contains('is-active')).length).toBe(1);
+  });
+
+  it('点卡图缩略 → 打开大图浮窗；关闭后消失', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    (root.querySelector('[data-act="challengeCardOpen"]') as HTMLElement).click();
+    const overlay = root.querySelector('[data-act="challengeCardOverlay"]');
+    expect(overlay).not.toBeNull();
+    (root.querySelector('[data-act="challengeCardClose"]') as HTMLElement).click();
+    expect(root.querySelector('[data-act="challengeCardOverlay"]')).toBeNull();
+  });
+});

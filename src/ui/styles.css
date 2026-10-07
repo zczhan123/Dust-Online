@@ -2498,3 +2498,70 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
   .fx-text { transition-duration: 1ms !important; }
 }
 
+/* ===== 挑战模式 · 对手面板（D 方案） ===== */
+.panel--challenge .player-header { flex-wrap: wrap; }
+.panel--challenge .card-sub { font-weight: 400; font-size: 12px; color: #6f6a60; }
+.challenge-row { display: flex; gap: 8px; align-items: stretch; margin: 4px 0; min-width: 0; }
+.challenge-thumb {
+  flex: 0 0 38%;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid #cfc8ba;
+  border-radius: 8px;
+  background: #000;
+  overflow: hidden;
+  cursor: zoom-in;
+  aspect-ratio: 1764 / 799;
+}
+.challenge-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.challenge-thumb:focus-visible { outline: 2px solid #8a5a05; outline-offset: 2px; }
+.challenge-skills {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #cfc8ba;
+  border-radius: 8px;
+  padding: 3px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+.challenge-skill {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.25;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border-left: 3px solid transparent;
+  min-width: 0;
+}
+.challenge-skill.is-active { background: #fbe8c8; border-left-color: #8a5a05; }
+.challenge-skill .csk-no { font-size: 11px; color: #918b7e; flex: 0 0 auto; }
+.challenge-skill .csk-name { font-weight: 700; flex: 0 0 auto; }
+.challenge-skill .csk-mark { color: #8a5a05; font-weight: 700; flex: 0 0 auto; }
+.challenge-skill .csk-slot {
+  color: #6f6a60;
+  font-size: 11.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.challenge-skill.is-active .csk-slot { color: #7a4a12; font-weight: 700; }
+html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; background: #fdf8ee; }
+html[data-theme] .die.die-drv { background: #8a8f98; color: #fff; }
+.playband--single > .lifeline { grid-row: 1; }
+.challenge-card-box {
+  position: relative;
+  max-width: min(1200px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.challenge-card-box img { max-width: 100%; max-height: 86vh; border-radius: 8px; background: #000; display: block; }
+.challenge-card-box .settings-close { position: absolute; right: 0; top: -34px; }
+

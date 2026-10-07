@@ -16,7 +16,7 @@ import { isAltArtifact } from '../core/content/artifacts';
 import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
-import { CHALLENGE_RULE_NOTES } from '../core/content/challenges';
+import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase } from '../core/content/challenges';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
@@ -154,6 +154,8 @@ export interface UiState {
   settingsOpen: boolean;
   /** 挑战模式：是否打开「挑战模式特殊规则」浮窗 */
   challengeRulesOpen?: boolean;
+  /** 挑战模式：是否打开挑战卡大图 */
+  challengeCardOpen?: boolean;
   /** 联机·战斗界面「退出对局」二次确认弹框是否打开 */
   onlineLeaveOpen?: boolean;
   /** 战报抽屉是否打开（战报栏收起时用） */
@@ -1328,6 +1330,137 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
 }
 
 /** 玩家面板：只保留骰区与神器卡（不显示「玩家A/B」归属标签——身份由生命值栏/面板边线呈现） */
+/** 挑战模式 · 对手面板（D 方案）：面板头（含点数分布/计数）＋ 卡图缩略（点开放大）＋ 技能列（高亮"正在结算"）
+ *  ＋ 三区（防御骰区 / 攻击骰区 / **驱动骰槽**＝原冥想骰区槽位）＋ 生命条。 */
+function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
+  const { state } = ctx;
+  const card = CHALLENGES.find((c) => c.id === state.challenge?.cardId) ?? null;
+  const panel = el('div', 'player player--enemy panel--challenge');
+  panel.dataset.player = player.id;
+  if (state.phase !== 'gameOver' && actorOf(state) === player.id) panel.classList.add('player--acting');
+
+  // ① 面板头：传奇名 ＋ 药丸 ＋ 点数分布（取它第二列神器；与玩家卡头同款写法）＋ 计数徽标
+  const head = el('div', 'player-header');
+  const title = el('span', 'player-title');
+  title.textContent = card ? `传说中的「${card.legacy}」` : '昔日传奇';
+  head.appendChild(title);
+  const pill = el('span', 'skill-type');
+  pill.textContent = card ? `昔日传奇 · ${card.id}` : '昔日传奇';
+  head.appendChild(pill);
+  const dist = player.artifacts.find((a) => a.column === 2)?.distribution;
+  if (dist) {
+    const sub = el('span', 'card-sub');
+    sub.textContent = `分布 防${dist.defense.join('/')} 攻${dist.attack.join('/')} 冥${dist.meditation.join('/')}`;
+    head.appendChild(sub);
+  }
+  if (card?.countCap != null) {
+    const cnt = el('span', 'badge-count');
+    cnt.textContent = `计数 ${state.challenge?.count ?? 0}/${card.countCap}`;
+    head.appendChild(cnt);
+  }
+  panel.appendChild(head);
+
+  // ② 卡图缩略（点开看大图）＋ 技能列
+  const row = el('div', 'challenge-row');
+  const thumb = document.createElement('button');
+  thumb.type = 'button';
+  thumb.className = 'challenge-thumb';
+  thumb.dataset.act = 'challengeCardOpen';
+  thumb.title = '点击看大图';
+  const im = document.createElement('img');
+  im.src = card ? `./challenges/${card.id}.jpg` : '';
+  im.alt = card ? card.legacy : '';
+  thumb.appendChild(im);
+  thumb.addEventListener('click', () => {
+    ctx.hooks.ui.challengeCardOpen = true;
+    ctx.hooks.requestRender();
+  });
+  row.appendChild(thumb);
+
+  const list = el('div', 'challenge-skills');
+  (card?.skills ?? []).forEach((sk, i) => {
+    const r = el('div', `challenge-skill${state.challenge?.activeSkill === i ? ' is-active' : ''}`);
+    const no = el('span', 'csk-no');
+    no.textContent = String(i);
+    r.appendChild(no);
+    const nm = el('span', 'csk-name');
+    nm.textContent = sk.name;
+    r.appendChild(nm);
+    if (sk.marker) {
+      const mk = el('span', 'csk-mark');
+      mk.textContent = sk.marker;
+      r.appendChild(mk);
+    }
+    const sl = el('span', 'csk-slot');
+    sl.textContent = slotPhrase(sk.slots ?? null);
+    r.appendChild(sl);
+    list.appendChild(r);
+  });
+  row.appendChild(list);
+  panel.appendChild(row);
+
+  // ③ 生命条（独占一行）
+  const band = el('div', 'playband playband--single');
+  const life = lifeBar(player, playerName(ctx, player.id));
+  life.style.gridColumn = '1 / span 3';
+  band.appendChild(life);
+  panel.appendChild(band);
+
+  // ④ 三区：防御骰区 / 攻击骰区 / 驱动骰槽（＝原"冥想骰区"槽位，仅本模式改名）
+  const areas = el('div', 'areas');
+  const driven = el('div', 'area area--driven');
+  driven.dataset.kind = 'driven';
+  const dlab = el('div', 'area-label');
+  dlab.textContent = `驱动骰槽（${state.challenge?.driven.length ?? 0}）`;
+  driven.appendChild(dlab);
+  const ddice = el('div', 'dice');
+  for (const d of state.challenge?.driven ?? []) {
+    const chip = el('span', 'die die-drv');
+    chip.dataset.id = d.id;
+    chip.dataset.value = String(d.value);
+    chip.textContent = String(d.value);
+    ddice.appendChild(chip);
+  }
+  driven.appendChild(ddice);
+  for (const k of AREA_ORDER_MIRRORED) {
+    if (k === 'meditation') areas.appendChild(driven);
+    else areas.appendChild(areaBox(k, player, ctx));
+  }
+  panel.appendChild(areas);
+
+  return panel;
+}
+
+/** 挑战卡大图浮窗（复用设置弹窗外壳）。 */
+function challengeCardOverlay(ctx: Ctx): HTMLElement {
+  const overlay = el('div', 'settings-overlay');
+  overlay.dataset.act = 'challengeCardOverlay';
+  const box = el('div', 'challenge-card-box');
+  const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
+  const im = document.createElement('img');
+  im.src = card ? `./challenges/${card.id}.jpg` : '';
+  im.alt = card ? card.legacy : '';
+  box.appendChild(im);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel settings-close';
+  close.dataset.act = 'challengeCardClose';
+  close.textContent = '关闭 ✕';
+  close.addEventListener('click', () => {
+    ctx.hooks.ui.challengeCardOpen = false;
+    ctx.hooks.requestRender();
+  });
+  box.appendChild(close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      ctx.hooks.ui.challengeCardOpen = false;
+      ctx.hooks.requestRender();
+    }
+  });
+  overlay.appendChild(box);
+  return overlay;
+}
+
 function playerPanel(
   player: PlayerState,
   role: 'enemy' | 'self',
@@ -5747,7 +5880,11 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   // 主栏：敌方 / 中央操作区 / 自己
   const main = el('div', 'main');
-  main.appendChild(playerPanel(state.players[enemyId], 'enemy', true, ctx));
+  main.appendChild(
+    state.mode === 'challenge'
+      ? challengePanel(state.players[enemyId], ctx)
+      : playerPanel(state.players[enemyId], 'enemy', true, ctx),
+  );
 
   const centerband = el('div', 'centerband');
   // 传奇模式：中段最左格 = 战报（内置滚动；设置按钮已移到中段右侧空槽）
@@ -5827,6 +5964,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   if (hooks.ui.challengeRulesOpen) {
     root.appendChild(challengeRulesPanel(ctx));
+  }
+  if (hooks.ui.challengeCardOpen) {
+    root.appendChild(challengeCardOverlay(ctx));
   }
   if (hooks.ui.logOpen) {
     root.appendChild(logDrawer(ctx));

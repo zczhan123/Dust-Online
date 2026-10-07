@@ -388,7 +388,15 @@ export interface GameState {
   /** 对局形态：标准（含左右互搏/联机）｜单人挑战（对手＝挑战卡自动机） */
   mode: 'standard' | 'challenge';
   /** 单人挑战：传奇运行时（仅 `mode==='challenge'` 时存在） */
-  challenge?: { cardId: string; count: number; driven: Die[]; turn: number; resumeAt?: number | null };
+  challenge?: {
+    cardId: string;
+    count: number;
+    driven: Die[];
+    turn: number;
+    resumeAt?: number | null;
+    /** 正在结算的技能下标（界面高亮"正在结算"用）；不在回合内为 null */
+    activeSkill?: number | null;
+  };
   dustfall: number;
   turnIndex: number;
   firstRound: Record<PlayerId, boolean>;
