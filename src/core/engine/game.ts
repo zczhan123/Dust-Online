@@ -14,7 +14,7 @@ import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnS
 import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
-import { CHALLENGES, type ChallengeSkill } from '../content/challenges';
+import { CHALLENGES, type ChallengeCard, type ChallengeSkill } from '../content/challenges';
 import { matchSlots } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
@@ -131,14 +131,64 @@ function rollDrivenDice(g: GameState, n: number): void {
   });
 }
 
-/** 传奇单条技能（2b-2 只写战报；效果在 2c）。 */
-function runChallengeSkill(g: GameState, legacy: string, skill: ChallengeSkill, consumed: string[]): void {
-  const vals = consumed
-    .map((id) => g.challenge!.driven.find((d) => d.id === id)?.value)
-    .filter((v): v is number => v != null)
-    .sort((a, b) => a - b)
-    .join('/');
+/** 传奇防御骰上限截断（超出部分**不获得**）。 */
+function capLegendDefense(g: GameState, cap: number): void {
+  if (g.players.B.areas.defense.length > cap) {
+    g.players.B.areas.defense = g.players.B.areas.defense.slice(0, cap);
+  }
+}
+
+/** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
+function syncLegendFengmang(g: GameState): void {
+  const p = g.players.B;
+  p.buffs = p.buffs.filter((b) => b.source !== '传奇锋芒');
+  const add = g.challenge?.count ?? 0;
+  if (add > 0) p.buffs.push({ attr: 'attackDamage', add, duration: 'thisTurn', source: '传奇锋芒' });
+}
+
+/**
+ * 结算传奇的一条技能（导出供测试直接调用；`consumed` ＝本条消耗的驱动骰对象，点数仍保留）。
+ * 攻击类效果（暗夜凶神 / 枭首 / 遁入暗影的"发起攻击"）在 2c-2；本批先把**状态改动**做完。
+ */
+export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: ChallengeSkill, consumed: Die[]): void {
+  const legacy = card.legacy;
+  const vals = consumed.map((d) => d.value).sort((a, b) => a - b).join('/');
   logLine(g, `「${legacy}」：${skill.name}${vals ? `（消耗驱动骰 ${vals}）` : ''}`);
+  const A = g.players.A;
+  const B = g.players.B;
+  switch (skill.id) {
+    case 'z02-0':
+      return; // 投驱动骰已在回合开始完成
+    case 'z02-1':
+      syncLegendFengmang(g);
+      return;
+    case 'z02-2': {
+      // 尽可能弃置挑战者防御骰，直至剩 1（默认：留第一颗；"留哪颗"由代决层决定）
+      const drop = A.areas.defense.slice(1).map((d) => d.id);
+      if (drop.length) consumeDice(g, A, 'defense', drop);
+      // 获得 1/2/3/4 点攻击骰各 1
+      for (const v of [1, 2, 3, 4]) B.areas.attack.push(createDie(newDieId('chg-B-'), v, 'attack'));
+      return;
+    }
+    case 'z02-3': {
+      if (A.areas.defense.length > 0) consumeDice(g, A, 'defense', [A.areas.defense[0].id]);
+      const cap = card.countCap ?? Number.POSITIVE_INFINITY;
+      g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
+      syncLegendFengmang(g);
+      return; // 「8 点不可抵挡攻击」在 2c-2
+    }
+    case 'z02-4': {
+      for (const d of consumed) B.areas.attack.push(createDie(newDieId('chg-B-'), d.value, 'attack'));
+      return; // 「若攻击骰 > 挑战者防御骰 → 全部攻击」在 2c-2
+    }
+    case 'z02-5': {
+      for (const d of consumed) B.areas.defense.push(createDie(newDieId('chg-B-'), d.value, 'defense'));
+      capLegendDefense(g, card.defenseCap ?? Number.POSITIVE_INFINITY);
+      return; // 「每 1 组 → 1 次 2 点攻击」在 2c-2
+    }
+    default:
+      return;
+  }
 }
 
 /**
@@ -168,17 +218,17 @@ function runLegendTurn(g: GameState): void {
       logLine(g, `「${legacy}」：${skill.name} — 首次回合（怜悯*），跳过`);
       continue;
     }
-    let consumed: string[] = [];
+    let consumed: Die[] = [];
     if (skill.slots && skill.slots.length > 0) {
       const m = matchSlots(skill.slots, g.challenge.driven);
       if (!m) {
         logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
         continue;
       }
-      consumed = m;
-      g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d.id));
+      consumed = g.challenge.driven.filter((d) => m.includes(d.id));
+      g.challenge.driven = g.challenge.driven.filter((d) => !m.includes(d.id));
     }
-    runChallengeSkill(g, legacy, skill, consumed);
+    applyChallengeSkill(g, card, skill, consumed);
     if (skill.endsTurn) {
       logLine(g, `「${legacy}」：${skill.name} — 立即结束回合`);
       break;
