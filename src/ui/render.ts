@@ -1358,10 +1358,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   head.appendChild(pill);
   if (card) {
     const meta = el('span', 'card-sub');
-    const life = card.life != null ? `生命 ${card.life}` : '生命 —';
-    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
-    const rule = card.defenseRule ?? '防御规则 —';
-    meta.textContent = `${life}　｜　${cap}　｜　${rule}`;
+    meta.textContent = card.life != null ? `生命 ${card.life}` : '生命 —';
     head.appendChild(meta);
   }
   const dist = player.artifacts.find((a) => a.column === 2)?.distribution;
@@ -1398,20 +1395,25 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const table = el('div', 'challenge-skill-table');
   (card?.skills ?? []).forEach((sk, i) => {
     const r = el('div', `challenge-skill${state.challenge?.activeSkill === i ? ' is-active' : ''}`);
+    const head = el('div', 'csk-head');
     const no = el('span', 'csk-no');
     no.textContent = String(i);
-    r.appendChild(no);
+    head.appendChild(no);
     const nm = el('span', 'csk-name');
     nm.textContent = sk.name;
-    r.appendChild(nm);
+    head.appendChild(nm);
     if (sk.marker) {
       const mk = el('span', 'csk-mark');
       mk.textContent = sk.marker;
-      r.appendChild(mk);
+      head.appendChild(mk);
     }
     const sl = el('span', 'csk-slot');
     sl.textContent = slotPhrase(sk.slots ?? null);
-    r.appendChild(sl);
+    head.appendChild(sl);
+    r.appendChild(head);
+    const eff = el('div', 'csk-eff');
+    eff.textContent = sk.effect; // 完整效果（照卡面）
+    r.appendChild(eff);
     table.appendChild(r);
   });
   right.appendChild(table);
@@ -1434,11 +1436,20 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   row.appendChild(right);
   panel.appendChild(row);
 
-  // ③ 生命条（独占一行）
+  // ③ 生命条（占"驱动骰槽列 + 攻击骰区列"）＋ 防御信息框（占"防御骰区列"）
   const band = el('div', 'playband playband--single');
   const life = lifeBar(player, playerName(ctx, player.id));
-  life.style.gridColumn = '1 / span 3';
+  life.style.gridColumn = '1 / span 2';
   band.appendChild(life);
+  if (card) {
+    const info = el('div', 'challenge-legacy-info');
+    info.dataset.act = 'challengeLegacyInfo';
+    info.style.gridColumn = '3';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
+    const rule = card.defenseRule ?? '防御规则 —';
+    info.textContent = `${cap}　｜　${rule}`;
+    band.appendChild(info);
+  }
   panel.appendChild(band);
 
   // ④ 三区：防御骰区 / 攻击骰区 / 驱动骰槽（＝原"冥想骰区"槽位，仅本模式改名）

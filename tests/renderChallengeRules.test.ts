@@ -80,8 +80,21 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(panel).not.toBeNull();
     expect(panel.querySelector('.player-title')?.textContent).toContain('永暗之刃');
     expect(panel.querySelector('.player-header .skill-type')?.textContent).toBe('昔日传奇');
-    expect(panel.textContent).toContain('生命 50　｜　防御骰上限 4　｜　只抵挡伤害 ≥ 3 的攻击');
+    expect(panel.querySelector('.card-sub')?.textContent).toBe('生命 50');
     expect(panel.querySelectorAll('.card-sub')[1]?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
+    // 标题栏不再含"防御骰上限/规则"（已移到防御信息框）
+    expect(panel.querySelector('.player-header')?.textContent).not.toContain('防御骰上限');
+    // 防御信息框（占防御骰区列）
+    expect(panel.querySelector('.challenge-legacy-info')?.textContent).toBe(
+      '防御骰上限 4　｜　只抵挡伤害 ≥ 3 的攻击',
+    );
+    // 生命条占两列（驱动骰槽列 + 攻击骰区列）
+    expect((panel.querySelector('.playband--single > .lifeline') as HTMLElement).style.gridColumn).toBe(
+      '1 / span 2',
+    );
+    // 技能描述补全（照卡面）＋ 条件文案已精简
+    expect(panel.textContent).toContain('尽可能弃置挑战者的防御骰');
+    expect(panel.textContent).toContain('（满足1、2、3、4点时发动）');
     const img = panel.querySelector('.challenge-thumb img');
     expect(img?.getAttribute('src')).toBe('./challenges/Z002.jpg');
     expect(panel.querySelectorAll('.challenge-skill-table .challenge-skill').length).toBe(6);

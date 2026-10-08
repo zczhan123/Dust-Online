@@ -80,25 +80,26 @@ export const CHALLENGES: ChallengeCard[] = [
   { id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'] },
 ];
 
-/** 把挑战技能的槽转换成显示文本（与规格文档记法一致）。 */
+/** 把挑战技能的槽转换成显示文本（**自造记法，求短**；与结构化数据一一对应）。 */
 export function slotPhrase(slots: ChallengeSlot[] | null): string {
   if (!slots || slots.length === 0) return '（必发动）';
   const single = slots.length === 1 ? slots[0] : null;
-  if (single && single.kind === 'pips' && single.count > 1) {
-    return `（满足 ${single.count} 个〔${(single.faces ?? []).join('/')}点〕驱动骰时发动）`;
+  if (single && single.kind === 'pips') {
+    const faces = (single.faces ?? []).join('/');
+    return single.count === 1 ? `（满足${faces}点时发动）` : `（满足${single.count}颗${faces}点时发动）`;
   }
   if (slots.every((s) => s.kind === 'pips')) {
     if (slots.every((s) => s.count === 1)) {
       const faces = slots.flatMap((s) => s.faces ?? []);
-      return `（满足〔${faces.join('点、')}点〕驱动骰时发动）`;
+      return `（满足${faces.join('、')}点时发动）`;
     }
-    const parts = slots.map((s) => `${s.count} 个〔${(s.faces ?? []).join('/')}点〕`).join('');
-    return `（满足 ${parts}驱动骰时发动）`;
+    const parts = slots.map((s) => `${s.count}颗${(s.faces ?? []).join('/')}`).join('＋');
+    return `（满足${parts}点时发动）`;
   }
   const s = slots[0];
-  if (s.kind === 'same') return `（满足 ${s.count} 个任意相同点数驱动骰时发动）`;
-  if (s.kind === 'any') return `（满足 ${s.count} 个任意点数驱动骰时发动）`;
-  if (s.kind === 'straight') return `（满足 ${s.count} 个顺点驱动骰时发动）`;
+  if (s.kind === 'same') return `（满足${s.count}颗同点时发动）`;
+  if (s.kind === 'any') return `（满足${s.count}颗任意点时发动）`;
+  if (s.kind === 'straight') return `（满足${s.count}颗顺点时发动）`;
   return '（必发动）';
 }
 
