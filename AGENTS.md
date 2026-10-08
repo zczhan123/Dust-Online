@@ -330,7 +330,8 @@
     - **可暂停续跑**：`challenge.resumeAt` 记"下一条技能下标"；`applyActionCore` 收尾在"无待决策/无攻击队列"时自动 `continueLegendTurn`。**多段攻击走现成 `virtualQueue` + `pumpAttackQueue`**（不新增机制）。
     - **★ 分步顺序＝卡面 `effect` 文字顺序，一字不改**：每条技能**固定前缀**＝① 弹技能名 ② 驱动骰「临时区→中间→驱动骰槽→消失」③ 再按卡面逐步执行；**代决在哪一步发生就哪一步弹**。反例（真实事故）：暗夜凶神卡面是"①8点攻击 ②弃骰 ③计数+1"，曾把"弃骰（及其选择）"提到攻击之前 → 现用 `challenge.deferred`（延后一步）修正。转写新卡先拆**有序步骤表**（见 `..\plans\挑战模式-新卡开发清单.md §0.0`）。
     - **先动画、再选择**：要弹代决时，**先把驱动骰扣下并报 `legendSkill`（`consumed` 非空、`spawn:[]`）**，让界面播完"技能名 + 驱骰进槽"再显示选择面板（`legendPickHoldUntil` + 操作区占位"发动中…"）；选完进同一条技能时用 `challenge.pendingConsumed` 里的骰子（不再重算槽匹配），第二条 `legendSkill` 只报"新产生的骰/攻击"（`consumed:[]`，界面**不重复弹名**）。
-    - **枭首"逐颗飞出"**：攻击骰**留在攻击骰区**（不再一次清空）；`virtualQueue` 条目带 `dieId`/`dieStyle:'solid'`，`pumpAttackQueue` 轮到它时把该骰从区里移除并置 `pendingAttack.sourceDieId` → 界面以"区里那颗骰"作飞行动画起点（通用"消失"已按 `sourceDieId` 排除）。
+    - **枭首"逐颗飞出"**：攻击骰**留在攻击骰区**（不再一次清空）；`virtualQueue` 条目带 `dieId`/`dieStyle:'solid'`，`pumpAttackQueue` 轮到它时只置 `pendingAttack.sourceDieId`（**不立刻删**），**这次攻击结算后**才在 `settleAttack` 里把它从区里移除；界面在等待响应期间把区里那颗真骰**藏起来**（观感＝飞出去就没它了）。**先进后出**：新骰先飞进区、与旧骰并排，再逐颗飞出去攻击（否则新骰滑进旧骰腾出的格子 → 和飞行影子重叠；真实事故：两颗 6 点"覆盖"）。
+    - **驱动骰槽＝纯过场**：引擎**不**写 `challenge.slot`（只用 `pendingConsumed` 记账）；界面只用影子演「临时区→中间→槽→消失」，落地即淡出，**别再揭出真骰**。
    - **扣驱动骰的时机**：**真正结算前才扣**（曾因"提问前就扣"导致续跑重算槽匹配→整条被跳过）。
 5. **代决（模式 1）**：传奇本该自己做的抉择**全部由挑战者决定**。机制＝`Pending{kind:'challengePick', player:'A', prompt, options[]}` ＋ `Action{t:'challengePick', id}`；`challengeDecisions()` 给出本条需要的选择，`continueLegendTurn` 逐条问、收集齐再结算；选择存 `g.challenge.decisions`（按技能 id）。**已接**：`z02-2` 留哪颗防御骰、`z02-3` 弃哪颗防御骰、`z02-4` 枭首攻击顺序（`asc/desc`）。**未代决时一律有确定性默认**（AI/测试兼容）。
 6. **挑战者侧**：正常流程但无尘落；传奇按 **「防御规则」** 抵挡——`ChallengeCard.defenseMin`（Z01=2 / Z02=3），伤害 < 门槛 → `getLegalActions` **不给任何抵挡动作**（自动不挡）；「防御骰上限」`defenseCap` 在传奇**获得**防御骰时生效，**超出＝保留最新、挤掉最旧**（被挤出的旧骰由界面走通用"飞中间淡出"）。

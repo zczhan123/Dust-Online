@@ -6154,6 +6154,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   //  ★ **顺序＝卡面顺序**：固定前缀（弹技能名 + 驱骰「临时区→中间→驱动骰槽→消失」）→ 再按卡面逐步执行。
   //  投掷（驱动骰→临时区）**不在这里做**：临时区骰子也是 `.die[data-id]`，通用「获得骰」动画已经会播
   //  （曾额外加一条 `playLegendRoll` → 同一动作播两遍）。
+  //  驱动骰槽是**纯过场**：状态里不留骰（引擎只记 `pendingConsumed`）→ 界面全用影子演，落点后自然消失。
   let legendDur = 0;
   let legendConsumeDur = 0;
   if (legendSkillEv) {
@@ -6170,29 +6171,15 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
       legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
       legendDur = Math.max(legendDur, legendConsumeDur);
-      // 驱动骰槽里的"真骰"（多段攻击等待期间会保留在槽里）→ 与飞行影子同步：先藏、落位后揭出
-      if (legendConsumeDur > 0) {
-        const hidden: HTMLElement[] = [];
-        for (const c of legendSkillEv.consumed) {
-          const el = root.querySelector<HTMLElement>(`.area--driven .die[data-id="${c.id}"]`);
-          if (el && !el.closest('#fx-layer')) {
-            el.style.visibility = 'hidden';
-            hidden.push(el);
-          }
-        }
-        if (hidden.length)
-          window.setTimeout(() => {
-            for (const el of hidden) el.style.visibility = '';
-          }, legendConsumeDur + 20);
-      }
       // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"，操作区据此延后显示
       if (state.pending?.kind === 'challengePick') {
         legendPickHoldUntil = performance.now() + legendDur + 30;
       }
     }
-    // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
+    // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区（**不受 consumed 是否为空影响**：
+    //   代决选完那一帧 consumed 为空、只有 spawn，这一帧同样要演"进区"）。
     //   常规：它们真的在区里 → 交给通用「获得骰」动画（由 beforeAddsMs 推迟到本过场之后）；
-    //   特例：DOM 里找不到真骰（例：枭首触发攻击时第一颗骰已被立刻用掉）→ 用影子补演。
+    //   特例：DOM 里找不到真骰 → 用影子补演。
     const missing = legendSkillEv.spawn.filter((s) => !root.querySelector(`.die[data-id="${s.id}"]`));
     if (missing.length) {
       legendDur = Math.max(
@@ -6248,6 +6235,14 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       : 0;
 
   let attackDur = 0;
+  // 挑战模式「枭首」：那颗骰子**结算后才从攻击骰区移除**（规则如此）→ 等待响应期间把它在区里的真骰**藏起来**，
+  // 观感＝"飞出去之后区里就没有它了"（飞行由影子负责；普通攻击的 sourceDieId 那颗早没了 → 空操作）。
+  if (state.mode === 'challenge' && pa?.sourceDieId) {
+    const src = root.querySelector<HTMLElement>(
+      `.panel--challenge .area[data-kind="attack"] .die[data-id="${pa.sourceDieId}"]`,
+    );
+    if (src) src.style.visibility = 'hidden';
+  }
   if (isNewAttack) {
     attackDur = attackStart(root, {
       sig: pa,

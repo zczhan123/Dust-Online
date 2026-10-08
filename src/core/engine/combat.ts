@@ -524,6 +524,13 @@ export function settleAttack(
   if (o.applyDamage) noteFirstDamageFromOpponent(g, defenderId, o.damageDealt, pa.attacker);
   // T17「诱敌」：受到对方伤害后，可挂"移动最多 3 颗骰"的可选待决策
   if (o.applyDamage) noteYoudiAfterDamage(g, defenderId, o.damageDealt, pa.attacker);
+  // 挑战模式「枭首」：多段队列用"攻击骰区里的真骰"发起攻击 → **这一击结算完**才把那颗骰从区里移除。
+  //（只在本模式做，避免误伤 001/C01 裁雨流那种"攻击骰结算后落区"的常规流程。）
+  if (g.mode === 'challenge' && pa.sourceDieId) {
+    const area = g.players[pa.attacker].areas.attack;
+    const idx = area.findIndex((d) => d.id === pa.sourceDieId);
+    if (idx >= 0) area.splice(idx, 1);
+  }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;
   afterAttackResolved(g, pa, { blocked: o.blockedForTriggers, damageDealt: o.damageDealt });
@@ -798,14 +805,13 @@ export function pumpAttackQueue(g: GameState): void {
     if (vq.length === 0) g.virtualQueue = null;
     logLine(g, `${pname(next.attacker)} 「${next.label}」：以 ${next.value} 点发起攻击（依次结算）`);
     virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner });
-    // 挑战模式「枭首」：本条攻击用的是**攻击骰区里的那颗真骰**（骰子一直留在区里，轮到它才飞出并消耗）。
-    // 把它从攻击骰区移除（＝用掉了），并记成飞行动画起点（界面据此"逐颗飞出攻击"；通用"消失"已按 sourceDieId 排除）。
+    // 挑战模式「枭首」：本条攻击用的是**攻击骰区里的那颗真骰**。
+    // ⚠️ 这里**不删**它——骰子留在区里（"用掉"发生在**这次攻击结算后**，见 settleAttack）：
+    //   于是"新骰飞进来"与"旧骰还并排在区里"能同帧存在，界面再按"先进后出"演；
+    //   等待响应期间由界面把区里那颗真骰**藏起来**（观感＝飞出去后区里就没它了）。
     if (next.dieId) {
       const pa = g.pendingAttack as PendingAttack | null; // TS 在函数开头已把它收窄成 null，这里重新取
       if (pa) {
-        const area = g.players[next.attacker].areas.attack;
-        const idx = area.findIndex((d) => d.id === next.dieId);
-        if (idx >= 0) area.splice(idx, 1);
         pa.sourceDieId = next.dieId;
         pa.sourceValue = next.value;
         if (next.dieStyle) pa.dieStyle = next.dieStyle;

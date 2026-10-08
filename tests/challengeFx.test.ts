@@ -120,16 +120,19 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(got!.spawn.every((s) => !g.players.B.areas[s.area].some((d) => d.id === s.id))).toBe(true);
   });
 
-  it('枭首（D）：攻击骰**留在攻击骰区**，轮到它才从区里飞出并消耗（不再一次清空）', () => {
+  it('枭首（D）：攻击骰**留在攻击骰区**，轮到它攻击、**结算后**才从区里移走（不再一次清空）', () => {
     const g = CHAL();
     g.players.A.areas.defense = []; // 保证满足攻击条件
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 3, 'attack')];
     applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
-    // 3 颗（旧 2 + 新 1）全部发起攻击；第一颗（b1）已从区里消耗，其余仍留在区里
-    expect(g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b)).toEqual([3, 6]);
+    // 3 颗（旧 2 + 新 1）全部发起攻击；**这一帧都还在区里**（界面：新骰进区与旧骰并排，不重叠）
+    expect(g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b)).toEqual([2, 3, 6]);
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', sourceDieId: 'b1' });
     expect(g.pendingAttack?.dieStyle).toBe('solid');
     expect(g.virtualQueue?.length).toBe(2);
+    // 结算这一击 → 第一颗（b1）才从攻击骰区移走
+    applyAction(g, { t: 'block' });
+    expect(g.players.B.areas.attack.some((d) => d.id === 'b1')).toBe(false);
   });
 
   it('代决帧 vs 选完帧：两条 legendSkill（先"弹名＋进槽"，选完只报"新产生的骰"）', () => {

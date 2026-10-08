@@ -415,7 +415,8 @@ function continueLegendTurn(g: GameState, once = false): void {
       g.challenge.resumeAt = i;
       if (!resuming) {
         g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
-        g.challenge.slot = consumed; // 移到驱动骰槽（界面看得见）
+        // ⚠️ **不写 `slot`**：驱动骰槽只是界面上的"过场" → 那几颗骰由界面影子演「临时区→中间→槽→消失」，
+        //    状态里**不留**（否则界面会露出真骰、之后还要再演一次"从槽飞走"）。记账靠 `pendingConsumed`。
         g.challenge.pendingConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
         g.challenge.pendingSkillId = skill.id;
         // 动效旁路：**先动画（技能名 + 驱骰进槽）**，选择面板由界面延后到动画播完再显示
@@ -435,7 +436,7 @@ function continueLegendTurn(g: GameState, once = false): void {
       return;
     }
     g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
-    g.challenge.slot = consumed; // 临时移到**驱动骰槽**（界面看得见；结算后清空或已被移入区域）
+    g.challenge.slot = []; // 驱动骰槽＝纯过场视觉，状态里不留骰
     g.challenge.activeSkill = i; // 界面高亮"正在结算"
     g.challenge.pendingConsumed = undefined;
     g.challenge.pendingSkillId = undefined;
