@@ -798,6 +798,19 @@ export function pumpAttackQueue(g: GameState): void {
     if (vq.length === 0) g.virtualQueue = null;
     logLine(g, `${pname(next.attacker)} 「${next.label}」：以 ${next.value} 点发起攻击（依次结算）`);
     virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner });
+    // 挑战模式「枭首」：本条攻击用的是**攻击骰区里的那颗真骰**（骰子一直留在区里，轮到它才飞出并消耗）。
+    // 把它从攻击骰区移除（＝用掉了），并记成飞行动画起点（界面据此"逐颗飞出攻击"；通用"消失"已按 sourceDieId 排除）。
+    if (next.dieId) {
+      const pa = g.pendingAttack as PendingAttack | null; // TS 在函数开头已把它收窄成 null，这里重新取
+      if (pa) {
+        const area = g.players[next.attacker].areas.attack;
+        const idx = area.findIndex((d) => d.id === next.dieId);
+        if (idx >= 0) area.splice(idx, 1);
+        pa.sourceDieId = next.dieId;
+        pa.sourceValue = next.value;
+        if (next.dieStyle) pa.dieStyle = next.dieStyle;
+      }
+    }
   }
 }
 

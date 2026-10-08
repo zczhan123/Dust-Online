@@ -4,10 +4,12 @@ import {
   createChallengeGame,
   skipInitialReroll,
   applyAction,
+  applyChallengeSkill,
   getLegalActions,
 } from '../src/core/engine/game';
 import { fxTake, type FxEvent } from '../src/core/engine/fx';
-import type { GameState } from '../src/core/model/types';
+import { CHALLENGES } from '../src/core/content/challenges';
+import type { Die, DiceKind, GameState } from '../src/core/model/types';
 
 /**
  * 挑战模式 · 传奇回合的"动效旁路事件"（界面据此编排过场）。
@@ -22,6 +24,10 @@ const STD = (): GameState =>
   createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['001', '002', '003'] });
 
 const isLegendFx = (e: FxEvent): boolean => e.kind === 'legendRoll' || e.kind === 'legendSkill';
+
+const CARD = CHALLENGES.find((c) => c.id === 'Z02')!;
+const SK = (id: string) => CARD.skills!.find((s) => s.id === id)!;
+const die = (id: string, value: number, kind: DiceKind): Die => ({ id, value, kind });
 
 describe('挑战模式 · 传奇回合 fx 事件', () => {
   it('回合开始：报 legendRoll（本回合投出的全部驱动骰，id 与角子一致）', () => {
@@ -110,8 +116,48 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(got).toBeTruthy();
     expect(got!.attack).toBe(true);
     expect(got!.spawn.length).toBeGreaterThan(0);
-    // 骰子已进攻击队列 → 状态里看不到它们（这正是必须由引擎报出的原因）
+    // 轮到的第一颗已从攻击骰区消耗掉（其余仍留在区里 → 界面演"逐颗飞出"）
     expect(got!.spawn.every((s) => !g.players.B.areas[s.area].some((d) => d.id === s.id))).toBe(true);
+  });
+
+  it('枭首（D）：攻击骰**留在攻击骰区**，轮到它才从区里飞出并消耗（不再一次清空）', () => {
+    const g = CHAL();
+    g.players.A.areas.defense = []; // 保证满足攻击条件
+    g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 3, 'attack')];
+    applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
+    // 3 颗（旧 2 + 新 1）全部发起攻击；第一颗（b1）已从区里消耗，其余仍留在区里
+    expect(g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b)).toEqual([3, 6]);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', sourceDieId: 'b1' });
+    expect(g.pendingAttack?.dieStyle).toBe('solid');
+    expect(g.virtualQueue?.length).toBe(2);
+  });
+
+  it('代决帧 vs 选完帧：两条 legendSkill（先"弹名＋进槽"，选完只报"新产生的骰"）', () => {
+    const g = CHAL();
+    skipInitialReroll(g);
+    fxTake();
+    // 让「葬敌的完杀」可填（〔1、2、3、4〕），且挑战者防御骰 >1 → 产生代决
+    g.challenge!.driven = [
+      die('q1', 1, 'meditation'),
+      die('q2', 2, 'meditation'),
+      die('q3', 3, 'meditation'),
+      die('q4', 4, 'meditation'),
+    ];
+    g.players.A.areas.defense = [die('a1', 2, 'defense'), die('a2', 3, 'defense')];
+    applyAction(g, { t: 'challengeStep' }); // 完杀：先扣骰 + 发事件，再挂代决
+    const fx1 = fxTake().filter((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
+    expect(fx1.length).toBe(1);
+    expect(fx1[0].consumed.length).toBeGreaterThan(0); // 代决帧：报消耗（界面＝弹技能名 + 驱骰进槽）
+    expect(fx1[0].spawn).toEqual([]);
+    expect(fx1[0].attack).toBe(false);
+    expect(g.pending?.kind).toBe('challengePick');
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    applyAction(g, { t: 'challengePick', id: g.pending.options[0].id });
+    applyAction(g, { t: 'challengeStep' }); // 结算：只报"新产生的骰"
+    const fx2 = fxTake().filter((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
+    expect(fx2.length).toBe(1);
+    expect(fx2[0].consumed).toEqual([]); // 不重复报消耗（界面不重复弹名 / 不重复进槽）
+    expect(fx2[0].spawn.length).toBeGreaterThan(0);
   });
 
   it('标准模式：全程不出现 legendRoll / legendSkill', () => {

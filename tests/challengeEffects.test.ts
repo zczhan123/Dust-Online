@@ -19,15 +19,39 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.players.B.areas.attack.map((d) => d.value)).toEqual([1, 2, 3, 4]);
   });
 
-  it('暗夜凶神：弃挑战者 1 个防御骰；计数 +1 且不超上限', () => {
+  it('暗夜凶神：**先**发起 8 点攻击；弃骰与计数 +1 记为"延后一步"（卡面顺序）', () => {
     const g = make();
     g.players.A.areas.defense = [die('a1', 2, 'defense'), die('a2', 3, 'defense')];
     applyChallengeSkill(g, CARD, SK('z02-3'), []);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 8, unblockable: true });
+    expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['a1', 'a2']); // 攻击结算前**还没弃**
+    expect(g.challenge!.count).toBe(0);
+    expect(g.challenge!.deferred).toEqual({ skillId: 'z02-3', step: 0 });
+  });
+
+  it('暗夜凶神：攻击结算完回到传奇回合 → **才**问"弃哪颗防御骰"，然后计数 +1', () => {
+    const g = make();
+    skipInitialReroll(g);
+    g.challenge!.driven = [die('p1', 1, 'meditation'), die('p4', 4, 'meditation'), die('p6', 6, 'meditation')];
+    g.players.A.areas.defense = [die('a1', 2, 'defense'), die('a2', 3, 'defense')];
+    let guard = 0;
+    while (g.activePlayer === 'B' && !g.pendingAttack && !g.pending && guard++ < 20) {
+      applyAction(g, { t: 'challengeStep' });
+    }
+    expect(g.pendingAttack).toMatchObject({ baseValue: 8, unblockable: true });
+    expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['a1', 'a2']); // 攻击前没弃
+    applyAction(g, { t: 'block' }); // 挑战者承受这次攻击 → 攻击结算
+    // 回到传奇回合：这一步就该问"弃哪颗防御骰"（延后一步）
+    let guard2 = 0;
+    while (!g.pending && g.activePlayer === 'B' && guard2++ < 6) applyAction(g, { t: 'challengeStep' });
+    expect(g.pending?.kind).toBe('challengePick');
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    applyAction(g, { t: 'challengePick', id: 'a1' });
+    // 选择收齐 → 下一次 challengeStep 收尾"延后一步"（弃骰 + 计数 +1）
+    applyAction(g, { t: 'challengeStep' });
     expect(g.players.A.areas.defense.map((d) => d.id)).toEqual(['a2']);
     expect(g.challenge!.count).toBe(1);
-    g.challenge!.count = 3; // 已满
-    applyChallengeSkill(g, CARD, SK('z02-3'), []);
-    expect(g.challenge!.count).toBe(3);
+    expect(g.challenge!.deferred).toBeUndefined();
   });
 
   it('枭首：消耗的驱动骰变成传奇的攻击骰（点数保留）', () => {

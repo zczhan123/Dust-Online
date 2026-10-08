@@ -2431,15 +2431,6 @@ export function playBubble(
 
 /* ===== 挑战模式 · 传奇回合的专属过场 ===== */
 
-/**
- * 传奇回合开始：驱动骰从**快速操作栏中心**并排冒出 → 飞入「临时驱动骰区域」。返回时长。
- * 直接复用通用「获得骰」动画（`playAdds`＋`fromPool`）——骰子此刻**真的**在临时区里，所以是真骰动画。
- */
-export function playLegendRoll(root: HTMLElement, ids: string[], delayMs = 0): number {
-  if (!canAnimate(root)) return 0;
-  return playAdds(root, ids, poolPoint(root), delayMs, true);
-}
-
 export interface LegendConsumeItem {
   /** 该驱动骰**上一帧**在「临时驱动骰区域」里的位置（结算后它已从状态消失 → 只能靠影子） */
   rect: Rect;

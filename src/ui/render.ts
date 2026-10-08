@@ -27,7 +27,7 @@ import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
-import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendRoll, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
+import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
@@ -65,6 +65,12 @@ const lastPhaseSnap = new WeakMap<GameState, { active: PlayerId; phase: GameStat
 
 /** 最近一帧战斗动效的总时长（含阶段横幅）。`main.ts` 用它给"挑战模式自动推进"配速。 */
 let lastFrameMs = 0;
+
+/**
+ * 【先动画，再选择】挑战模式：代决面板要等到这个时刻（performance.now）之后才允许显示。
+ * 本帧的传奇过场（技能名 + 驱骰进槽）播完前，操作区只显示"发动中…"占位。
+ */
+let legendPickHoldUntil = 0;
 
 /** 本帧动效总时长（ms）——挑战模式"每步播完再走下一步"用。 */
 export function lastFrameDurationMs(): number {
@@ -2147,6 +2153,13 @@ function actionZone(ctx: Ctx): HTMLElement {
     zone.appendChild(fengmangPanel(ctx));
   } else if (ui.dustFlow) {
     zone.appendChild(dustFlowView(ctx));
+  } else if (challengePickHeld(ctx)) {
+    // 【先动画，再选择】传奇那一段过场（技能名 + 驱骰进槽）还没播完 → 先显示占位，播完自动重绘出选项
+    const note = el('div', 'actionlist-readonly');
+    note.textContent = `「${LEGEND_DISPLAY_NAME}」发动中…`;
+    zone.appendChild(note);
+    const left = legendPickHoldUntil - performance.now();
+    window.setTimeout(() => ctx.hooks.requestRender(), Math.max(40, left + 20));
   } else {
     const confirm = confirmRow(ctx);
     if (confirm) {
@@ -2159,6 +2172,16 @@ function actionZone(ctx: Ctx): HTMLElement {
     }
   }
   return zone;
+}
+
+/** 挑战模式：代决面板是否还在"等传奇过场动画播完"（先动画，再选择）。 */
+function challengePickHeld(ctx: Ctx): boolean {
+  return (
+    ctx.state.mode === 'challenge' &&
+    ctx.state.pending?.kind === 'challengePick' &&
+    typeof performance !== 'undefined' &&
+    performance.now() < legendPickHoldUntil
+  );
 }
 
 function confirmRow(ctx: Ctx): HTMLElement | null {
@@ -5649,9 +5672,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const lifeItems: LifeDelta[] = [...lifeDeltas];
   const fxEvents = fxTake();
   // 挑战模式·传奇回合：本帧的"过场命令"（引擎只报事实，界面据此编排；标准模式永不出现）
-  const legendRollEv = fxEvents.find(
-    (e): e is Extract<FxEvent, { kind: 'legendRoll' }> => e.kind === 'legendRoll',
-  );
+  // 注：投掷（`legendRoll`）不需要界面插手——临时区骰子属于 `.die[data-id]`，通用「获得骰」已会播。
   const legendSkillEv = fxEvents.find(
     (e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill',
   );
@@ -6130,30 +6151,48 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
 
   // 挑战模式 · 传奇回合的过场（引擎已在本帧 fx 里报出"这一步发生了什么"；标准模式永不出现）：
-  //  ① legendRoll  → 驱动骰从**快速操作栏中心**并排冒出 → 飞入「临时驱动骰区域」；
-  //  ② legendSkill → 中央弹技能名（**复用必杀横幅**，不带"必杀·"前缀）
-  //                 ＋ 驱动骰「临时区 → 中间 → 驱动骰槽 → 消失」。
-  // 第二步（本步新产生的骰飞入对应区）由通用「获得」动画承担，但**推迟到本过场之后**（见 beforeAddsMs）。
+  //  ★ **顺序＝卡面顺序**：固定前缀（弹技能名 + 驱骰「临时区→中间→驱动骰槽→消失」）→ 再按卡面逐步执行。
+  //  投掷（驱动骰→临时区）**不在这里做**：临时区骰子也是 `.die[data-id]`，通用「获得骰」动画已经会播
+  //  （曾额外加一条 `playLegendRoll` → 同一动作播两遍）。
   let legendDur = 0;
   let legendConsumeDur = 0;
-  if (legendRollEv) {
-    legendDur = Math.max(legendDur, playLegendRoll(root, legendRollEv.dice.map((d) => d.id), 0));
-  }
   if (legendSkillEv) {
-    legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, ''));
-    const items: LegendConsumeItem[] = legendSkillEv.consumed
-      .map((c) => {
-        const pd = prevDice.get(c.id);
-        return pd ? { rect: pd.rect, value: c.value } : null;
-      })
-      .filter((x): x is LegendConsumeItem => !!x);
-    // 落点＝**槽区域**（不是里面那个空的 `.dice`——空容器高度为 0，会算到快速操作栏去）
-    const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
-    legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
-    legendDur = Math.max(legendDur, legendConsumeDur);
+    // 技能名只在"报消耗的那一帧"弹（代决帧 / 无代决的技能帧）；选完后的那一帧只做第二步/第三步
+    if (legendSkillEv.consumed.length > 0) {
+      legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, ''));
+      const items: LegendConsumeItem[] = legendSkillEv.consumed
+        .map((c) => {
+          const pd = prevDice.get(c.id);
+          return pd ? { rect: pd.rect, value: c.value } : null;
+        })
+        .filter((x): x is LegendConsumeItem => !!x);
+      // 落点＝**槽区域**（不是里面那个空的 `.dice`——空容器高度为 0，会算到快速操作栏去）
+      const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
+      legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
+      legendDur = Math.max(legendDur, legendConsumeDur);
+      // 驱动骰槽里的"真骰"（多段攻击等待期间会保留在槽里）→ 与飞行影子同步：先藏、落位后揭出
+      if (legendConsumeDur > 0) {
+        const hidden: HTMLElement[] = [];
+        for (const c of legendSkillEv.consumed) {
+          const el = root.querySelector<HTMLElement>(`.area--driven .die[data-id="${c.id}"]`);
+          if (el && !el.closest('#fx-layer')) {
+            el.style.visibility = 'hidden';
+            hidden.push(el);
+          }
+        }
+        if (hidden.length)
+          window.setTimeout(() => {
+            for (const el of hidden) el.style.visibility = '';
+          }, legendConsumeDur + 20);
+      }
+      // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"，操作区据此延后显示
+      if (state.pending?.kind === 'challengePick') {
+        legendPickHoldUntil = performance.now() + legendDur + 30;
+      }
+    }
     // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
     //   常规：它们真的在区里 → 交给通用「获得骰」动画（由 beforeAddsMs 推迟到本过场之后）；
-    //   特例：枭首触发攻击时新骰被**立刻移进攻击队列**（DOM 里没有真骰）→ 用影子补演。
+    //   特例：DOM 里找不到真骰（例：枭首触发攻击时第一颗骰已被立刻用掉）→ 用影子补演。
     const missing = legendSkillEv.spawn.filter((s) => !root.querySelector(`.die[data-id="${s.id}"]`));
     if (missing.length) {
       legendDur = Math.max(
@@ -6164,21 +6203,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
           0,
         ),
       );
-    }
-    // 驱动骰槽里的"真骰"（多段攻击等待期间会保留在槽里）→ 与飞行影子同步：先藏、落位后揭出
-    if (legendConsumeDur > 0) {
-      const hidden: HTMLElement[] = [];
-      for (const c of legendSkillEv.consumed) {
-        const el = root.querySelector<HTMLElement>(`.area--driven .die[data-id="${c.id}"]`);
-        if (el && !el.closest('#fx-layer')) {
-          el.style.visibility = 'hidden';
-          hidden.push(el);
-        }
-      }
-      if (hidden.length)
-        window.setTimeout(() => {
-          for (const el of hidden) el.style.visibility = '';
-        }, legendConsumeDur + 20);
     }
   }
   // 传奇这一步"触发攻击"时：攻击动画整体后移到 第一步＋第二步 之后
@@ -6230,8 +6254,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       attacker: pa!.attacker,
       target: oppOf(pa!.attacker),
       value: pa!.baseValue ?? pa!.value,
-      // 挑战模式·传奇的攻击：走"实体红骰"样式（从它的攻击骰区飞出）→ 与"从攻击骰区的骰子逐个发起攻击"一致
-      virtual: state.mode === 'challenge' && pa!.attacker === 'B' ? false : !pa!.physical,
+      // 挑战模式·传奇的攻击：只有"来自攻击骰区真骰"的那次攻击用实体红骰（`dieStyle:'solid'`）；
+      // 其余虚拟攻击（8 点不可抵挡 / 2 点遁入暗影）一律灰骰。
+      virtual: pa!.dieStyle === 'solid' ? false : !pa!.physical,
       sourceRect: pa!.sourceDieId
         ? (prevDice.get(pa!.sourceDieId)?.rect ?? prevStored.get(pa!.sourceDieId)?.rect ?? null)
         : null,

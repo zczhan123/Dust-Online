@@ -157,6 +157,11 @@ export interface PendingAttack {
   sourceSkill?: string;
   /** 上述技能的效果**拥有者**：与其等于 `attacker` → 持有者自己发起；不等 → 他人因该效果发起（提示栏区分措辞） */
   sourceSkillOwner?: PlayerId;
+  /**
+   * **表现层**提示（不影响任何规则）：本次攻击的骰子该画成什么样。
+   * `'solid'`＝实体色骰（例：挑战模式「枭首」用攻击骰区里的真骰逐颗发起攻击）；未设＝按 `physical` 判定（虚拟攻击＝灰骰）。
+   */
+  dieStyle?: 'solid';
 }
 
 export type Pending =
@@ -412,6 +417,18 @@ export interface GameState {
     activeSkill?: number | null;
     /** 代决（模式 1）：已收集的选择，按技能 id 存（值＝所选 option 的 id） */
     decisions?: Record<string, string[]>;
+    /**
+     * 代决期间**已扣下**的驱动骰（发起技能时先扣骰、再问代决 → 选完进同一条技能时不再重复扣）。
+     * 存在时表示"这条技能正在等代决"。
+     */
+    pendingConsumed?: { id: string; value: number }[];
+    /** 已扣骰、正在等代决的那条技能 id */
+    pendingSkillId?: string;
+    /**
+     * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
+     * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。
+     */
+    deferred?: { skillId: string; step: number };
   };
   dustfall: number;
   turnIndex: number;
@@ -438,7 +455,18 @@ export interface GameState {
   attackQueue: { player: PlayerId; values: number[] } | null;
   /** 技能发起的多次攻击队列（A01「不败之王」充能：你 5 点 → 对方 3 点 ×2，**攻击者可不同**，逐次结算）
    *  `owner` = 该技能（效果）的拥有者，用于提示栏区分"我方发起 / 因对方效果发起" */
-  virtualQueue: { attacker: PlayerId; value: number; label: string; owner: PlayerId }[] | null;
+  /**
+   * 多段攻击队列（依次结算）。挑战模式「枭首」会给条目带上 `dieId`/`dieStyle`：
+   * 该骰**留在攻击骰区**、轮到它时才从区里飞出并消耗（界面因此能演"逐颗飞出攻击"）。
+   */
+  virtualQueue: {
+    attacker: PlayerId;
+    value: number;
+    label: string;
+    owner: PlayerId;
+    dieId?: string;
+    dieStyle?: 'solid';
+  }[] | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;
   /** 战术牌·战前「抽 2 留 1」：剩余可抽池（抽走的会移出 → 双方天然不同名） */

@@ -155,11 +155,13 @@ function syncLegendFengmang(g: GameState): void {
   if (add > 0) p.buffs.push({ attr: 'attackDamage', add, duration: 'thisTurn', source: '传奇锋芒' });
 }
 
-/** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。 */
+/** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
+ *  `atDeferred`＝这句话是在"延后一步"阶段问的（例：暗夜凶神的"弃哪颗防御骰"应在 8 点攻击结算**之后**问）。 */
 function challengeDecisions(
   g: GameState,
   skill: ChallengeSkill,
   consumedCount = 0,
+  atDeferred = false,
 ): { prompt: string; options: { id: string; label: string }[] }[] {
   const A = g.players.A;
   const B = g.players.B;
@@ -171,7 +173,8 @@ function challengeDecisions(
         ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts() }]
         : [];
     case 'z02-3':
-      return A.areas.defense.length > 0
+      // 卡面顺序：先 8 点攻击 →（攻击结算后）才问"弃哪颗防御骰"
+      return atDeferred && A.areas.defense.length > 0
         ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts() }]
         : [];
     case 'z02-4': {
@@ -234,27 +237,33 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     }
     case 'z02-3': {
-      // 卡面顺序：先发起 8 点「不可抵挡」攻击
+      // 卡面顺序：① 先发起 8 点「不可抵挡」攻击；② 攻击结算完**之后**才弃挑战者 1 颗防御骰；③ 最后计数 +1
       virtualAttack(g, 'B', 8, { skill: '暗夜凶神', owner: 'B' }, { unblockable: true });
-      // 再弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；未代决时默认第一颗）
-      const dropId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
-      if (dropId) consumeDice(g, A, 'defense', [dropId]);
-      const cap = card.countCap ?? Number.POSITIVE_INFINITY;
-      g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
-      syncLegendFengmang(g);
+      if (g.pendingAttack) {
+        // 攻击已挂起 → 把"②弃骰 ③计数"记成延后效果，等这次攻击结算完回到传奇回合再执行
+        g.challenge!.deferred = { skillId: skill.id, step: 0 };
+      } else {
+        // 极端兜底（攻击被禁等）：立刻按顺序补齐
+        const dropId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
+        if (dropId) consumeDice(g, A, 'defense', [dropId]);
+        const cap = card.countCap ?? Number.POSITIVE_INFINITY;
+        g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
+        syncLegendFengmang(g);
+      }
       return { spawn, outIds };
     }
     case 'z02-4': {
       for (const d of consumed) gain('attack', d.value);
       // 若（传奇）攻击骰数 > 挑战者防御骰数 → 用全部攻击骰逐个攻击（走统一多段机制 virtualQueue）
       if (B.areas.attack.length > A.areas.defense.length) {
-        const dice = [...B.areas.attack];
-        B.areas.attack = [];
-        g.virtualQueue = dice.map((d) => ({
+        // 骰子**留在攻击骰区**：队列条目带 dieId/dieStyle，轮到它时才从区里飞出并消耗（界面演"逐颗飞出攻击"）
+        g.virtualQueue = B.areas.attack.map((d) => ({
           attacker: 'B' as PlayerId,
           value: d.value,
           label: '枭首',
           owner: 'B' as PlayerId,
+          dieId: d.id,
+          dieStyle: 'solid' as const,
         }));
         // 代决（模式 1）：攻击顺序（未代决时保持原顺序）
         const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
@@ -314,8 +323,50 @@ function runLegendTurn(g: GameState): void {
 }
 
 /**
+ * 收尾"延后一步"的效果（**按卡面顺序**：例「暗夜凶神」＝①8点攻击 →（攻击结算后）②弃挑战者1防御骰 →③计数+1）。
+ * 只在攻击已结算完、回到传奇回合时执行；遇到"②的代决"就挂起等待。
+ */
+function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
+  const d = g.challenge?.deferred;
+  if (!g.challenge || !d) return;
+  const skill = (card.skills ?? []).find((s) => s.id === d.skillId);
+  if (!skill) {
+    g.challenge.deferred = undefined;
+    return;
+  }
+  const A = g.players.A;
+  if (skill.id === 'z02-3') {
+    // ② 弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；**攻击结算之后**才问）
+    const wants = challengeDecisions(g, skill, 0, true);
+    const dec = (g.challenge.decisions ??= {});
+    const got = dec[skill.id] ?? [];
+    if (wants.length > got.length) {
+      const w = wants[got.length];
+      // 让代决归到**这条技能**（challengePick 按 activeSkill 存选择）
+      g.challenge.activeSkill = (card.skills ?? []).indexOf(skill);
+      g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
+      return; // 停在代决
+    }
+    const dropId = (dec[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
+    if (dropId) consumeDice(g, A, 'defense', [dropId]);
+    delete dec[skill.id];
+    // ③ 计数 +1（≤ 上限），并同步「锋芒」加成
+    const cap = card.countCap ?? Number.POSITIVE_INFINITY;
+    g.challenge.count = Math.min(cap, g.challenge.count + 1);
+    syncLegendFengmang(g);
+    logLine(g, `「${card.legacy}」：${skill.name} — 弃置挑战者 1 个防御骰，计数 +1`);
+    g.challenge.deferred = undefined;
+    return;
+  }
+  g.challenge.deferred = undefined;
+}
+
+/**
  * 从 `g.challenge.resumeAt` 继续逐条结算；遇"发起攻击/代决"就记下续跑点并返回。
  * `once = true`（界面按节奏派发 `challengeStep`）→ **只结算"一条真正要执行的技能"**就返回，让每条都看得见。
+ *
+ * **顺序＝卡面文字顺序**；每条技能固定前缀：①（界面）弹技能名 ② 驱动骰：临时区 → 驱动骰槽 → 消失
+ * → ③ 再按卡面逐步执行（该步的代决在**它该发生的那一步**才弹）。
  */
 function continueLegendTurn(g: GameState, once = false): void {
   const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
@@ -324,6 +375,11 @@ function continueLegendTurn(g: GameState, once = false): void {
     return;
   }
   const legacy = card.legacy;
+  // 「延后一步」先收尾（例：暗夜凶神＝攻击结算后 弃骰 + 计数）
+  if (g.challenge.deferred) {
+    resolveLegendDeferred(g, card);
+    return; // 本步只做这一件事；下一次 challengeStep 再继续
+  }
   g.challenge.resumeAt = g.challenge.resumeAt ?? 0;
   for (let i = g.challenge.resumeAt; i < card.skills.length; i++) {
     if (g.pendingAttack) return; // 正在等挑战者响应
@@ -337,33 +393,55 @@ function continueLegendTurn(g: GameState, once = false): void {
       logLine(g, `「${legacy}」：${skill.name} — 首次回合（怜悯*），跳过`);
       continue;
     }
+    // 本条消耗的驱动骰：代决暂停期间**已扣下并记住** → 续跑时直接取回（不重算槽匹配，否则骰子已不在 driven 里）
+    const resuming = g.challenge.pendingSkillId === skill.id && !!g.challenge.pendingConsumed;
     let consumed: Die[] = [];
-    if (skill.slots && skill.slots.length > 0) {
+    if (resuming) {
+      consumed = g.challenge.pendingConsumed!.map((x) => ({ id: x.id, value: x.value, kind: 'meditation' }));
+    } else if (skill.slots && skill.slots.length > 0) {
       const m = matchSlots(skill.slots, g.challenge.driven);
       if (!m) {
-        logLine(g, `「${card.legacy}」：${skill.name} — 驱动骰不足，跳过`);
+        logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
         continue;
       }
       consumed = g.challenge.driven.filter((d) => m.includes(d.id));
-      // 注意：**此刻不扣**——代决可能中途暂停，续跑时会重新算槽；等真正结算前再扣（见下）
     }
-    // 代决（模式 1）：本条需要的选择还没收集齐 → 逐条问挑战者，收集完再结算
+    // 代决（模式 1）：本条需要的选择还没收集齐 → **先把骰子扣下、发第一步动效**，再挂代决
     const wants = challengeDecisions(g, skill, consumed.length);
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {
-      const w = wants[got.length];
       g.challenge.activeSkill = i;
       g.challenge.resumeAt = i;
+      if (!resuming) {
+        g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
+        g.challenge.slot = consumed; // 移到驱动骰槽（界面看得见）
+        g.challenge.pendingConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
+        g.challenge.pendingSkillId = skill.id;
+        // 动效旁路：**先动画（技能名 + 驱骰进槽）**，选择面板由界面延后到动画播完再显示
+        fxPush({
+          kind: 'legendSkill',
+          player: 'B',
+          skillKey: skill.id,
+          skillName: skill.name,
+          consumed: consumed.map((d) => ({ id: d.id, value: d.value })),
+          spawn: [],
+          outIds: [],
+          attack: false,
+        });
+      }
+      const w = wants[got.length];
       g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
       return;
     }
     g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
     g.challenge.slot = consumed; // 临时移到**驱动骰槽**（界面看得见；结算后清空或已被移入区域）
     g.challenge.activeSkill = i; // 界面高亮"正在结算"
-    const fxConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
+    g.challenge.pendingConsumed = undefined;
+    g.challenge.pendingSkillId = undefined;
+    const fxConsumed = resuming ? [] : consumed.map((d) => ({ id: d.id, value: d.value })); // 代决帧已报过 → 不重复
     const res = applyChallengeSkill(g, card, skill, consumed);
-    // 动效旁路：本步的编排依据（消耗的驱动骰 / 新产生的骰 / 是否触发攻击）
+    // 动效旁路：本步的编排依据（新产生的骰 / 是否触发攻击；消耗已在代决帧报过）
     fxPush({
       kind: 'legendSkill',
       player: 'B',
@@ -3382,7 +3460,10 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (!opt) throw new Error(`非法代决选项：${action.id}`);
       g.pending = null;
       const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
-      const key = card?.skills?.[g.challenge?.resumeAt ?? 0]?.id ?? 'unknown';
+      // 选择归到"**正在结算的那条技能**"：不能用 resumeAt —— "延后一步"的代决（例：暗夜凶神弃骰）
+      // 是在攻击结算后问的，那时 resumeAt 已经指向下一条了。
+      const idx = g.challenge?.activeSkill ?? g.challenge?.resumeAt ?? 0;
+      const key = card?.skills?.[idx]?.id ?? 'unknown';
       const dec = (g.challenge!.decisions ??= {});
       dec[key] = [...(dec[key] ?? []), action.id];
       logLine(g, `（代决）${pd.prompt} → ${opt.label}`);
