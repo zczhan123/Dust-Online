@@ -72,6 +72,12 @@ let lastFrameMs = 0;
  */
 let legendPickHoldUntil = 0;
 
+/**
+ * 挑战模式「枭首」：这些骰子**已经飞出去攻击**（飞行/等待响应中）→ 每次渲染都把区里那颗真骰藏起来，
+ * 直到它真的被移除（这次攻击结算后）。**注意：是"开飞那一刻"才加进来**，不是渲染当下（否则会提前挖空）。
+ */
+const legendFlyingIds = new Set<string>();
+
 /** 本帧动效总时长（ms）——挑战模式"每步播完再走下一步"用。 */
 export function lastFrameDurationMs(): number {
   return lastFrameMs;
@@ -6110,6 +6116,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 挑战模式：本步被扣下的驱动骰由 `playLegendConsume`（临时区→中间→驱动骰槽→消失）接管 →
   // 排除出普通"消失"动画，否则同一颗骰会被两套动画驱动。
   if (legendSkillEv) for (const c of legendSkillEv.consumed) excludeIds.push(c.id);
+  // 挑战模式「枭首」：这一帧"上一段攻击刚结算" → 它用的是攻击骰区里的真骰，此时才被引擎移除；
+  // 那颗骰的"飞出去"动画早由攻击池负责 → 这里排除，别再补一次通用"飞中间淡出"（否则一飞两次）。
+  if (state.mode === 'challenge' && prevResolved && prevPA?.sourceDieId) excludeIds.push(prevPA.sourceDieId);
 
   // 真伤白墨线：发动卡图 / 战术栏名 中心 → 受伤方生命条 中心（与攻击线同编排）。
   // 缺"发动卡"上下文（如 009/T09 延后真伤）→ 退回"来源玩家面板"锚点，保证仍有线。位置当场量取、按身份取元素。
@@ -6157,6 +6166,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   //  驱动骰槽是**纯过场**：状态里不留骰（引擎只记 `pendingConsumed`）→ 界面全用影子演，落点后自然消失。
   let legendDur = 0;
   let legendConsumeDur = 0;
+  /** 挑战模式：本帧传奇**新得到**的骰子 → 它们不交给通用「获得骰」（`playLegendSpawn` 独占负责） */
+  const legendAddIds = new Set<string>();
   if (legendSkillEv) {
     // 技能名只在"报消耗的那一帧"弹（代决帧 / 无代决的技能帧）；选完后的那一帧只做第二步/第三步
     if (legendSkillEv.consumed.length > 0) {
@@ -6175,25 +6186,28 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       if (state.pending?.kind === 'challengePick') {
         legendPickHoldUntil = performance.now() + legendDur + 30;
       }
+      // 新的一步开始了：上一段"已开飞"的攻击骰隐藏记录作废
+      legendFlyingIds.clear();
     }
-    // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区（**不受 consumed 是否为空影响**：
-    //   代决选完那一帧 consumed 为空、只有 spawn，这一帧同样要演"进区"）。
-    //   常规：它们真的在区里 → 交给通用「获得骰」动画（由 beforeAddsMs 推迟到本过场之后）；
-    //   特例：DOM 里找不到真骰 → 用影子补演。
-    const missing = legendSkillEv.spawn.filter((s) => !root.querySelector(`.die[data-id="${s.id}"]`));
-    if (missing.length) {
+    // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
+    //   **动画隔离**：这几颗**只由 `playLegendSpawn` 负责**（从通用「获得骰」里排除），落点＝区里行尾并排，
+    //   确定、唯一 → 不会再和通用"获得/让位"抢同一颗骰子（挤格/跳格就是这么来的）。
+    if (legendSkillEv.spawn.length > 0 && state.mode === 'challenge') {
+      for (const s of legendSkillEv.spawn) legendAddIds.add(s.id);
       legendDur = Math.max(
         legendDur,
         playLegendSpawn(
           root,
-          missing.map((s) => ({ value: s.value, area: s.area })),
+          legendSkillEv.spawn.map((s) => ({ value: s.value, area: s.area })),
           0,
+          legendSkillEv.spawn.map((s) => s.id),
         ),
       );
     }
   }
   // 传奇这一步"触发攻击"时：攻击动画整体后移到 第一步＋第二步 之后
   const legendAttackDelay = legendSkillEv?.attack ? legendDur + addsDuration() : 0;
+  if (state.mode !== 'challenge') legendFlyingIds.clear();
 
   // L04 重开：本帧是整盘重置 → 走"全部旧骰 → 中间合成一个 → 新骰从中间冒出"的专用动画
   const resetMerge = fxEvents.some((e) => e.kind === 'reset');
@@ -6235,13 +6249,24 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       : 0;
 
   let attackDur = 0;
-  // 挑战模式「枭首」：那颗骰子**结算后才从攻击骰区移除**（规则如此）→ 等待响应期间把它在区里的真骰**藏起来**，
-  // 观感＝"飞出去之后区里就没有它了"（飞行由影子负责；普通攻击的 sourceDieId 那颗早没了 → 空操作）。
-  if (state.mode === 'challenge' && pa?.sourceDieId) {
-    const src = root.querySelector<HTMLElement>(
-      `.panel--challenge .area[data-kind="attack"] .die[data-id="${pa.sourceDieId}"]`,
+  // 挑战模式「枭首」：那颗骰子**这次攻击结算后**才从攻击骰区移除（规则如此）。
+  // 为了让观感"飞出去之后区里就没它了"，在**它的飞行动画开飞那一刻**才把它在区里的真骰藏起来
+  // （不是渲染当下就藏 —— 那会提前挖空、让新骰挤格/跳格，真实事故）。
+  if (state.mode === 'challenge' && pa?.sourceDieId && legendAttackDelay > 0) {
+    const id = pa.sourceDieId;
+    window.setTimeout(() => {
+      legendFlyingIds.add(id); // 之后每次渲染都保持隐藏，直到它被移除
+      const el = root.querySelector<HTMLElement>(
+        `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
+      );
+      if (el) el.style.visibility = 'hidden';
+    }, legendAttackDelay + 30);
+  }
+  for (const id of legendFlyingIds) {
+    const el = root.querySelector<HTMLElement>(
+      `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
     );
-    if (src) src.style.visibility = 'hidden';
+    if (el) el.style.visibility = 'hidden';
   }
   if (isNewAttack) {
     attackDur = attackStart(root, {
@@ -6335,11 +6360,23 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   //    （否则"使用/弃置的骰"还在飞，幽魂获得的骰就从中间飞进来 → 同帧重叠）。
   // 池动画都已在 runBoardMotions **之前**登记好了（见上），所以这里能拿到它们的时长。
   const youhunFired = fxEvents.some((e) => e.kind === 'skillFired' && e.skillKey === 'xuyu.alt.youhun');
-  const beforeAddsMs = Math.max(
-    youhunFired ? Math.max(payDur, attackDur, weijuDur, joinDur, gouhunDur, heldReleaseDur) : payDur,
-    legendDur, // 挑战模式：本步新产生的骰**推迟到传奇过场之后**再飞入对应区（第二步）
+  const beforeAddsMs = youhunFired
+    ? Math.max(payDur, attackDur, weijuDur, joinDur, gouhunDur, heldReleaseDur)
+    : payDur;
+  const settleDice = runBoardMotions(
+    root,
+    prevDice,
+    lifeItems,
+    flipped,
+    deferAddOwner,
+    excludeIds,
+    prevStored,
+    rerollIds,
+    diceFx,
+    beforeAddsMs,
+    resetMerge,
+    legendAddIds, // 挑战模式：这些新骰的"获得"动画由 playLegendSpawn 独占负责
   );
-  const settleDice = runBoardMotions(root, prevDice, lifeItems, flipped, deferAddOwner, excludeIds, prevStored, rerollIds, diceFx, beforeAddsMs, resetMerge);
 
   // P-D · 技能气泡：开＝单字（白底）/ 用＝技能名（黑底）；锚点在**卡图**正中央
   const artElOf = (player: PlayerId, artifactId: string): HTMLElement | null =>

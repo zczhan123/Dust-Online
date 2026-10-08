@@ -1236,6 +1236,11 @@ export function runBoardMotions(
   beforeAddsMs = 0,
   /** L04 重开：本帧走"全部旧骰→中间合成一个→新骰冒出"的专用动画（覆盖通用 L→M→G） */
   resetMerge = false,
+  /**
+   * 挑战模式动画隔离：这些 id 的"获得"动画**由挑战模式自己负责**（`playLegendSpawn`），
+   * 通用"获得骰"动画**不要碰**它们（避免两套动画抢同一颗骰子 → 挤格/跳格）。
+   */
+  skipAddIds: Set<string> = new Set(),
 ): number {
   if (!canAnimate(root)) return 0;
   const layer0 = ensureFxLayer();
@@ -1315,7 +1320,7 @@ export function runBoardMotions(
   )
     return 0;
 
-  const addedIds = [...curIds].filter((id) => !prev.has(id) && !exAll.has(id));
+  const addedIds = [...curIds].filter((id) => !prev.has(id) && !exAll.has(id) && !skipAddIds.has(id));
   const addDur = addedIds.length ? addsDuration() : 0;
 
   // L04 重开：整盘重置 → 专用"合成再分回"动画（不走通用 L→M→G）
@@ -2473,6 +2478,8 @@ export function playLegendSpawn(
   root: HTMLElement,
   items: { value: number; area: 'attack' | 'defense' | 'meditation' }[],
   delayMs = 0,
+  /** 与 `items` 一一对应的真实骰 id：存在则飞行期间把它藏起来、落位后揭出（不让它提前"弹"在区里） */
+  ids: string[] = [],
 ): number {
   if (!canAnimate(root) || items.length === 0) return 0;
   if (prefersReducedMotion() || moveScale() === 0) return 0;
@@ -2503,6 +2510,11 @@ export function playLegendSpawn(
     el.style.top = `${pool.y}px`;
     el.style.position = 'absolute';
     layer.appendChild(el);
+    // 飞行期间把区里那颗**真骰**藏起来（否则它会立刻"弹"在落点，与飞行动画重影）；落位后揭出
+    const realEl = ids[i]
+      ? root.querySelector<HTMLElement>(`.panel--challenge .die[data-id="${ids[i]}"]`)
+      : null;
+    if (realEl) realEl.style.visibility = 'hidden';
     if (typeof el.animate === 'function') {
       const sx = midXs[i] - pool.x;
       el.animate(
@@ -2520,7 +2532,10 @@ export function playLegendSpawn(
         { duration: total, delay, easing: EASE.enter, fill: 'both' },
       );
     }
-    window.setTimeout(() => el.remove(), delay + total + 90);
+    window.setTimeout(() => {
+      if (realEl) realEl.style.visibility = ''; // 落位 → 揭出真骰
+      el.remove();
+    }, delay + total + 90);
   });
   return delay + total;
 }
