@@ -16,6 +16,10 @@
 2. 术语**全量一致**（代码 + UI + 文档 + 文件名 + 交叉引用）。
 3. 列表 / 选项测试用**精确断言**（禁 `toContain`）；**一个动作只有一个渲染来源**。
 4. **每批一次小提交**；提交信息中文 + 关键细节。
+5. **改版本号只许用 `edit`/`write` 工具**（`package.json` 的 `"version"` 一行）。
+   ⚠️ **绝对禁止**用 PowerShell `Set-Content -Encoding utf8` / `Out-File` 写 `package.json`——**PS 5.1 会写入 BOM（`EF BB BF`）→ 文件成为非法 JSON → `npm run dev` 一启动就崩（vite 解析 PostCSS 配置时 `Unexpected token '﻿'`）**。真实事故 2026-10-08（v0.16.2 提交把 dev 弄挂）。
+   写完**必须**验字节：`[System.IO.File]::ReadAllBytes($f)[0..2]` ≠ `EF BB BF`，且 `node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"` 通过。
+   （若确需整文件写：用 `[System.IO.File]::WriteAllText($f,$text,(New-Object System.Text.UTF8Encoding($false)))`。）
 
 ## 命令（workdir 必须是本目录）
 - 开发：`npm run dev`（http://localhost:5173/）
