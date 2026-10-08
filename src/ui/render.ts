@@ -72,12 +72,6 @@ let lastFrameMs = 0;
  */
 let legendPickHoldUntil = 0;
 
-/**
- * 挑战模式「枭首」：这些骰子**已经飞出去攻击**（飞行/等待响应中）→ 每次渲染都把区里那颗真骰藏起来，
- * 直到它真的被移除（这次攻击结算后）。**注意：是"开飞那一刻"才加进来**，不是渲染当下（否则会提前挖空）。
- */
-const legendFlyingIds = new Set<string>();
-
 /** 本帧动效总时长（ms）——挑战模式"每步播完再走下一步"用。 */
 export function lastFrameDurationMs(): number {
   return lastFrameMs;
@@ -6186,8 +6180,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       if (state.pending?.kind === 'challengePick') {
         legendPickHoldUntil = performance.now() + legendDur + 30;
       }
-      // 新的一步开始了：上一段"已开飞"的攻击骰隐藏记录作废
-      legendFlyingIds.clear();
     }
     // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
     //   **动画隔离**：这几颗**只由 `playLegendSpawn` 负责**（从通用「获得骰」里排除），落点＝区里行尾并排，
@@ -6207,7 +6199,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   // 传奇这一步"触发攻击"时：攻击动画整体后移到 第一步＋第二步 之后
   const legendAttackDelay = legendSkillEv?.attack ? legendDur + addsDuration() : 0;
-  if (state.mode !== 'challenge') legendFlyingIds.clear();
 
   // L04 重开：本帧是整盘重置 → 走"全部旧骰 → 中间合成一个 → 新骰从中间冒出"的专用动画
   const resetMerge = fxEvents.some((e) => e.kind === 'reset');
@@ -6249,25 +6240,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       : 0;
 
   let attackDur = 0;
-  // 挑战模式「枭首」：那颗骰子**这次攻击结算后**才从攻击骰区移除（规则如此）。
-  // 为了让观感"飞出去之后区里就没它了"，在**它的飞行动画开飞那一刻**才把它在区里的真骰藏起来
-  // （不是渲染当下就藏 —— 那会提前挖空、让新骰挤格/跳格，真实事故）。
-  if (state.mode === 'challenge' && pa?.sourceDieId && legendAttackDelay > 0) {
-    const id = pa.sourceDieId;
-    window.setTimeout(() => {
-      legendFlyingIds.add(id); // 之后每次渲染都保持隐藏，直到它被移除
-      const el = root.querySelector<HTMLElement>(
-        `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
-      );
-      if (el) el.style.visibility = 'hidden';
-    }, legendAttackDelay + 30);
-  }
-  for (const id of legendFlyingIds) {
-    const el = root.querySelector<HTMLElement>(
-      `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
-    );
-    if (el) el.style.visibility = 'hidden';
-  }
   if (isNewAttack) {
     attackDur = attackStart(root, {
       sig: pa,
@@ -6283,6 +6255,13 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       fromCard: pa!.sourceDieId ? prevStored.has(pa!.sourceDieId) : false,
       costDur: resolveDur + costDur + legendAttackDelay, // 先等上一段收尾（整组播完），再等本段代价；挑战模式再等"先出骰后攻击"
       substitution: subOf(attackPay, pa!.sourceDieId ?? undefined),
+      // 挑战模式「枭首」：这次攻击用的是区里那颗真骰 → 交给 attackStart 在**开飞那一刻**把它藏起来
+      hideSourceEl:
+        state.mode === 'challenge' && pa!.sourceDieId
+          ? root.querySelector<HTMLElement>(
+              `.panel--challenge .area[data-kind="attack"] .die[data-id="${pa!.sourceDieId}"]`,
+            )
+          : null,
     });
   } else if (prevResolved && !hasAttackJoin) {
     attackDur = resolveDur;

@@ -269,6 +269,9 @@ export function applyChallengeSkill(
         const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
         if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
         else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+        // 区里的**排列也按同一顺序重排** → "最左边那颗先飞出去"，观感不错位
+        const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
+        B.areas.attack.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
         pumpAttackQueue(g);
       }
       return { spawn, outIds };

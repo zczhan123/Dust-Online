@@ -135,6 +135,18 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(g.players.B.areas.attack.some((d) => d.id === 'b1')).toBe(false);
   });
 
+  it('枭首（顺序）：代决"由大到小"时，攻击骰区的**排列也按同一顺序重排**（最左先飞）', () => {
+    const g = CHAL();
+    g.players.A.areas.defense = [];
+    g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 5, 'attack')];
+    g.challenge!.decisions = { 'z02-4': ['desc'] };
+    applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
+    // 队列/区里都按"由大到小"：6 → 5 → 2
+    expect(g.players.B.areas.attack.map((d) => d.value)).toEqual([6, 5, 2]);
+    expect(g.virtualQueue?.map((q) => q.value)).toEqual([5, 2]);
+    expect(g.pendingAttack).toMatchObject({ sourceDieId: g.players.B.areas.attack[0].id });
+  });
+
   it('代决帧 vs 选完帧：两条 legendSkill（先"弹名＋进槽"，选完只报"新产生的骰"）', () => {
     const g = CHAL();
     skipInitialReroll(g);
