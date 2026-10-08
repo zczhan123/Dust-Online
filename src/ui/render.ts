@@ -1395,24 +1395,22 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const table = el('div', 'challenge-skill-table');
   (card?.skills ?? []).forEach((sk, i) => {
     const r = el('div', `challenge-skill${state.challenge?.activeSkill === i ? ' is-active' : ''}`);
-    const head = el('div', 'csk-head');
     const no = el('span', 'csk-no');
     no.textContent = String(i);
-    head.appendChild(no);
+    r.appendChild(no);
     const nm = el('span', 'csk-name');
     nm.textContent = sk.name;
-    head.appendChild(nm);
+    r.appendChild(nm);
     if (sk.marker) {
       const mk = el('span', 'csk-mark');
       mk.textContent = sk.marker;
-      head.appendChild(mk);
+      r.appendChild(mk);
     }
     const sl = el('span', 'csk-slot');
     sl.textContent = slotPhrase(sk.slots ?? null);
-    head.appendChild(sl);
-    r.appendChild(head);
-    const eff = el('div', 'csk-eff');
-    eff.textContent = sk.effect; // 完整效果（照卡面）
+    r.appendChild(sl);
+    const eff = el('span', 'csk-eff');
+    eff.textContent = sk.effect; // 完整效果（照卡面）——与上面同一段文字流，不另起两行
     r.appendChild(eff);
     table.appendChild(r);
   });
@@ -1436,20 +1434,11 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   row.appendChild(right);
   panel.appendChild(row);
 
-  // ③ 生命条（占"驱动骰槽列 + 攻击骰区列"）＋ 防御信息框（占"防御骰区列"）
+  // ③ 生命条（占"驱动骰槽列 + 攻击骰区列"）；防御上限/规则**并进防御骰区那个框**（两者同一框，不再分家）
   const band = el('div', 'playband playband--single');
   const life = lifeBar(player, playerName(ctx, player.id));
   life.style.gridColumn = '1 / span 2';
   band.appendChild(life);
-  if (card) {
-    const info = el('div', 'challenge-legacy-info');
-    info.dataset.act = 'challengeLegacyInfo';
-    info.style.gridColumn = '3';
-    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
-    const rule = card.defenseRule ?? '防御规则 —';
-    info.textContent = `${cap}　｜　${rule}`;
-    band.appendChild(info);
-  }
   panel.appendChild(band);
 
   // ④ 三区：防御骰区 / 攻击骰区 / 驱动骰槽（＝原"冥想骰区"槽位，仅本模式改名）
@@ -1470,7 +1459,20 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   driven.appendChild(ddice);
   for (const k of AREA_ORDER_MIRRORED) {
     if (k === 'meditation') areas.appendChild(driven);
-    else areas.appendChild(areaBox(k, player, ctx));
+    else if (k === 'defense') {
+      // 防御骰区那一个框里，紧接一行「防御骰上限 N ｜ 只抵挡伤害 ≥ X 的攻击」——两件事同一框
+      const def = areaBox(k, player, ctx);
+      def.classList.add('area--legend-def');
+      if (card) {
+        const info = el('div', 'challenge-legacy-info');
+        info.dataset.act = 'challengeLegacyInfo';
+        const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
+        const rule = card.defenseRule ?? '防御规则 —';
+        info.textContent = `${cap}　｜　${rule}`;
+        def.appendChild(info);
+      }
+      areas.appendChild(def);
+    } else areas.appendChild(areaBox(k, player, ctx));
   }
   panel.appendChild(areas);
 
