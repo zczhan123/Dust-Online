@@ -6147,8 +6147,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         return pd ? { rect: pd.rect, value: c.value } : null;
       })
       .filter((x): x is LegendConsumeItem => !!x);
-    const slotEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven .dice');
-    legendConsumeDur = playLegendConsume(root, items, slotEl, 0);
+    // 落点＝**槽区域**（不是里面那个空的 `.dice`——空容器高度为 0，会算到快速操作栏去）
+    const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
+    legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
     legendDur = Math.max(legendDur, legendConsumeDur);
     // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
     //   常规：它们真的在区里 → 交给通用「获得骰」动画（由 beforeAddsMs 推迟到本过场之后）；

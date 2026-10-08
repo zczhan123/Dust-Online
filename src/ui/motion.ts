@@ -2446,8 +2446,35 @@ export interface LegendConsumeItem {
   value: number;
 }
 
+/** 区域内"能力骰真实落点"的排布常量（与 `.dice{gap:5}` / `.die{26px}` 一致）。 */
+const AREA_ROW_DIE_W = 26;
+const AREA_ROW_GAP = 5;
+
 /**
- * 传奇本步**新产生**的骰：从快速操作栏中心冒出 → 飞入对应骰区。返回时长。
+ * 某骰区里"能力骰会排到哪"——和**真实骰同排**：从 `.dice` 行左起 26+5 并排；行中心＝**区域竖向中心**
+ * （`.area{align-items:center}`）。
+ * ⚠️ 容器为空时 `.dice` 高度＝0 → **绝不能拿它定 Y**（曾因此把落点算成"快速操作栏"→ 骰子飞进操作栏消失）。
+ * 找不到区域矩形 → 返回 null（调用方**不得**退回 `pool`）。
+ */
+function areaDiceLanding(
+  areaEl: HTMLElement | null,
+  count: number,
+): { xs: number[]; y: number } | null {
+  if (!areaEl) return null;
+  const r = areaEl.getBoundingClientRect();
+  if (r.width <= 0 && r.height <= 0) return null;
+  const rowEl = areaEl.querySelector<HTMLElement>('.dice');
+  const rr = rowEl ? rowEl.getBoundingClientRect() : null;
+  const rowLeft = rr && rr.width > 0 ? rr.left : r.left + 8; // 量不到行就用区域左 + padding(8)
+  const xs = Array.from(
+    { length: count },
+    (_, i) => rowLeft + AREA_ROW_DIE_W / 2 + i * (AREA_ROW_DIE_W + AREA_ROW_GAP),
+  );
+  return { xs, y: r.top + r.height / 2 };
+}
+
+/**
+ * 传奇本步**新产生**的骰：从快速操作栏中心冒出 → 飞入对应骰区**并排落位**（与真实骰同排）。返回时长。
  * 用于"引擎已把骰子移走、DOM 里找不到真骰"的情况（例：枭首触发攻击时，新骰被立刻移进攻击队列）；
  * 真骰还在区里时请交给通用「获得骰」动画（不要用本函数，否则重影）。
  */
@@ -2467,21 +2494,26 @@ export function playLegendSpawn(
   const settleDur = ms(MOTION.settle);
   const total = inDur + holdDur + flyDur + settleDur;
   const delay = Math.max(0, delayMs);
-  const xs = sideBySideXs(pool.x, items.length, DIE_W);
+  const midXs = sideBySideXs(pool.x, items.length, AREA_ROW_DIE_W);
+  // 按区域分组：落点＝该区域 `.dice` 行里**接着已有真骰**依次并排
+  const slotOf = new Map<string, number>();
   items.forEach((it, i) => {
-    const target =
-      root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"] .dice`) ??
-      root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"]`);
-    const tr = target ? target.getBoundingClientRect() : null;
-    const tcX = tr && tr.width > 0 ? tr.left + tr.width / 2 : pool.x;
-    const tcY = tr && tr.height > 0 ? tr.top + tr.height / 2 : pool.y;
+    const areaEl = root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"]`);
+    if (!areaEl) return; // 目标区域量不到 → 本颗不做动画（绝不飞向快速操作栏）
+    const existing = areaEl.querySelectorAll('.dice .die').length;
+    const k = existing + (slotOf.get(it.area) ?? 0);
+    slotOf.set(it.area, (slotOf.get(it.area) ?? 0) + 1);
+    const landing = areaDiceLanding(areaEl, k + 1);
+    if (!landing) return;
+    const tcX = landing.xs[k];
+    const tcY = landing.y;
     const el = makeFlyingDie('solid', 'B', it.value);
     el.style.left = `${pool.x}px`;
     el.style.top = `${pool.y}px`;
     el.style.position = 'absolute';
     layer.appendChild(el);
     if (typeof el.animate === 'function') {
-      const sx = xs[i] - pool.x;
+      const sx = midXs[i] - pool.x;
       el.animate(
         [
           { transform: `translate(${sx}px, 0) scale(.7)`, opacity: 0, offset: 0 },
@@ -2505,12 +2537,13 @@ export function playLegendSpawn(
 /**
  * 传奇发动技能：把「临时驱动骰区域」里满足条件的那几颗驱动骰演成
  * **临时区 → 中间（停一下）→ 驱动骰槽 → 消失**。返回时长。
- * 用 fx 层影子演（红骰、与身份一致）；整段只是"过场"，**不改任何状态**。
+ * 落点＝**槽区域里 `.dice` 行的并排位置**（和攻击/防御区里的骰子同一种排布）；
+ * ⚠️ 落点必须用**区域**矩形算（空槽的 `.dice` 高度为 0，曾因此把骰子算到"快速操作栏"里消失）。
  */
 export function playLegendConsume(
   root: HTMLElement,
   dice: LegendConsumeItem[],
-  toSlotEl: HTMLElement | null,
+  slotAreaEl: HTMLElement | null,
   delayMs = 0,
 ): number {
   if (!canAnimate(root) || dice.length === 0) return 0;
@@ -2523,12 +2556,9 @@ export function playLegendConsume(
   const fadeDur = ms(MOTION.fade);
   const total = moveDur + holdDur + moveDur + fadeDur;
   const delay = Math.max(0, delayMs);
-  const slotR = toSlotEl ? toSlotEl.getBoundingClientRect() : null;
   const sorted = [...dice].sort((a, b) => a.rect.left - b.rect.left); // 按上一帧左右排序 → 中间/落点都不穿插
-  const midXs = sideBySideXs(pool.x, sorted.length, DIE_W);
-  const slotCx = slotR && slotR.width > 0 ? slotR.left + slotR.width / 2 : pool.x;
-  const slotXs = sideBySideXs(slotCx, sorted.length, DIE_W);
-  const slotY = slotR && slotR.height > 0 ? slotR.top + Math.min(8, slotR.height / 2) : pool.y;
+  const midXs = sideBySideXs(pool.x, sorted.length, AREA_ROW_DIE_W);
+  const landing = areaDiceLanding(slotAreaEl, sorted.length);
   sorted.forEach((dy, i) => {
     const g = makeFlyingDie('solid', 'B', dy.value);
     g.style.left = `${dy.rect.left}px`;
@@ -2538,8 +2568,9 @@ export function playLegendConsume(
     const c = rectCenter(dy.rect);
     const dx1 = midXs[i] - c.x;
     const dy1 = pool.y - c.y;
-    const dx2 = slotXs[i] - midXs[i];
-    const dy2 = slotY - pool.y;
+    // 第二跳：中间 → 槽区并排落点（量不到槽区时原地淡出，绝不飞向快速操作栏）
+    const dx2 = landing ? landing.xs[i] - midXs[i] : 0;
+    const dy2 = landing ? landing.y - pool.y : 0;
     if (typeof g.animate === 'function') {
       g.animate(
         [
