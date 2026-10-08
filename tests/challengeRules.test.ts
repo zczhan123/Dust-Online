@@ -32,15 +32,27 @@ describe('挑战模式 · 规则与削弱', () => {
     expect(legendCanBlock(Z02, 0)).toBe(false);
   });
 
-  it('isInertSkill：只在挑战模式下生效', () => {
+  it('isInertSkill：按玩家分侧（不是按模式一刀切）；标准模式一律 false', () => {
     const chal = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
-    expect(isInertSkill(chal, 'minglei.leibao.continuous')).toBe(true);
-    expect(isInertSkill(chal, 'youming.weimu')).toBe(true);
-    expect(isInertSkill(chal, 'tianfa.bairi')).toBe(true);
-    expect(isInertSkill(chal, 'tianfa.alt.shenkong')).toBe(true);
-    expect(isInertSkill(chal, 'buxiang.fengmang')).toBe(false);
+    // 028 白昼之火 / A05 深空之火：只废"打向传奇"的那一份（挑战者 A）；传奇 B 照常
+    expect(isInertSkill(chal, 'A', 'tianfa.bairi')).toBe(true);
+    expect(isInertSkill(chal, 'A', 'tianfa.alt.shenkong')).toBe(true);
+    expect(isInertSkill(chal, 'B', 'tianfa.bairi')).toBe(false);
+    expect(isInertSkill(chal, 'B', 'tianfa.alt.shenkong')).toBe(false);
+    // 013 雷暴（持续）/ 017 帷幕：只废传奇 B（它没有重掷阶段）；挑战者 A 照常
+    expect(isInertSkill(chal, 'B', 'minglei.leibao.continuous')).toBe(true);
+    expect(isInertSkill(chal, 'B', 'youming.weimu')).toBe(true);
+    expect(isInertSkill(chal, 'A', 'minglei.leibao.continuous')).toBe(false);
+    expect(isInertSkill(chal, 'A', 'youming.weimu')).toBe(false);
+    // 不在名单里的技能：两侧都 false
+    expect(isInertSkill(chal, 'A', 'buxiang.fengmang')).toBe(false);
+    expect(isInertSkill(chal, 'B', 'buxiang.fengmang')).toBe(false);
+    // 标准模式：一律 false
     const std = createGame({ seed: 1, firstPlayer: 'A' });
-    expect(isInertSkill(std, 'minglei.leibao.continuous')).toBe(false);
+    expect(isInertSkill(std, 'A', 'tianfa.bairi')).toBe(false);
+    expect(isInertSkill(std, 'B', 'tianfa.bairi')).toBe(false);
+    expect(isInertSkill(std, 'A', 'minglei.leibao.continuous')).toBe(false);
+    expect(isInertSkill(std, 'B', 'youming.weimu')).toBe(false);
   });
 
   it('防御规则：挑战者 2 点攻击（< 门槛 3）→ 传奇不给任何抵挡动作', () => {

@@ -327,8 +327,17 @@
    - **扣驱动骰的时机**：**真正结算前才扣**（曾因"提问前就扣"导致续跑重算槽匹配→整条被跳过）。
 5. **代决（模式 1）**：传奇本该自己做的抉择**全部由挑战者决定**。机制＝`Pending{kind:'challengePick', player:'A', prompt, options[]}` ＋ `Action{t:'challengePick', id}`；`challengeDecisions()` 给出本条需要的选择，`continueLegendTurn` 逐条问、收集齐再结算；选择存 `g.challenge.decisions`（按技能 id）。**已接**：`z02-2` 留哪颗防御骰、`z02-3` 弃哪颗防御骰、`z02-4` 枭首攻击顺序（`asc/desc`）。**未代决时一律有确定性默认**（AI/测试兼容）。
 6. **挑战者侧**：正常流程但无尘落；传奇按 **「防御规则」** 抵挡——`ChallengeCard.defenseMin`（Z01=2 / Z02=3），伤害 < 门槛 → `getLegalActions` **不给任何抵挡动作**（自动不挡）；「防御骰上限」`defenseCap` 在传奇**获得**防御骰时截断。
-7. **本模式技能削弱（唯一来源 `CHALLENGE_RULE_NOTES`）**：013 雷暴·持续 / 017 帷幕 / 028 与 A05「白昼之火」（`tianfa.bairi`、`tianfa.alt.shenkong`）→ **整条失效**（`isInertSkill(g,key)`；护栏测试确保 key 真实存在）；023 共振选"双方各获得"时**跳过给传奇的冥想骰**；020 兽魂的选择由挑战者定（Z02 无此卡）。
+7. **本模式技能削弱（唯一来源 `CHALLENGE_RULE_NOTES`）——⚠️ 必须按**玩家**分侧，不是按模式一刀切**（实现＝`isInertSkill(g, player, key)`，`challenge.ts`；护栏＝`tests/challengeRules.test.ts` + `tests/challengeIsolation.test.ts`）：
+   - `tianfa.bairi` / `tianfa.alt.shenkong`（028 / A05「白昼之火」）：**只废挑战者(A)**。FAQ 27.1.2 / 41.1.1 原文："为了降低『天罚』**面对昔日传奇**时的压制能力，我们设定『天罚·白昼之火』没有任何效果" → 废的是"打向传奇"的那一份；**传奇自己拿到 028 时照常生效**（它面对的是有冥想骰区的挑战者）。
+   - `minglei.leibao.continuous` / `youming.weimu`（013 雷暴·持续 / 017 帷幕）：**只废传奇(B)**——「昔日传奇」没有重掷阶段。
+   - 标准模式：一律 false（旧路径零变化）。
+   - 023 共振选"双方各获得"时**跳过给传奇的冥想骰**；020 兽魂的选择由挑战者定（Z02 无此卡）。
 8. **对手面板（D 方案，`render.ts` 的 `challengePanel()`）**：面板头＝`传说中的「X」` ＋药丸 `昔日传奇 · Z0N` ＋**点数分布**（取第二列神器，同玩家卡头写法）＋计数 `X/上限`；**卡图缩略**（`public/challenges/Z0NN.jpg`，点开＝大图浮窗 `challengeCardOverlay`）＋**技能列**（序号/名称/`∞`·`怜悯*`/槽摘要，**正在结算**一条高亮＝`challenge.activeSkill`）；生命条独占一行；三区＝防御骰区 / 攻击骰区 / **驱动骰槽**（＝原冥想骰区槽位，**仅本模式**改名）。图上不显示三神器。
 9. **固定视角**：本模式**不做 A/B 换位**——宿主 `main.ts` 在挑战局用 `setLocalViewPlayer('A')`（`viewOwnerOf` 唯一开关）⇒ `holdView` 恒假。
 10. **入口**：`setupScreen` 主页菜单「挑战模式」→ 已有的 4 列选择界面 → 「开始挑战」按钮带 `challengeCardId` → `main.ts` 的 `startLocal` 分支走 `createChallengeGame`。中段右槽在挑战模式多一个 **`挑战模式特殊规则`** 按钮（浮窗＝第 7 条清单）。
 11. **新卡义务**：转写 Z03–Z12 时，除 `CHALLENGES` 数据外，必须在 `applyChallengeSkill` 里逐条实现效果、在 `challengeDecisions` 登记其**代决点**、并更新代决清单；**槽/`∞`/`怜悯*`/`endsTurn` 由状态机统一处理，不要各写一遍**。
+12. **隔离红线（动动画/渲染前必读）**：挑战模式是**独立模式**——它的专属分支、战报称呼、阶段横幅、对局动作、以及"部分神器被削弱"**都不得外溢到标准模式**（也**不得反向误伤挑战者自己**）。规则：
+   - 任何挑战专属逻辑**一律**以 `g.mode === 'challenge'` 为门禁；凡涉及"**哪一方**"的一律**再加玩家判断**（如 `isInertSkill`），**禁止**只凭"某技能/某状态存在"就改行为。
+   - 护栏测试：**`tests/challengeIsolation.test.ts`**（标准局动作表无 `challengeStep`/`challengePick`、战报仍「玩家B」、横幅照弹尘起/主要、尘落照推、`virtualAttack` 口径不回归、削弱只作用在正确一侧）。**动 `render.ts` / `motion.ts` / `styles.css` 之前先跑它；改完再跑一遍。**
+   - 挑战模式**不做联机、不做传奇英雄面板**（刻意的）。
+13. **新卡开发清单**：`..\plans\挑战模式-新卡开发清单.md`——转写 Z01 / Z03–Z12 **动手前先读**（15 条踩坑 + 隔离 / 代决 / 命名 / 测试口径）。

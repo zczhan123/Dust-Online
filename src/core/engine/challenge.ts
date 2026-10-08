@@ -1,4 +1,4 @@
-import type { Die, GameState } from '../model/types';
+import type { Die, GameState, PlayerId } from '../model/types';
 import { challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
 
 /** 从小到大、按 id 稳定排序（保证"确定性默认分配"可测）。 */
@@ -95,7 +95,24 @@ export function legendCanBlock(card: ChallengeCard, damage: number): boolean {
   return damage >= (card.defenseMin ?? 0);
 }
 
-/** 该神器技能在本局是否**整条失效**（挑战模式的"特殊规则"；唯一来源 `CHALLENGE_RULE_NOTES`）。 */
-export function isInertSkill(g: GameState, key: string): boolean {
-  return g.mode === 'challenge' && challengeInertSkills().has(key);
+/** 「昔日传奇」固定坐 B 席（挑战者坐 A 席）——削弱判定要用到。 */
+export const LEGEND_PLAYER: PlayerId = 'B';
+
+/**
+ * 该神器技能在**这一方手里**是否**整条失效**（挑战模式的"特殊规则"；名单唯一来源 `CHALLENGE_RULE_NOTES`）。
+ *
+ * ⚠️ 削弱是**按玩家**判定的，**不是**按模式一刀切——两侧理由不同、作用方向相反：
+ *  - `tianfa.bairi` / `tianfa.alt.shenkong`：只废**挑战者(A)**。FAQ 27.1.2 / 41.1.1 原文：
+ *    "在单人挑战中，昔日传奇没有冥想骰区，我的『天罚·白昼之火』会正常生效吗？→ 为了降低『天罚』
+ *     **面对昔日传奇**时的压制能力，我们设定『天罚·白昼之火』没有任何效果。"
+ *    → 被废的是"打向传奇"的那一份；传奇自己拿到 028 时**照常生效**（它面对的挑战者有冥想骰区）。
+ *  - `minglei.leibao.continuous` / `youming.weimu`：只废**昔日传奇(B)**——「昔日传奇」没有重掷阶段。
+ *  - 标准模式：一律 false（旧路径零变化）。
+ *  - 其它不在名单里的技能：false。
+ */
+export function isInertSkill(g: GameState, player: PlayerId, key: string): boolean {
+  if (g.mode !== 'challenge') return false;
+  if (!challengeInertSkills().has(key)) return false;
+  if (key === 'tianfa.bairi' || key === 'tianfa.alt.shenkong') return player !== LEGEND_PLAYER;
+  return player === LEGEND_PLAYER;
 }

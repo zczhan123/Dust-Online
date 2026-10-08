@@ -1186,8 +1186,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 白昼之火（激活）：本回合攻击点数视为 6，且对方只能用冥想骰抵挡 */
   'tianfa.bairi': {
     run({ g, player }) {
-      // 单人挑战：本模式下没有任何效果（见 CHALLENGE_RULE_NOTES / FAQ 28.1.2）
-      if (isInertSkill(g, 'tianfa.bairi')) {
+      // 单人挑战：**挑战者**的「白昼之火」没有任何效果（打向传奇那侧；见 CHALLENGE_RULE_NOTES / FAQ 27.1.2）
+      if (isInertSkill(g, player, 'tianfa.bairi')) {
         logLine(g, `${pname(player)} 「白昼之火」：单人挑战中没有效果`);
         return;
       }
@@ -1212,8 +1212,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 深空之火（激活）：本回合攻击不可用防御骰抵挡（只能用冥想骰），且攻击伤害 +3；2 次伤害后结束主要阶段 */
   'tianfa.alt.shenkong': {
     run({ g, player }) {
-      // 单人挑战：本模式下没有任何效果（A05 的「白昼之火」等价物；见 CHALLENGE_RULE_NOTES / FAQ 41.1.1）
-      if (isInertSkill(g, 'tianfa.alt.shenkong')) {
+      // 单人挑战：**挑战者**的「深空之火」（A05 的白昼之火等价物）没有任何效果（见 CHALLENGE_RULE_NOTES / FAQ 41.1.1）
+      if (isInertSkill(g, player, 'tianfa.alt.shenkong')) {
         logLine(g, `${pname(player)} 「深空之火」：单人挑战中没有效果`);
         return;
       }
