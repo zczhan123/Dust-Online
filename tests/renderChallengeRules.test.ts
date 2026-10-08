@@ -120,6 +120,34 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(thumb.classList.contains('challenge-thumb--crop')).toBe(false);
   });
 
+  it('枭首：已"飞出去"的骰子从攻击骰区**数据层排除**（重绘也不复活）', () => {
+    vi.useFakeTimers();
+    try {
+      const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+      // 造"枭首一次攻击等待响应"的局面：攻击骰区一颗真骰 + 以它为 sourceDieId 的待抵挡
+      state.players.B.areas.attack = [{ id: 'bx1', value: 6, kind: 'attack' }];
+      state.challenge!.activeSkill = 4;
+      state.challenge!.resumeAt = 4;
+      state.pendingAttack = {
+        attacker: 'B',
+        value: 6,
+        unblockable: false,
+        physical: false,
+        baseValue: 6,
+        sourceDieId: 'bx1',
+        dieStyle: 'solid',
+      };
+      const { root, hooks } = mount(state);
+      const sel = '.panel--challenge .area[data-kind="attack"] .die[data-id="bx1"]';
+      expect(root.querySelector(sel)).not.toBeNull(); // 渲染当下还在（等到"开飞"才排除）
+      vi.advanceTimersByTime(5000); // 开飞时刻到点
+      renderGame(state, root, hooks); // 重绘（模拟挑战者点抵挡/不抵挡那一帧）
+      expect(root.querySelector(sel)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root, hooks } = mount(state);

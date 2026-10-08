@@ -330,11 +330,6 @@ export interface AttackStartInfo {
   costDur: number;
   /** 本次攻击由"真实之剑置换"支付：先 2 骰并排→中间→停顿→合并成灰 5 停住（不另建攻击骰） */
   substitution?: { rects: Rect[]; values: number[] } | null;
-  /**
-   * 挑战模式「枭首」：这次攻击用的那颗真骰在区里**还在**（规则上"结算后才离区"）→
-   * 在**开飞那一刻**（`costDur` 到点）把它藏起来，观感＝"飞出去之后区里就没它了"。**永不揭出**（结算后会被移除）。
-   */
-  hideSourceEl?: HTMLElement | null;
 }
 
 interface AttackPool {
@@ -543,8 +538,6 @@ export function attackStart(root: HTMLElement, info: AttackStartInfo): number {
     const atkNow = root.querySelector<HTMLElement>(`.player[data-player="${info.attacker}"]`);
     const defNow = root.querySelector<HTMLElement>(`.player[data-player="${defId}"]`);
     drawLinkLine(layer, atkNow, defNow);
-    // 挑战模式「枭首」：**开飞那一刻**才把区里那颗真骰藏起来（不是渲染当下 → 否则会提前挖空、挤格跳格）
-    if (info.hideSourceEl) info.hideSourceEl.style.visibility = 'hidden';
     die.style.transition = `opacity ${inDur}ms linear, transform ${flyDur}ms ${EASE.move}`;
     die.style.opacity = '1';
     const p = poolPoint(root);

@@ -72,6 +72,13 @@ let lastFrameMs = 0;
  */
 let legendPickHoldUntil = 0;
 
+/**
+ * 挑战模式「枭首」：这些骰子**已经飞出去攻击** → 每次渲染都**从数据层把它们排除**（直接从攻击骰区 DOM 里去掉），
+ * ⚠️ 不能用 CSS `hidden`：元素每帧重建会把 `hidden` 弄丢 → 挑战者一点抵挡它又"复活"（真实事故）。
+ * 自清理：只保留"此刻还在攻击骰区里"的 id。
+ */
+const legendGoneIds = new Set<string>();
+
 /** 本帧动效总时长（ms）——挑战模式"每步播完再走下一步"用。 */
 export function lastFrameDurationMs(): number {
   return lastFrameMs;
@@ -6255,18 +6262,33 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       fromCard: pa!.sourceDieId ? prevStored.has(pa!.sourceDieId) : false,
       costDur: resolveDur + costDur + legendAttackDelay, // 先等上一段收尾（整组播完），再等本段代价；挑战模式再等"先出骰后攻击"
       substitution: subOf(attackPay, pa!.sourceDieId ?? undefined),
-      // 挑战模式「枭首」：这次攻击用的是区里那颗真骰 → 交给 attackStart 在**开飞那一刻**把它藏起来
-      hideSourceEl:
-        state.mode === 'challenge' && pa!.sourceDieId
-          ? root.querySelector<HTMLElement>(
-              `.panel--challenge .area[data-kind="attack"] .die[data-id="${pa!.sourceDieId}"]`,
-            )
-          : null,
     });
+    // 挑战模式「枭首」：这颗骰**开飞那一刻**起就不该再出现在攻击骰区（数据层排除；不用 CSS hidden）
+    if (state.mode === 'challenge' && pa!.sourceDieId) {
+      const id = pa!.sourceDieId;
+      const at = resolveDur + costDur + legendAttackDelay + 30; // 与 attackStart 的"开飞时刻"一致
+      window.setTimeout(() => legendGoneIds.add(id), Math.max(0, at));
+    }
   } else if (prevResolved && !hasAttackJoin) {
     attackDur = resolveDur;
   } else if (pa) {
     attackHold(root);
+  }
+
+  // 挑战模式「枭首」：**每次渲染**都执行——把"已飞出去"的骰子从攻击骰区**数据层排除**（直接从 DOM 去掉），
+  // 这样挑战者点抵挡/不抵挡触发重绘时，它也不会"复活"（CSS hidden 会被重建弄丢 → 真实事故）。
+  if (state.mode === 'challenge') {
+    for (const id of [...legendGoneIds]) {
+      const el = root.querySelector<HTMLElement>(
+        `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
+      );
+      if (el) el.remove();
+    }
+    // 自清理：只保留"此刻还在攻击骰区里"的 id（结算移除后自动掉出，不旧账复发）
+    const alive = new Set(state.players.B.areas.attack.map((d) => d.id));
+    for (const id of [...legendGoneIds]) if (!alive.has(id)) legendGoneIds.delete(id);
+  } else {
+    legendGoneIds.clear();
   }
 
   // 攻击池"另一方补一颗骰"（011 spend / 034 park·cancel）：并排、不遮挡 → 按 then 处理
