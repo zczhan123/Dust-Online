@@ -2499,7 +2499,19 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 }
 
 /* ===== 挑战模式 · 对手面板（D 方案） ===== */
-.panel--challenge .player-header { flex-wrap: wrap; }
+/* 标题栏＝神器标题栏同款"浅底条"、同高（只在挑战面板作用域内，不动普通玩家面板） */
+.panel--challenge .player-header {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  margin: 0 0 6px;
+  border-radius: 4px;
+  background: var(--tb-card-head, #f7f7f7);
+  color: var(--tb-head-ink, #1b1b1b);
+  border-bottom: 1px solid var(--tb-card-line, #111111);
+}
+.panel--challenge .player-header .player-title { font-size: 17px; }
 .panel--challenge .card-sub { font-weight: 400; font-size: 12px; color: #6f6a60; }
 .challenge-row { display: flex; gap: 8px; align-items: stretch; margin: 4px 0; min-width: 0; }
 .challenge-thumb {
@@ -2515,6 +2527,11 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
   aspect-ratio: 1764 / 799;
 }
 .challenge-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 缩略：只裁上下——顶部图片自带的标题条(y 0→108/799)、底部末行下的留白(y 745→799/799)；
+   左右一像素不裁（保留 1764×637 ≈ 2.77:1）。object-position 66.7% = 把可见窗口停在 y=108
+   （可滑动余量 799-637=162，108/162=66.7%）。完整＝整张全图(1764/799)。 */
+.challenge-thumb--crop { aspect-ratio: 1764 / 637; }
+.challenge-thumb--crop img { object-position: 50% 66.7%; }
 .challenge-thumb:focus-visible { outline: 2px solid #8a5a05; outline-offset: 2px; }
 .challenge-skills {
   flex: 1 1 auto;
@@ -2570,15 +2587,23 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 .challenge-staging .csk-staging-lab { font-size: 11.5px; color: #7a4a12; flex: 0 0 auto; }
 html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; background: #fdf8ee; }
 .playband--single > * { grid-row: 1; }
-/* 防御骰区那一个框：把「防御骰上限 / 规则」并进来（同一框、紧跟一行；样式参考生命条框＝深色圆角条） */
-.area--legend-def { flex-wrap: wrap; align-content: center; }
-.area--legend-def .challenge-legacy-info {
-  flex: 1 1 100%;
-  margin-top: 3px;
+/* 防御骰区 ↔ 其正下方「防御骰上限 / 规则」信息框：**直角相接、不是合并**。
+   做法：两行之间不留空隙；骰区下两角、信息框上两角都是直角 → 视觉上"直线接住圆角"。
+   列宽用与 .areas 相同的 8px 间距，保证上下两框左右边缘严丝合缝。 */
+.panel--challenge .areas { margin-bottom: 0; }
+.panel--challenge .areas .area[data-kind="defense"] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.panel--challenge .playband--single { column-gap: 8px; margin-top: 0; }
+.panel--challenge .playband--single > .lifeline { margin-top: 4px; }
+.challenge-legacy-info {
+  display: flex;
+  align-items: center;
   padding: 3px 8px;
   background: #1c1f24;
   color: #f2f2f2;
-  border-radius: 6px;
+  border-radius: 0 0 8px 8px;
   font-size: 11.5px;
   line-height: 1.3;
   text-align: left;

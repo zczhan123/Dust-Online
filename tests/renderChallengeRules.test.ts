@@ -29,10 +29,11 @@ const freshUi = (): UiState => ({
   error: null,
 });
 
-const mount = (state: GameState): { root: HTMLElement; ui: UiState } => {
+const mount = (state: GameState, cardArt: 'thumb' | 'full' = 'thumb'): { root: HTMLElement; ui: UiState } => {
   document.body.innerHTML = '<div id="app"></div>';
   const root = document.getElementById('app')!;
   const ui = freshUi();
+  ui.prefs.cardArt = cardArt;
   const hooks: RenderHooks = {
     onAction: vi.fn(),
     ui,
@@ -84,10 +85,11 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(panel.querySelectorAll('.card-sub')[1]?.textContent).toBe('分布 防3 攻1/2/6 冥4/5');
     // 标题栏不再含"防御骰上限/规则"（已移到防御信息框）
     expect(panel.querySelector('.player-header')?.textContent).not.toContain('防御骰上限');
-    // 防御信息框（占防御骰区列）
-    expect(panel.querySelector('.challenge-legacy-info')?.textContent).toBe(
-      '防御骰上限 4　｜　只抵挡伤害 ≥ 3 的攻击',
-    );
+    // 防御信息框：在 band 第 3 列（＝防御骰区正下方），与骰区直角相接（不是并进骰区框里）
+    const info = panel.querySelector('.playband--single > .challenge-legacy-info') as HTMLElement | null;
+    expect(info?.textContent).toBe('防御骰上限 4　｜　只抵挡伤害 ≥ 3 的攻击');
+    expect(info?.style.gridColumn).toBe('3');
+    expect(panel.querySelector('.area--legend-def')).toBeNull();
     // 生命条占两列（驱动骰槽列 + 攻击骰区列）
     expect((panel.querySelector('.playband--single > .lifeline') as HTMLElement).style.gridColumn).toBe(
       '1 / span 2',
@@ -97,6 +99,8 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(panel.textContent).toContain('（满足1、2、3、4点时发动）');
     const img = panel.querySelector('.challenge-thumb img');
     expect(img?.getAttribute('src')).toBe('./challenges/Z002.jpg');
+    // 缩略图模式（prefs.cardArt='thumb' 是本用例默认）＝裁掉上下标题条/留白；完整模式＝不加裁剪类
+    expect(panel.querySelector('.challenge-thumb')?.classList.contains('challenge-thumb--crop')).toBe(true);
     expect(panel.querySelectorAll('.challenge-skill-table .challenge-skill').length).toBe(6);
     expect(panel.querySelector('.challenge-staging')).not.toBeNull();
     expect(panel.querySelector('.challenge-staging .csk-staging-lab')?.textContent).toBe('临时驱动骰区域');
@@ -104,6 +108,13 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     // 标准模式下不出现该面板
     const std = mount(createGame({ seed: 1, firstPlayer: 'A' }));
     expect(std.root.querySelector('.panel--challenge')).toBeNull();
+  });
+
+  it('完整模式：卡图不加裁剪类（整张全图）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const { root } = mount(state, 'full');
+    const thumb = root.querySelector('.panel--challenge .challenge-thumb')!;
+    expect(thumb.classList.contains('challenge-thumb--crop')).toBe(false);
   });
 
   it('传奇骰子按身份上色：临时驱动骰区域 / 驱动骰槽 用 die-B（红），不用灰色 die-drv', () => {

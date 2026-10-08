@@ -1378,7 +1378,8 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const row = el('div', 'challenge-row');
   const thumb = document.createElement('button');
   thumb.type = 'button';
-  thumb.className = 'challenge-thumb';
+  // 缩略（默认偏好）＝裁掉"顶部标题条 + 底部留白"；完整＝整张全图。点开大图始终是全图。
+  thumb.className = `challenge-thumb${ctx.prefs.cardArt === 'thumb' ? ' challenge-thumb--crop' : ''}`;
   thumb.dataset.act = 'challengeCardOpen';
   thumb.title = '点击看大图';
   const im = document.createElement('img');
@@ -1434,11 +1435,21 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   row.appendChild(right);
   panel.appendChild(row);
 
-  // ③ 生命条（占"驱动骰槽列 + 攻击骰区列"）；防御上限/规则**并进防御骰区那个框**（两者同一框，不再分家）
+  // ③ 生命条（占"驱动骰槽列 + 攻击骰区列"）；「防御骰上限 / 规则」放在第 3 列 ＝ 防御骰区**正下方**，
+  //    两者**直角相接**（不是合并）：骰区下两角、信息框上两角都是直角、中间无缝。
   const band = el('div', 'playband playband--single');
   const life = lifeBar(player, playerName(ctx, player.id));
   life.style.gridColumn = '1 / span 2';
   band.appendChild(life);
+  if (card) {
+    const info = el('div', 'challenge-legacy-info');
+    info.dataset.act = 'challengeLegacyInfo';
+    info.style.gridColumn = '3';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
+    const rule = card.defenseRule ?? '防御规则 —';
+    info.textContent = `${cap}　｜　${rule}`;
+    band.appendChild(info);
+  }
   panel.appendChild(band);
 
   // ④ 三区：防御骰区 / 攻击骰区 / 驱动骰槽（＝原"冥想骰区"槽位，仅本模式改名）
@@ -1459,20 +1470,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   driven.appendChild(ddice);
   for (const k of AREA_ORDER_MIRRORED) {
     if (k === 'meditation') areas.appendChild(driven);
-    else if (k === 'defense') {
-      // 防御骰区那一个框里，紧接一行「防御骰上限 N ｜ 只抵挡伤害 ≥ X 的攻击」——两件事同一框
-      const def = areaBox(k, player, ctx);
-      def.classList.add('area--legend-def');
-      if (card) {
-        const info = el('div', 'challenge-legacy-info');
-        info.dataset.act = 'challengeLegacyInfo';
-        const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
-        const rule = card.defenseRule ?? '防御规则 —';
-        info.textContent = `${cap}　｜　${rule}`;
-        def.appendChild(info);
-      }
-      areas.appendChild(def);
-    } else areas.appendChild(areaBox(k, player, ctx));
+    else areas.appendChild(areaBox(k, player, ctx));
   }
   panel.appendChild(areas);
 
