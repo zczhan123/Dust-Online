@@ -1,6 +1,6 @@
 import './ui/styles.css';
 import { createGame, createChallengeGame, applyAction, getLegalActions } from './core/engine/game';
-import { renderGame, setLocalViewPlayer, actorOf, type UiState } from './ui/render';
+import { renderGame, setLocalViewPlayer, actorOf, lastFrameDurationMs, type UiState } from './ui/render';
 import { renderSetup, type SetupOptions } from './ui/setupScreen';
 import { renderLobby } from './ui/lobby';
 import { createOnlineShell, type OnlineShell } from './ui/online';
@@ -77,7 +77,7 @@ const onlineUi = () => {
   };
 };
 
-/** 挑战模式：传奇回合"逐条结算"的节奏（毫秒）；界面按此节奏自动派发 `challengeStep` */
+/** 挑战模式：传奇回合"逐条结算"的**下限**节奏（毫秒）。实际＝`max(它, 本帧动画总时长)` → 每步播完才走下一步。 */
 const CHALLENGE_STEP_MS = 700;
 let challengeStepTimer: number | null = null;
 
@@ -114,7 +114,7 @@ const scheduleChallengeStep = (): void => {
     if (!state) return;
     if (!getLegalActions(state).some((a) => a.t === 'challengeStep')) return;
     dispatchAction({ t: 'challengeStep' });
-  }, CHALLENGE_STEP_MS);
+  }, Math.max(CHALLENGE_STEP_MS, lastFrameDurationMs()));
 };
 
 const render = (): void => {

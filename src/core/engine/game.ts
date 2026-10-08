@@ -124,18 +124,27 @@ function queueXianzhen(g: GameState, owner: PlayerId, reason: 'rerollEnd' | 'mai
 
 /** 投 `n` 个驱动骰（非能力骰；`kind` 只作占位，**永不进区域**，只活在 `g.challenge.driven`）。 */
 function rollDrivenDice(g: GameState, n: number): void {
+  const before = g.challenge!.driven.length;
   withRngState(g, (rng) => {
     for (let i = 0; i < n; i++) {
       g.challenge!.driven.push(createDie(newDieId('drv-B-'), rng.rollDie(), 'meditation'));
     }
   });
+  // 动效旁路：本回合投出的驱动骰（界面：中间并排冒出 → 飞入「临时驱动骰区域」）
+  fxPush({
+    kind: 'legendRoll',
+    player: 'B',
+    dice: g.challenge!.driven.slice(before).map((d) => ({ id: d.id, value: d.value })),
+  });
 }
 
-/** 传奇防御骰上限截断（超出部分**不获得**）。 */
-function capLegendDefense(g: GameState, cap: number): void {
-  if (g.players.B.areas.defense.length > cap) {
-    g.players.B.areas.defense = g.players.B.areas.defense.slice(0, cap);
-  }
+/** 传奇防御骰上限截断：**保留最新、挤掉最旧**（被挤出的旧骰交给界面走通用"飞中间淡出"）。 */
+function capLegendDefense(g: GameState, cap: number): { outIds: string[] } {
+  const def = g.players.B.areas.defense;
+  if (def.length <= cap) return { outIds: [] };
+  const outIds = def.slice(0, def.length - cap).map((d) => d.id);
+  g.players.B.areas.defense = def.slice(-cap);
+  return { outIds };
 }
 
 /** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
@@ -187,28 +196,42 @@ function challengeDecisions(
 
 /**
  * 结算传奇的一条技能（导出供测试直接调用；`consumed` ＝本条消耗的驱动骰对象，点数仍保留）。
- * 攻击类效果（暗夜凶神 / 枭首 / 遁入暗影的"发起攻击"）在 2c-2；本批先把**状态改动**做完。
+ * 返回本步的**动效事实**：`spawn`＝新获得的骰（及其区域）、`outIds`＝被「防御骰上限」挤出的旧骰。
+ * （枭首 / 遁入暗影触发攻击时，新骰会被**立刻移进攻击队列**，界面拿不到区域差集 → 只能靠这里报出。）
  */
-export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: ChallengeSkill, consumed: Die[]): void {
+export function applyChallengeSkill(
+  g: GameState,
+  card: ChallengeCard,
+  skill: ChallengeSkill,
+  consumed: Die[],
+): { spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[]; outIds: string[] } {
   const legacy = card.legacy;
   const vals = consumed.map((d) => d.value).sort((a, b) => a - b).join('/');
   logLine(g, `「${legacy}」：${skill.name}${vals ? `（消耗驱动骰 ${vals}）` : ''}`);
   const A = g.players.A;
   const B = g.players.B;
+  const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+  const outIds: string[] = [];
+  /** 传奇新获得一颗能力骰（登记进 `spawn`，供界面演"中间冒出 → 飞入区域"）。 */
+  const gain = (area: 'attack' | 'defense' | 'meditation', value: number): void => {
+    const d = createDie(newDieId('chg-B-'), value, area);
+    B.areas[area].push(d);
+    spawn.push({ id: d.id, value, area });
+  };
   switch (skill.id) {
     case 'z02-0':
-      return; // 投驱动骰已在回合开始完成
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
     case 'z02-1':
       syncLegendFengmang(g);
-      return;
+      return { spawn, outIds };
     case 'z02-2': {
       // 尽可能弃置挑战者防御骰，直至剩 1（"留哪颗"＝代决，模式 1；未代决时默认留第一颗）
       const keepId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
       const drop = A.areas.defense.filter((d) => d.id !== keepId).map((d) => d.id);
       if (drop.length) consumeDice(g, A, 'defense', drop);
       // 获得 1/2/3/4 点攻击骰各 1
-      for (const v of [1, 2, 3, 4]) B.areas.attack.push(createDie(newDieId('chg-B-'), v, 'attack'));
-      return;
+      for (const v of [1, 2, 3, 4]) gain('attack', v);
+      return { spawn, outIds };
     }
     case 'z02-3': {
       // 卡面顺序：先发起 8 点「不可抵挡」攻击
@@ -219,10 +242,10 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
       const cap = card.countCap ?? Number.POSITIVE_INFINITY;
       g.challenge!.count = Math.min(cap, g.challenge!.count + 1);
       syncLegendFengmang(g);
-      return;
+      return { spawn, outIds };
     }
     case 'z02-4': {
-      for (const d of consumed) B.areas.attack.push(createDie(newDieId('chg-B-'), d.value, 'attack'));
+      for (const d of consumed) gain('attack', d.value);
       // 若（传奇）攻击骰数 > 挑战者防御骰数 → 用全部攻击骰逐个攻击（走统一多段机制 virtualQueue）
       if (B.areas.attack.length > A.areas.defense.length) {
         const dice = [...B.areas.attack];
@@ -239,11 +262,11 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
         else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
         pumpAttackQueue(g);
       }
-      return;
+      return { spawn, outIds };
     }
     case 'z02-5': {
-      for (const d of consumed) B.areas.defense.push(createDie(newDieId('chg-B-'), d.value, 'defense'));
-      capLegendDefense(g, card.defenseCap ?? Number.POSITIVE_INFINITY);
+      for (const d of consumed) gain('defense', d.value);
+      outIds.push(...capLegendDefense(g, card.defenseCap ?? Number.POSITIVE_INFINITY).outIds);
       // 每 1 组 → 1 次 2 点攻击（组数＝消耗骰数 ÷ 每槽颗数；Z02 单槽 → 1 组）
       const per = (skill.slots ?? []).reduce((s, x) => s + x.count, 0) || consumed.length || 1;
       const groups = Math.max(1, Math.floor(consumed.length / per));
@@ -254,10 +277,10 @@ export function applyChallengeSkill(g: GameState, card: ChallengeCard, skill: Ch
         owner: 'B' as PlayerId,
       }));
       pumpAttackQueue(g);
-      return;
+      return { spawn, outIds };
     }
     default:
-      return;
+      return { spawn, outIds };
   }
 }
 
@@ -338,7 +361,19 @@ function continueLegendTurn(g: GameState, once = false): void {
     g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
     g.challenge.slot = consumed; // 临时移到**驱动骰槽**（界面看得见；结算后清空或已被移入区域）
     g.challenge.activeSkill = i; // 界面高亮"正在结算"
-    applyChallengeSkill(g, card, skill, consumed);
+    const fxConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
+    const res = applyChallengeSkill(g, card, skill, consumed);
+    // 动效旁路：本步的编排依据（消耗的驱动骰 / 新产生的骰 / 是否触发攻击）
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: fxConsumed,
+      spawn: res.spawn,
+      outIds: res.outIds,
+      attack: !!(g.pendingAttack || g.virtualQueue),
+    });
     delete dec[skill.id];
     g.challenge.slot = [];
     if (g.pendingAttack || g.virtualQueue) {

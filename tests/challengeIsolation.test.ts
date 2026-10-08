@@ -7,6 +7,7 @@ import {
   getLegalActions,
 } from '../src/core/engine/game';
 import { logLine, LEGEND_DISPLAY_NAME } from '../src/core/engine/log';
+import { fxTake, type FxEvent } from '../src/core/engine/fx';
 import { virtualAttack } from '../src/core/engine/combat';
 import { SKILL_HANDLERS } from '../src/core/engine/skills';
 import { SeededRng } from '../src/core/rng/rng';
@@ -30,9 +31,13 @@ const CHAL = (): GameState =>
 const isChallengeAction = (a: { t: string }): boolean =>
   a.t === 'challengeStep' || a.t === 'challengePick';
 
-/** 标准局：跨回合驱动若干决策点；每一步都断言"不出现挑战专属动作/待决策"，且不抛错。 */
+/** 传奇专属的动效旁路事件（标准模式一条都不该出现）。 */
+const isLegendFx = (e: FxEvent): boolean => e.kind === 'legendRoll' || e.kind === 'legendSkill';
+
+/** 标准局：跨回合驱动若干决策点；每一步都断言"不出现挑战专属动作/待决策/事件"，且不抛错。 */
 function driveStandard(g: GameState, steps: number): void {
   skipInitialReroll(g);
+  expect(fxTake().some(isLegendFx)).toBe(false);
   for (let i = 0; i < steps && g.phase !== 'gameOver'; i++) {
     const acts = getLegalActions(g);
     expect(acts.some(isChallengeAction)).toBe(false);
@@ -41,6 +46,7 @@ function driveStandard(g: GameState, steps: number): void {
     if (g.pendingAttack) applyAction(g, { t: 'block' });
     else if (g.pending) applyAction(g, acts[0]);
     else applyAction(g, acts.find((a) => a.t === 'advance') ?? acts[0]);
+    expect(fxTake().some(isLegendFx)).toBe(false);
   }
 }
 
@@ -86,6 +92,29 @@ describe('挑战模式 · 隔离守护（不得外溢到标准模式）', () => 
       toMain(g);
       expect(g.activePlayer).toBe('A');
       expect(getLegalActions(g).some(isChallengeAction)).toBe(false);
+    });
+
+    it('标准局：动效旁路里没有传奇专属事件（legendRoll / legendSkill）', () => {
+      const g = STD();
+      skipInitialReroll(g);
+      for (let i = 0; i < 30 && g.phase !== 'gameOver'; i++) {
+        const acts = getLegalActions(g);
+        expect(fxTake().some(isLegendFx)).toBe(false);
+        if (!acts.length) break;
+        if (g.pendingAttack) applyAction(g, { t: 'block' });
+        else if (g.pending) applyAction(g, acts[0]);
+        else applyAction(g, acts.find((a) => a.t === 'advance') ?? acts[0]);
+      }
+      expect(fxTake().some(isLegendFx)).toBe(false);
+    });
+
+    it('挑战局：这两种事件**确实会**出现（证明上一条不是"永远为假"的假护栏）', () => {
+      const g = CHAL();
+      fxTake();
+      skipInitialReroll(g);
+      expect(fxTake().some((e) => e.kind === 'legendRoll')).toBe(true);
+      applyAction(g, { t: 'challengeStep' });
+      expect(fxTake().some((e) => e.kind === 'legendSkill')).toBe(true);
     });
   });
 

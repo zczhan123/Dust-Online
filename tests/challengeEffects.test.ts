@@ -36,11 +36,11 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.players.B.areas.attack.map((d) => d.value).sort()).toEqual([1, 6]);
   });
 
-  it('遁入暗影：驱动骰变成传奇防御骰，且受「防御骰上限 4」截断', () => {
+  it('遁入暗影：驱动骰变成传奇防御骰；超出「防御骰上限 4」时**保留最新、挤掉最旧**', () => {
     const g = make();
     applyChallengeSkill(g, CARD, SK('z02-5'), [die('drv1', 3, 'meditation'), die('drv2', 4, 'meditation')]);
     expect(g.players.B.areas.defense.map((d) => d.value).sort()).toEqual([3, 4]);
-    applyChallengeSkill(
+    const res = applyChallengeSkill(
       g,
       CARD,
       SK('z02-5'),
@@ -51,7 +51,12 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
         die('x4', 6, 'meditation'),
       ],
     );
-    expect(g.players.B.areas.defense.length).toBe(4);
+    // 最新 4 颗留下；最旧的 2 颗被挤出（界面走通用"飞中间淡出"）
+    expect(g.players.B.areas.defense.map((d) => d.value).sort()).toEqual([1, 2, 5, 6]);
+    expect(res.outIds).toHaveLength(2);
+    for (const id of res.outIds) {
+      expect(g.players.B.areas.defense.some((d) => d.id === id)).toBe(false);
+    }
   });
 
   it('锋芒：传奇的攻击伤害加成 = 传奇计数（走统一口径 attackDamageBonus）', () => {

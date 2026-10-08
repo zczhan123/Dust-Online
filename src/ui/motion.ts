@@ -1080,6 +1080,11 @@ export function removalGroupMs(): number {
   return ms(MOTION.move) + ms(MOTION.hold) + ms(MOTION.fade);
 }
 
+/** 通用「获得骰」动画时长（中间并排冒出 → 飞入区域）；供界面估算"要推迟到什么时候"。 */
+export function addsDuration(): number {
+  return ms(MOTION.micro) + ms(MOTION.hold) + ms(MOTION.move) + ms(MOTION.settle);
+}
+
 export interface PayDie {
   id: string;
   rect: Rect;
@@ -1311,9 +1316,7 @@ export function runBoardMotions(
     return 0;
 
   const addedIds = [...curIds].filter((id) => !prev.has(id) && !exAll.has(id));
-  const addDur = addedIds.length
-    ? ms(MOTION.micro) + ms(MOTION.hold) + ms(MOTION.move) + ms(MOTION.settle)
-    : 0;
+  const addDur = addedIds.length ? addsDuration() : 0;
 
   // L04 重开：整盘重置 → 专用"合成再分回"动画（不走通用 L→M→G）
   if (resetMerge) return playResetMerge(root, layer0, pool0, prev, prevStored, exAll, addedIds, addDur);
@@ -2322,9 +2325,10 @@ export function setScaleX(el: HTMLElement, ratio: number, from?: number): void {
   }
 }
 
-/** 必杀横幅：从**快速操作栏正中心**弹出 `必杀·XXXX`（黑底白字、放大），从小变大浮现 → 停 → 原地淡出。
- *  `delayMs` 用于"跨卡顺序"（如先弹「没有怜悯」卡图气泡、再弹必杀横幅）。 */
-export function playUltimate(root: HTMLElement, name: string, delayMs = 0): number {
+/** 必杀横幅：从**快速操作栏正中心**弹出 `${prefix}${name}`（黑底白字、放大），从小变大浮现 → 停 → 原地淡出。
+ *  `delayMs` 用于"跨卡顺序"（如先弹「没有怜悯」卡图气泡、再弹必杀横幅）。
+ *  `prefix` 默认「必杀·」；**挑战模式**传 `''` 只显示技能名（复用同一套视觉，不另造）。 */
+export function playUltimate(root: HTMLElement, name: string, delayMs = 0, prefix = '必杀·'): number {
   if (!canAnimate(root)) return 0;
   const layer = ensureFxLayer();
   if (!layer) return 0;
@@ -2337,7 +2341,7 @@ export function playUltimate(root: HTMLElement, name: string, delayMs = 0): numb
   const delay = Math.max(0, delayMs);
   const b = document.createElement('div');
   b.className = 'fx-ultimate';
-  b.textContent = `必杀·${name}`;
+  b.textContent = `${prefix}${name}`;
   b.style.left = `${p.x}px`;
   b.style.top = `${p.y}px`;
   b.style.transform = 'translate(-50%,-50%)';
@@ -2422,5 +2426,141 @@ export function playBubble(
     b.style.opacity = '1';
   }
   window.setTimeout(() => b.remove(), delay + total + 80);
+  return delay + total;
+}
+
+/* ===== 挑战模式 · 传奇回合的专属过场 ===== */
+
+/**
+ * 传奇回合开始：驱动骰从**快速操作栏中心**并排冒出 → 飞入「临时驱动骰区域」。返回时长。
+ * 直接复用通用「获得骰」动画（`playAdds`＋`fromPool`）——骰子此刻**真的**在临时区里，所以是真骰动画。
+ */
+export function playLegendRoll(root: HTMLElement, ids: string[], delayMs = 0): number {
+  if (!canAnimate(root)) return 0;
+  return playAdds(root, ids, poolPoint(root), delayMs, true);
+}
+
+export interface LegendConsumeItem {
+  /** 该驱动骰**上一帧**在「临时驱动骰区域」里的位置（结算后它已从状态消失 → 只能靠影子） */
+  rect: Rect;
+  value: number;
+}
+
+/**
+ * 传奇本步**新产生**的骰：从快速操作栏中心冒出 → 飞入对应骰区。返回时长。
+ * 用于"引擎已把骰子移走、DOM 里找不到真骰"的情况（例：枭首触发攻击时，新骰被立刻移进攻击队列）；
+ * 真骰还在区里时请交给通用「获得骰」动画（不要用本函数，否则重影）。
+ */
+export function playLegendSpawn(
+  root: HTMLElement,
+  items: { value: number; area: 'attack' | 'defense' | 'meditation' }[],
+  delayMs = 0,
+): number {
+  if (!canAnimate(root) || items.length === 0) return 0;
+  if (prefersReducedMotion() || moveScale() === 0) return 0;
+  const layer = ensureFxLayer();
+  if (!layer) return 0;
+  const pool = poolPoint(root);
+  const inDur = ms(MOTION.micro);
+  const holdDur = ms(MOTION.hold);
+  const flyDur = ms(MOTION.move);
+  const settleDur = ms(MOTION.settle);
+  const total = inDur + holdDur + flyDur + settleDur;
+  const delay = Math.max(0, delayMs);
+  const xs = sideBySideXs(pool.x, items.length, DIE_W);
+  items.forEach((it, i) => {
+    const target =
+      root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"] .dice`) ??
+      root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"]`);
+    const tr = target ? target.getBoundingClientRect() : null;
+    const tcX = tr && tr.width > 0 ? tr.left + tr.width / 2 : pool.x;
+    const tcY = tr && tr.height > 0 ? tr.top + tr.height / 2 : pool.y;
+    const el = makeFlyingDie('solid', 'B', it.value);
+    el.style.left = `${pool.x}px`;
+    el.style.top = `${pool.y}px`;
+    el.style.position = 'absolute';
+    layer.appendChild(el);
+    if (typeof el.animate === 'function') {
+      const sx = xs[i] - pool.x;
+      el.animate(
+        [
+          { transform: `translate(${sx}px, 0) scale(.7)`, opacity: 0, offset: 0 },
+          { transform: `translate(${sx}px, 0) scale(1.05)`, opacity: 1, offset: inDur / total },
+          { transform: `translate(${sx}px, 0) scale(1)`, opacity: 1, offset: (inDur + holdDur) / total },
+          {
+            transform: `translate(${tcX - pool.x}px, ${tcY - pool.y}px) scale(1.08)`,
+            opacity: 1,
+            offset: (inDur + holdDur + flyDur) / total,
+          },
+          { transform: `translate(${tcX - pool.x}px, ${tcY - pool.y}px) scale(1)`, opacity: 1, offset: 1 },
+        ],
+        { duration: total, delay, easing: EASE.enter, fill: 'both' },
+      );
+    }
+    window.setTimeout(() => el.remove(), delay + total + 90);
+  });
+  return delay + total;
+}
+
+/**
+ * 传奇发动技能：把「临时驱动骰区域」里满足条件的那几颗驱动骰演成
+ * **临时区 → 中间（停一下）→ 驱动骰槽 → 消失**。返回时长。
+ * 用 fx 层影子演（红骰、与身份一致）；整段只是"过场"，**不改任何状态**。
+ */
+export function playLegendConsume(
+  root: HTMLElement,
+  dice: LegendConsumeItem[],
+  toSlotEl: HTMLElement | null,
+  delayMs = 0,
+): number {
+  if (!canAnimate(root) || dice.length === 0) return 0;
+  if (prefersReducedMotion() || moveScale() === 0) return 0; // 减弱动效：整段跳过（骰子本就是"被消耗"）
+  const layer = ensureFxLayer();
+  if (!layer) return 0;
+  const pool = poolPoint(root);
+  const moveDur = ms(MOTION.move);
+  const holdDur = ms(MOTION.hold);
+  const fadeDur = ms(MOTION.fade);
+  const total = moveDur + holdDur + moveDur + fadeDur;
+  const delay = Math.max(0, delayMs);
+  const slotR = toSlotEl ? toSlotEl.getBoundingClientRect() : null;
+  const sorted = [...dice].sort((a, b) => a.rect.left - b.rect.left); // 按上一帧左右排序 → 中间/落点都不穿插
+  const midXs = sideBySideXs(pool.x, sorted.length, DIE_W);
+  const slotCx = slotR && slotR.width > 0 ? slotR.left + slotR.width / 2 : pool.x;
+  const slotXs = sideBySideXs(slotCx, sorted.length, DIE_W);
+  const slotY = slotR && slotR.height > 0 ? slotR.top + Math.min(8, slotR.height / 2) : pool.y;
+  sorted.forEach((dy, i) => {
+    const g = makeFlyingDie('solid', 'B', dy.value);
+    g.style.left = `${dy.rect.left}px`;
+    g.style.top = `${dy.rect.top}px`;
+    g.style.position = 'absolute';
+    layer.appendChild(g);
+    const c = rectCenter(dy.rect);
+    const dx1 = midXs[i] - c.x;
+    const dy1 = pool.y - c.y;
+    const dx2 = slotXs[i] - midXs[i];
+    const dy2 = slotY - pool.y;
+    if (typeof g.animate === 'function') {
+      g.animate(
+        [
+          { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0 },
+          { transform: `translate(${dx1}px, ${dy1}px) scale(1.04)`, opacity: 1, offset: moveDur / total },
+          { transform: `translate(${dx1}px, ${dy1}px) scale(1)`, opacity: 1, offset: (moveDur + holdDur) / total },
+          {
+            transform: `translate(${dx1 + dx2}px, ${dy1 + dy2}px) scale(.92)`,
+            opacity: 1,
+            offset: (moveDur + holdDur + moveDur) / total,
+          },
+          {
+            transform: `translate(${dx1 + dx2}px, ${dy1 + dy2}px) scale(.8)`,
+            opacity: 0,
+            offset: 1,
+          },
+        ],
+        { duration: total, delay, easing: EASE.move, fill: 'both' },
+      );
+    }
+    window.setTimeout(() => g.remove(), delay + total + 90);
+  });
   return delay + total;
 }

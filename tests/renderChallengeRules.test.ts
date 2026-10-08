@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createGame, createChallengeGame } from '../src/core/engine/game';
+import { createGame, createChallengeGame, skipInitialReroll, applyAction, getLegalActions } from '../src/core/engine/game';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import type { GameState } from '../src/core/model/types';
 
@@ -29,7 +29,10 @@ const freshUi = (): UiState => ({
   error: null,
 });
 
-const mount = (state: GameState, cardArt: 'thumb' | 'full' = 'thumb'): { root: HTMLElement; ui: UiState } => {
+const mount = (
+  state: GameState,
+  cardArt: 'thumb' | 'full' = 'thumb',
+): { root: HTMLElement; ui: UiState; hooks: RenderHooks } => {
   document.body.innerHTML = '<div id="app"></div>';
   const root = document.getElementById('app')!;
   const ui = freshUi();
@@ -42,7 +45,7 @@ const mount = (state: GameState, cardArt: 'thumb' | 'full' = 'thumb'): { root: H
     onRestart: () => {},
   };
   renderGame(state, root, hooks);
-  return { root, ui };
+  return { root, ui, hooks };
 };
 
 describe('挑战模式 · 战斗界面「特殊规则」入口', () => {
@@ -115,6 +118,19 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     const { root } = mount(state, 'full');
     const thumb = root.querySelector('.panel--challenge .challenge-thumb')!;
     expect(thumb.classList.contains('challenge-thumb--crop')).toBe(false);
+  });
+
+  it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const { root, hooks } = mount(state);
+    skipInitialReroll(state); // → 传奇回合开始（legendRoll 帧）
+    expect(() => renderGame(state, root, hooks)).not.toThrow();
+    applyAction(state, { t: 'challengeStep' }); // → 发动一条技能（legendSkill 帧）
+    expect(() => renderGame(state, root, hooks)).not.toThrow();
+    if (getLegalActions(state).some((a) => a.t === 'challengeStep')) {
+      applyAction(state, { t: 'challengeStep' });
+    }
+    expect(() => renderGame(state, root, hooks)).not.toThrow();
   });
 
   it('传奇骰子按身份上色：临时驱动骰区域 / 驱动骰槽 用 die-B（红），不用灰色 die-drv', () => {

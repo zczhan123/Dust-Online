@@ -127,6 +127,32 @@ export type FxEvent =
       artifactId: string;
       chipId: string;
       value: number;
+    }
+  | {
+      /** 挑战模式·传奇回合开始：投出的**驱动骰**（界面：从中间并排冒出 → 飞入「临时驱动骰区域」）。 */
+      kind: 'legendRoll';
+      player: PlayerId;
+      dice: { id: string; value: number }[];
+    }
+  | {
+      /**
+       * 挑战模式·传奇发动一条技能——界面按它编排这一步（**一条命令 = 一个过场**）：
+       * - `consumed`：本步被扣下的驱动骰（「临时驱动骰区域」里满足条件的那几颗）
+       *   → 界面演「临时区 → 中间 → 驱动骰槽 → 消失」；
+       * - `spawn`：本步**新产生**的骰及其落入区域。注意：枭首/遁入暗影在触发攻击时，
+       *   这些骰会被**立刻移进攻击队列**（结算后区域里看不到）→ 不能靠"区域差集"推，**必须由引擎报出**；
+       *   → 界面演「中间冒出 → 飞入对应骰区」；
+       * - `attack`：本步是否紧接着发起攻击（界面据此把攻击动画整体后移）；
+       * - `outIds`：被「防御骰上限」**挤出去**的旧骰 id（先出后进；界面走通用"飞中间淡出"）。
+       */
+      kind: 'legendSkill';
+      player: PlayerId;
+      skillKey: string;
+      skillName: string;
+      consumed: { id: string; value: number }[];
+      spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[];
+      outIds: string[];
+      attack: boolean;
     };
 
 let buf: FxEvent[] = [];
