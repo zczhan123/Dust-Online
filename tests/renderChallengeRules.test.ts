@@ -139,10 +139,11 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
       };
       const { root, hooks } = mount(state);
       const sel = '.panel--challenge .area[data-kind="attack"] .die[data-id="bx1"]';
-      expect(root.querySelector(sel)).not.toBeNull(); // 渲染当下还在（等到"开飞"才排除）
-      vi.advanceTimersByTime(5000); // 开飞时刻到点
-      renderGame(state, root, hooks); // 重绘（模拟挑战者点抵挡/不抵挡那一帧）
-      expect(root.querySelector(sel)).toBeNull();
+      expect(root.querySelector(sel)).not.toBeNull(); // ① 渲染当下还在（等到"开飞"才排除）
+      vi.advanceTimersByTime(5000); // ② 推进到"开飞那一刻"
+      expect(root.querySelector(sel)).toBeNull(); // 当场就没了（治"停留"）
+      renderGame(state, root, hooks); // ③ 再重绘（＝挑战者点抵挡/不抵挡那一帧）
+      expect(root.querySelector(sel)).toBeNull(); // 仍然没有（治"复活"）
     } finally {
       vi.useRealTimers();
     }

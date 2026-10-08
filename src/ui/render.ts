@@ -79,6 +79,20 @@ let legendPickHoldUntil = 0;
  */
 const legendGoneIds = new Set<string>();
 
+/**
+ * 挑战模式「枭首」：把"已飞出去"的骰子从攻击骰区**数据层去掉**（幂等）。
+ * **唯一入口**——开飞定时器与"每次渲染"都调它，二者缺一都会坏：
+ *  · 只调定时器（v0.16.6）→ 挑战者一交互重绘，元素重建 → 骰子"复活"；
+ *  · 只在渲染里做（v0.16.7）→ 开飞当下到下次重绘之间没人去掉它 → 骰子"停留"。
+ */
+function hideLegendFlownDie(root: HTMLElement, id: string): void {
+  legendGoneIds.add(id);
+  const el = root.querySelector<HTMLElement>(
+    `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
+  );
+  if (el) el.remove();
+}
+
 /** 本帧动效总时长（ms）——挑战模式"每步播完再走下一步"用。 */
 export function lastFrameDurationMs(): number {
   return lastFrameMs;
@@ -6266,8 +6280,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     // 挑战模式「枭首」：这颗骰**开飞那一刻**起就不该再出现在攻击骰区（数据层排除；不用 CSS hidden）
     if (state.mode === 'challenge' && pa!.sourceDieId) {
       const id = pa!.sourceDieId;
-      const at = resolveDur + costDur + legendAttackDelay + 30; // 与 attackStart 的"开飞时刻"一致
-      window.setTimeout(() => legendGoneIds.add(id), Math.max(0, at));
+      // 与 attackStart 的"开飞时刻"完全一致（costDur 到点）
+      const at = resolveDur + costDur + legendAttackDelay;
+      window.setTimeout(() => hideLegendFlownDie(root, id), Math.max(0, at));
     }
   } else if (prevResolved && !hasAttackJoin) {
     attackDur = resolveDur;
@@ -6275,15 +6290,10 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     attackHold(root);
   }
 
-  // 挑战模式「枭首」：**每次渲染**都执行——把"已飞出去"的骰子从攻击骰区**数据层排除**（直接从 DOM 去掉），
-  // 这样挑战者点抵挡/不抵挡触发重绘时，它也不会"复活"（CSS hidden 会被重建弄丢 → 真实事故）。
+  // 挑战模式「枭首」：**每次渲染**都执行——把"已飞出去"的骰子从攻击骰区**数据层排除**（唯一入口）。
+  // 这样挑战者点抵挡/不抵挡触发重绘时，它也不会"复活"；而"开飞当下"由定时器调用同一入口去掉，不会停留。
   if (state.mode === 'challenge') {
-    for (const id of [...legendGoneIds]) {
-      const el = root.querySelector<HTMLElement>(
-        `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
-      );
-      if (el) el.remove();
-    }
+    for (const id of [...legendGoneIds]) hideLegendFlownDie(root, id);
     // 自清理：只保留"此刻还在攻击骰区里"的 id（结算移除后自动掉出，不旧账复发）
     const alive = new Set(state.players.B.areas.attack.map((d) => d.id));
     for (const id of [...legendGoneIds]) if (!alive.has(id)) legendGoneIds.delete(id);
