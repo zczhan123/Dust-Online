@@ -184,14 +184,17 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(rows.filter((r) => r.classList.contains('is-active')).length).toBe(1);
   });
 
-  it('点卡图缩略 → 打开大图浮窗；关闭后消失', () => {
+  it('右键卡图缩略 → 打开技能详情浮窗；关闭后消失（不再显示整张大图）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root } = mount(state);
-    (root.querySelector('[data-act="challengeCardOpen"]') as HTMLElement).click();
-    const overlay = root.querySelector('[data-act="challengeCardOverlay"]');
+    const thumb = root.querySelector('[data-act="challengeSkillsOpen"]') as HTMLElement;
+    thumb.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const overlay = root.querySelector('[data-act="challengeSkillsOverlay"]');
     expect(overlay).not.toBeNull();
-    (root.querySelector('[data-act="challengeCardClose"]') as HTMLElement).click();
-    expect(root.querySelector('[data-act="challengeCardOverlay"]')).toBeNull();
+    expect(overlay!.querySelector('img')).toBeNull(); // 不再显示整张大图
+    expect(overlay!.textContent).toContain('锋芒');
+    (root.querySelector('[data-act="challengeSkillsClose"]') as HTMLElement).click();
+    expect(root.querySelector('[data-act="challengeSkillsOverlay"]')).toBeNull();
   });
 
   it('代决待决策：提示语 + 候选按钮（challengePick）', () => {
@@ -210,5 +213,33 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(t).toContain('挑战模式 · 代决：「葬敌的完杀」：留哪 1 颗防御骰？');
     expect(t).toContain('防2');
     expect(t).toContain('防5');
+  });
+});
+
+describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => {
+  it('挑战模式：操作栏不渲染「尘落」徽标；标准模式仍渲染', () => {
+    const c = mount(createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] }));
+    expect(c.root.querySelector('.hint-dust')).toBeNull();
+    const s = mount(createGame({ seed: 1, firstPlayer: 'A' }));
+    expect(s.root.querySelector('.hint-dust')).not.toBeNull();
+  });
+
+  it('持续生效：Z02「锋芒」计数>0 → 该行 is-on + 药丸「生效中」；计数=0 不亮', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.challenge!.count = 0;
+    let { root } = mount(state);
+    let row = Array.from(root.querySelectorAll('.panel--challenge .challenge-skill')).find((r) =>
+      r.textContent.includes('锋芒'),
+    ) as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.classList.contains('is-on')).toBe(false);
+
+    state.challenge!.count = 2;
+    ({ root } = mount(state));
+    row = Array.from(root.querySelectorAll('.panel--challenge .challenge-skill')).find((r) =>
+      r.textContent.includes('锋芒'),
+    ) as HTMLElement;
+    expect(row.classList.contains('is-on')).toBe(true);
+    expect(row.querySelector('.csk-on-pill')?.textContent).toBe('生效中');
   });
 });

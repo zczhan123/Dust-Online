@@ -2561,6 +2561,22 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
   background: #fff;
   min-width: 0;
 }
+/* 持续生效中（常亮，静）：左缘实心绿条 + 名称/描述转绿 + 行尾药丸「生效中」。
+   **不加动效**（整树每帧重绘，CSS 动画会反复重放）；与"当前结算"的绿底描边叠放时互不吞没。 */
+.challenge-skill.is-on { border-left: 3px solid #1d7a4d; }
+.challenge-skill.is-on .csk-name,
+.challenge-skill.is-on .csk-eff { color: #14532d; }
+.challenge-skill .csk-on-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d6b43;
+  background: #eaf7ee;
+  vertical-align: middle;
+}
 .challenge-skill.is-active {
   background: #e9f2ec;
   border-color: #1d7a4d;
@@ -2587,35 +2603,40 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 .challenge-staging .csk-staging-lab { font-size: 11.5px; color: #7a4a12; flex: 0 0 auto; }
 html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; background: #fdf8ee; }
 .playband--single > * { grid-row: 1; }
-/* 防御骰区 ↔ 其正下方「防御骰上限 / 规则」信息框：**直角相接、不是合并**。
-   做法：两行之间不留空隙；骰区下两角、信息框上两角都是直角 → 视觉上"直线接住圆角"。
-   列宽用与 .areas 相同的 8px 间距，保证上下两框左右边缘严丝合缝。 */
-.panel--challenge .areas { margin-bottom: 0; }
-.panel--challenge .areas .area[data-kind="defense"] {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
+/* 防御骰区框＝普通全圆角（与攻击骰框一致）。信息框在它**上方**（同一列）：上圆角、下直角。
+   `.lifeline` 不再加 margin-top（否则 height:100% 会溢出该格、下缘贴到骰区框线）。 */
+.panel--challenge .areas { margin-top: 8px; margin-bottom: 0; }
 .panel--challenge .playband--single { column-gap: 8px; margin-top: 0; }
-.panel--challenge .playband--single > .lifeline { margin-top: 4px; }
+/* 生命条按内容定高（不要 height:100%：挑战 band 无战术条定高，100% 会被信息框压成 30 → 生命条溢出 10px 压到骰区框）；
+   行高回到 44 → 信息框随 grid stretch 同高（生命条框与"防御骰上限"框等高）。 */
+.panel--challenge .playband--single > .lifeline { height: auto; }
 .challenge-legacy-info {
   display: flex;
   align-items: center;
   padding: 3px 8px;
   background: #1c1f24;
   color: #f2f2f2;
-  border-radius: 0 0 8px 8px;
+  border-radius: 8px 8px 0 0;
   font-size: 11.5px;
   line-height: 1.3;
   text-align: left;
 }
-.challenge-card-box {
+/* 挑战·「传奇技能详情」浮窗（右键/长按卡图打开）——复用设置弹窗外壳，内容＝技能列表。 */
+.challenge-skills-box {
   position: relative;
-  max-width: min(1200px, 94vw);
-  max-height: 90vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: min(560px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  padding: 14px 16px 16px;
+  background: #f7f7f7;
+  color: #1b1b1b;
+  border: 1px solid #111111;
+  border-radius: 10px;
 }
-.challenge-card-box img { max-width: 100%; max-height: 86vh; border-radius: 8px; background: #000; display: block; }
-.challenge-card-box .settings-close { position: absolute; right: 0; top: -34px; }
+.challenge-skills-box .challenge-skills-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.challenge-skills-box .challenge-skills-list { display: flex; flex-direction: column; gap: 8px; }
+.challenge-skills-box .csk-detail { border: 1px solid #cfc8ba; border-radius: 6px; padding: 6px 9px; background: #fff; }
+.challenge-skills-box .csk-detail-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px; }
+.challenge-skills-box .csk-detail-eff { font-size: 12.5px; color: #3f3a33; line-height: 1.45; margin-top: 2px; }
+.challenge-skills-box .settings-close { position: absolute; right: 12px; top: 12px; }
 

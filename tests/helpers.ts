@@ -1,4 +1,4 @@
-import { applyAction } from '../src/core/engine/game';
+import { applyAction, getLegalActions } from '../src/core/engine/game';
 import type { GameState } from '../src/core/model/types';
 
 /**
@@ -23,8 +23,12 @@ export function toMain(g: GameState): void {
 export function driveLegendTurn(g: GameState): void {
   let guard = 0;
   while (g.activePlayer === 'B' && g.phase !== 'gameOver' && guard++ < 80) {
-    if (g.pendingAttack) applyAction(g, { t: 'block' });
-    else if (g.pending) throw new Error(`legend turn left a pending: ${(g.pending as { kind: string }).kind}`);
+    if (g.pendingAttack) {
+      // 用合法动作（可能是"不抵挡"，也可能是"用某颗骰抵挡"——传奇防御规则要求挡时后者）
+      const legal = getLegalActions(g);
+      const block = legal.find((a) => a.t === 'block') ?? legal[0];
+      applyAction(g, block);
+    } else if (g.pending) throw new Error(`legend turn left a pending: ${(g.pending as { kind: string }).kind}`);
     else applyAction(g, { t: 'challengeStep' });
   }
 }

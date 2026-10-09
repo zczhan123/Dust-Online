@@ -2182,17 +2182,23 @@ export function getLegalActions(g: GameState): Action[] {
         ? CHALLENGES.find((c) => c.id === g.challenge?.cardId)
         : undefined;
     const legendBlocks = card == null || legendCanBlock(card, pa.value);
-    const acts: Action[] = [{ t: 'block' }];
+    // 传奇防御规则：伤害 ≥ 门槛且传奇有可用骰 → **必须挡**（只给"用哪颗骰抵挡"，不给"不抵御"）。
+    // 仅 标准模式 / 不可抵挡 / 伤害不足 / 传奇无可用骰 时才放"不抵挡"。
+    const legendMustBlock = card != null && legendBlocks && !pa.unblockable;
+    const dieBlocks: Action[] = [];
     if (!pa.unblockable && legendBlocks) {
       // 028 天罚：只能用指定类型的骰抵挡（白昼之火=冥想 / 陨落=攻击）；否则用防御骰
       const kind = pa.blockKind ?? 'defense';
       for (const d of g.players[defender].areas[kind]) {
-        acts.push({ t: 'block', costSlots: [{ dieIds: [d.id] }] });
+        dieBlocks.push({ t: 'block', costSlots: [{ dieIds: [d.id] }] });
       }
       for (const h of heldAbilityDice(g, defender)) {
-        if (h.kind === kind) acts.push({ t: 'block', costSlots: [{ dieIds: [h.id] }] });
+        if (h.kind === kind) dieBlocks.push({ t: 'block', costSlots: [{ dieIds: [h.id] }] });
       }
     }
+    const acts: Action[] = [];
+    if (!legendMustBlock || dieBlocks.length === 0) acts.push({ t: 'block' });
+    acts.push(...dieBlocks);
     return acts;
   }
 

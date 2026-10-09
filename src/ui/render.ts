@@ -190,8 +190,8 @@ export interface UiState {
   settingsOpen: boolean;
   /** 挑战模式：是否打开「挑战模式特殊规则」浮窗 */
   challengeRulesOpen?: boolean;
-  /** 挑战模式：是否打开挑战卡大图 */
-  challengeCardOpen?: boolean;
+  /** 挑战模式：是否打开「传奇技能详情」浮窗（右键/长按卡图；不再显示整张大图） */
+  challengeSkillsOpen?: boolean;
   /** 联机·战斗界面「退出对局」二次确认弹框是否打开 */
   onlineLeaveOpen?: boolean;
   /** 战报抽屉是否打开（战报栏收起时用） */
@@ -1374,6 +1374,16 @@ export function challengeImageUrl(id: string): string {
   return `./challenges/Z${padded}.jpg`;
 }
 
+/**
+ * 挑战·传奇技能「持续生效中」（长明）判定：**只影响本模式的技能列显示**（标准模式无关）。
+ * 目前仅 Z02「锋芒」（持续：攻击伤害 +计数）→ 计数 > 0 即生效中。
+ * 新增"持续且始终生效"的传奇技能时在此登记；未登记恒 false（不点亮）。
+ */
+function challengeSkillAlwaysOn(state: GameState, sk: { id: string }): boolean {
+  if (sk.id === 'z02-1') return (state.challenge?.count ?? 0) > 0;
+  return false;
+}
+
 /** 挑战模式 · 对手面板（D 方案）：面板头（含点数分布/计数）＋ 卡图缩略（点开放大）＋ 技能列（高亮"正在结算"）
  *  ＋ 三区（防御骰区 / 攻击骰区 / **驱动骰槽**＝原冥想骰区槽位）＋ 生命条。 */
 function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
@@ -1415,28 +1425,34 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   thumb.type = 'button';
   // 缩略（默认偏好）＝裁掉"顶部标题条 + 底部留白"；完整＝整张全图。点开大图始终是全图。
   thumb.className = `challenge-thumb${ctx.prefs.cardArt === 'thumb' ? ' challenge-thumb--crop' : ''}`;
-  thumb.dataset.act = 'challengeCardOpen';
-  thumb.title = '点击看大图';
+  thumb.dataset.act = 'challengeSkillsOpen';
+  thumb.title = '右键 / 长按查看技能';
   const im = document.createElement('img');
   im.src = card ? challengeImageUrl(card.id) : '';
   im.alt = card ? card.legacy : '';
   thumb.appendChild(im);
-  thumb.addEventListener('click', () => {
-    ctx.hooks.ui.challengeCardOpen = true;
-    ctx.hooks.requestRender();
-  });
+  attachChallengeSkillsTrigger(thumb, ctx);
   row.appendChild(thumb);
 
   const right = el('div', 'challenge-skills');
   const table = el('div', 'challenge-skill-table');
   (card?.skills ?? []).forEach((sk, i) => {
-    const r = el('div', `challenge-skill${state.challenge?.activeSkill === i ? ' is-active' : ''}`);
+    const alwaysOn = challengeSkillAlwaysOn(state, sk);
+    const cls = ['challenge-skill'];
+    if (alwaysOn) cls.push('is-on'); // 持续生效中（长明，静）
+    if (state.challenge?.activeSkill === i) cls.push('is-active'); // 当前结算（聚光灯，走位）
+    const r = el('div', cls.join(' '));
     const no = el('span', 'csk-no');
     no.textContent = String(i);
     r.appendChild(no);
     const nm = el('span', 'csk-name');
     nm.textContent = sk.name;
     r.appendChild(nm);
+    if (alwaysOn) {
+      const onPill = el('span', 'csk-on-pill');
+      onPill.textContent = '生效中';
+      r.appendChild(onPill);
+    }
     if (sk.marker) {
       const mk = el('span', 'csk-mark');
       mk.textContent = sk.marker;
@@ -1512,29 +1528,82 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   return panel;
 }
 
-/** 挑战卡大图浮窗（复用设置弹窗外壳）。 */
-function challengeCardOverlay(ctx: Ctx): HTMLElement {
+/** 挑战·卡图缩略：**右键 / 长按** → 打开「技能详情」浮窗（左键不再打开大图；与神器详情浮窗同款触发）。 */
+function attachChallengeSkillsTrigger(node: HTMLElement, ctx: Ctx): void {
+  const open = (): void => {
+    ctx.hooks.ui.challengeSkillsOpen = true;
+    ctx.hooks.requestRender();
+  };
+  let timer: number | null = null;
+  const cancel = (): void => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+  node.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    open();
+  });
+  node.addEventListener('pointerdown', () => {
+    cancel();
+    timer = window.setTimeout(() => {
+      timer = null;
+      open();
+    }, 500);
+  });
+  node.addEventListener('pointerup', cancel);
+  node.addEventListener('pointerleave', cancel);
+  node.addEventListener('pointercancel', cancel);
+}
+
+/** 挑战·传奇「技能详情」浮窗（右键/长按卡图打开；**不再显示整张大图**），内容＝各条技能名/标记/槽/完整效果。 */
+function challengeSkillsOverlay(ctx: Ctx): HTMLElement {
   const overlay = el('div', 'settings-overlay');
-  overlay.dataset.act = 'challengeCardOverlay';
-  const box = el('div', 'challenge-card-box');
+  overlay.dataset.act = 'challengeSkillsOverlay';
+  const box = el('div', 'challenge-skills-box');
   const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
-  const im = document.createElement('img');
-  im.src = card ? challengeImageUrl(card.id) : '';
-  im.alt = card ? card.legacy : '';
-  box.appendChild(im);
+  const title = el('div', 'challenge-skills-title');
+  title.textContent = card ? `传说中的「${card.legacy}」· 技能` : '技能';
+  box.appendChild(title);
+  const list = el('div', 'challenge-skills-list');
+  for (const [i, sk] of (card?.skills ?? []).entries()) {
+    const item = el('div', 'csk-detail');
+    const head = el('div', 'csk-detail-head');
+    const no = el('span', 'csk-no');
+    no.textContent = String(i);
+    head.appendChild(no);
+    const nm = el('span', 'csk-name');
+    nm.textContent = sk.name;
+    head.appendChild(nm);
+    if (sk.marker) {
+      const mk = el('span', 'csk-mark');
+      mk.textContent = sk.marker;
+      head.appendChild(mk);
+    }
+    const sl = el('span', 'csk-slot');
+    sl.textContent = slotPhrase(sk.slots ?? null);
+    head.appendChild(sl);
+    item.appendChild(head);
+    const eff = el('div', 'csk-detail-eff');
+    eff.textContent = sk.effect;
+    item.appendChild(eff);
+    list.appendChild(item);
+  }
+  box.appendChild(list);
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'btn btn-cancel settings-close';
-  close.dataset.act = 'challengeCardClose';
+  close.dataset.act = 'challengeSkillsClose';
   close.textContent = '关闭 ✕';
   close.addEventListener('click', () => {
-    ctx.hooks.ui.challengeCardOpen = false;
+    ctx.hooks.ui.challengeSkillsOpen = false;
     ctx.hooks.requestRender();
   });
   box.appendChild(close);
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
-      ctx.hooks.ui.challengeCardOpen = false;
+      ctx.hooks.ui.challengeSkillsOpen = false;
       ctx.hooks.requestRender();
     }
   });
@@ -2118,23 +2187,26 @@ function hintBox(ctx: Ctx): HTMLElement {
   }
   hint.appendChild(left);
   // 尘落计数：操作栏右上角。墨底小徽标（大号等宽数字 + 「尘落」小标签 + 弱化 /10）；数值变化时数字弹一下。
-  const curDust = ctx.state.dustfall;
-  const prevDust = lastDustfall.get(ctx.state);
-  lastDustfall.set(ctx.state, curDust);
-  const dust = el('span', 'hint-dust');
-  dust.dataset.alert = curDust >= 10 ? '10' : curDust >= 7 ? '7' : '0';
-  const dustLabel = el('span', 'hint-dust-label');
-  dustLabel.textContent = '尘落';
-  const dustNum = el('span', 'hint-dust-num');
-  dustNum.textContent = String(curDust);
-  const dustMax = el('span', 'hint-dust-max');
-  dustMax.textContent = '/ 10';
-  dust.append(dustLabel, dustNum, dustMax);
-  if (prevDust !== undefined && prevDust !== curDust) {
-    dust.dataset.bump = '1';
-    bumpEl(dustNum);
+  // 挑战模式：单人挑战**不存在尘落** → 不渲染该徽标（仅挑战模式，标准模式不变）。
+  if (ctx.state.mode !== 'challenge') {
+    const curDust = ctx.state.dustfall;
+    const prevDust = lastDustfall.get(ctx.state);
+    lastDustfall.set(ctx.state, curDust);
+    const dust = el('span', 'hint-dust');
+    dust.dataset.alert = curDust >= 10 ? '10' : curDust >= 7 ? '7' : '0';
+    const dustLabel = el('span', 'hint-dust-label');
+    dustLabel.textContent = '尘落';
+    const dustNum = el('span', 'hint-dust-num');
+    dustNum.textContent = String(curDust);
+    const dustMax = el('span', 'hint-dust-max');
+    dustMax.textContent = '/ 10';
+    dust.append(dustLabel, dustNum, dustMax);
+    if (prevDust !== undefined && prevDust !== curDust) {
+      dust.dataset.bump = '1';
+      bumpEl(dustNum);
+    }
+    hint.appendChild(dust);
   }
-  hint.appendChild(dust);
   return hint;
 }
 
@@ -6090,8 +6162,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   if (hooks.ui.challengeRulesOpen) {
     root.appendChild(challengeRulesPanel(ctx));
   }
-  if (hooks.ui.challengeCardOpen) {
-    root.appendChild(challengeCardOverlay(ctx));
+  if (hooks.ui.challengeSkillsOpen) {
+    root.appendChild(challengeSkillsOverlay(ctx));
   }
   if (hooks.ui.logOpen) {
     root.appendChild(logDrawer(ctx));
