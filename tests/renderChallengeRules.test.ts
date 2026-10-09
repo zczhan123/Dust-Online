@@ -242,4 +242,23 @@ describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => 
     expect(row.classList.contains('is-on')).toBe(true);
     expect(row.querySelector('.csk-on-pill')?.textContent).toBe('生效中');
   });
+
+  it('操作栏：B 侧称「昔日传奇」（非「玩家B」）；昔传技能名用其玩家色 player-B；A 侧仍「玩家A」', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.activePlayer = 'B';
+    state.challenge!.resumeAt = 1;
+    state.challenge!.activeSkill = 1; // 锋芒
+    const { root } = mount(state);
+    const hint = root.querySelector('.hint') as HTMLElement;
+    const who = hint.querySelector('.hint-player') as HTMLElement;
+    expect(who.textContent).toBe('昔日传奇');
+    expect(who.classList.contains('player-B')).toBe(true);
+    // "正在结算"的技能名：用昔传玩家色（裸名）
+    const phaseSkill = hint.querySelector('.hint-phase .hint-skill.player-B') as HTMLElement;
+    expect(phaseSkill).not.toBeNull();
+    expect(phaseSkill.textContent).toBe('锋芒');
+    // 挑战者(A)仍是「玩家A」、蓝色
+    const aWho = root.querySelector('.lifeline-who.player-A') as HTMLElement;
+    expect(aWho.textContent).toBe('玩家A');
+  });
 });

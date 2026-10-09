@@ -1375,12 +1375,13 @@ export function challengeImageUrl(id: string): string {
 }
 
 /**
- * 挑战·传奇技能「持续生效中」（长明）判定：**只影响本模式的技能列显示**（标准模式无关）。
- * 目前仅 Z02「锋芒」（持续：攻击伤害 +计数）→ 计数 > 0 即生效中。
- * 新增"持续且始终生效"的传奇技能时在此登记；未登记恒 false（不点亮）。
+ * 挑战·昔传技能「持续生效中」（长明）判定：**只影响本模式的技能列显示**（标准模式无关）。
+ * **数据驱动**：读 `ChallengeSkill.alwaysOn`（`true`＝始终；`'count'`＝计数>0；缺省＝不常亮）。
+ * 新 Z 卡的持续技能在数据里填 `alwaysOn` 即可，**不要再按 `skill.id` 硬编码**。
  */
-function challengeSkillAlwaysOn(state: GameState, sk: { id: string }): boolean {
-  if (sk.id === 'z02-1') return (state.challenge?.count ?? 0) > 0;
+function challengeSkillAlwaysOn(state: GameState, sk: { alwaysOn?: boolean | 'count' }): boolean {
+  if (sk.alwaysOn === true) return true;
+  if (sk.alwaysOn === 'count') return (state.challenge?.count ?? 0) > 0;
   return false;
 }
 
@@ -1726,7 +1727,7 @@ function globalHint(ctx: Ctx): HintPart[] {
   const out: HintPart[] = [];
   if (state.rerollPunish.A || state.rerollPunish.B) {
     const owner: PlayerId = state.rerollPunish.A ? 'A' : 'B';
-    out.push({ text: `玩家${owner}「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害`, color: owner });
+    out.push({ text: `${playerName(ctx, owner)}「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害`, color: owner });
   }
   // A07 异相·历王之血之印：本回合双方所有持续式效果失效（全回合、双方可见）
   if ((['A', 'B'] as PlayerId[]).some((id) => state.players[id].artifacts.some((a) => a.continuousLostThisTurn))) {
@@ -1757,11 +1758,11 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '畏惧', color: pd.initiator },
       { text: '：' },
-      { text: `玩家${pd.player}`, color: pd.player },
+      { text: playerName(ctx, pd.player), color: pd.player },
       { text: ` 必须消耗 1 颗能力骰（对方已消耗 ${pd.initiatorValue} 点）——随后比较双方消耗的能力骰点数大小；1 视为大于 6；请选择` },
     ];
   }
-  // 挑战模式：传奇回合（逐条结算中）→ 提示"正在结算哪一条"
+  // 挑战模式：昔传回合（逐条结算中）→ 提示"正在结算哪一条"（技能名用昔传玩家色）
   if (
     ctx.state.mode === 'challenge' &&
     ctx.state.activePlayer === 'B' &&
@@ -1770,9 +1771,20 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
   ) {
     const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
     const sk = card?.skills?.[ctx.state.challenge.activeSkill ?? 0];
-    return [{ text: `「${LEGEND_DISPLAY_NAME}」正在结算：${sk?.name ?? '…'}` }];
+    const parts: HintPart[] = [{ text: `「${LEGEND_DISPLAY_NAME}」正在结算：` }];
+    parts.push(sk?.name ? { text: sk.name, color: 'B' } : { text: '…' });
+    return parts;
   }
   if (pd && pd.kind === 'challengePick') {
+    // 代决提示：把开头的「技能名」拆出来、用昔传玩家色；其余保持素色
+    const m = /^「([^」]+)」/.exec(pd.prompt);
+    if (m) {
+      return [
+        { text: '挑战模式 · 代决：' },
+        { text: `「${m[1]}」`, color: 'B' },
+        { text: pd.prompt.slice(m[0].length) },
+      ];
+    }
     return [{ text: `挑战模式 · 代决：${pd.prompt}` }];
   }
   if (pd && pd.kind === 'gongzhenPick') {
@@ -1858,7 +1870,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '兽魂', color: pd.owner },
       { text: '：' },
-      { text: `玩家${pd.owner}`, color: pd.owner },
+      { text: playerName(ctx, pd.owner), color: pd.owner },
       { text: ` 将受到 ${pd.attack.value} 点攻击伤害，且「兽魂」计数 ≥${pd.minCount}；你可以取消该伤害（令其计数 −1）。` },
     ];
   }
@@ -1958,7 +1970,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '威压', color: pd.player },
       {
-        text: `（玩家${pd.player} 的「哀歌」）：玩家${pd.player} 刚使用了 1 个能力骰（${weiyaReasonCn(pd.reason)}），可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择`,
+        text: `（${playerName(ctx, pd.player)} 的「哀歌」）：${playerName(ctx, pd.player)} 刚使用了 1 个能力骰（${weiyaReasonCn(pd.reason)}），可令自己或对方的 1 颗能力骰点数变为 ${pd.value}（保留原区域）；请选择`,
       },
     ];
   }
@@ -1966,7 +1978,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return [
       { text: '陷阵', color: pd.owner },
       {
-        text: `（玩家${pd.owner} 的「哀歌」）：玩家${pd.owner} 的重掷阶段结束，由生命最少的一方（玩家${pd.player}）选择弃置 玩家${pd.owner} 的 1 颗能力骰；随后 玩家${pd.owner} 获得另外两类各 1 颗；请选择`,
+        text: `（${playerName(ctx, pd.owner)} 的「哀歌」）：${playerName(ctx, pd.owner)} 的重掷阶段结束，由生命最少的一方（${playerName(ctx, pd.player)}）选择弃置 ${playerName(ctx, pd.owner)} 的 1 颗能力骰；随后 ${playerName(ctx, pd.owner)} 获得另外两类各 1 颗；请选择`,
       },
     ];
   }
@@ -1985,12 +1997,15 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       parts.push({ text: `被 ${pa.sourceValue} 点攻击骰攻击，本次 ${pa.value} 伤害` });
     } else if (pa.sourceSkill) {
       // 技能发起的攻击：写明"由该技能引起"，并区分「持有者自己发起 / 他人因该效果发起」
-      parts.push({ text: `玩家${pa.attacker}`, color: pa.attacker });
+      // 技能名**按所属方取色**（昔传=B 红；将来涉及挑战者则是 A 蓝）——不按名字，避免重名串色
+      parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
+      parts.push({ text: pa.sourceSkillOwner === pa.attacker ? '「' : ' 因对方「' });
+      parts.push({ text: pa.sourceSkill, color: pa.sourceSkillOwner });
       parts.push({
         text:
           pa.sourceSkillOwner === pa.attacker
-            ? `「${pa.sourceSkill}」发起攻击，本次 ${pa.value} 伤害（无攻击骰）`
-            : ` 因对方「${pa.sourceSkill}」效果而发起攻击，本次 ${pa.value} 伤害（无攻击骰）`,
+            ? `」发起攻击，本次 ${pa.value} 伤害（无攻击骰）`
+            : `」效果而发起攻击，本次 ${pa.value} 伤害（无攻击骰）`,
       });
     } else {
       parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰）` });
@@ -2005,7 +2020,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       const skillName = pa.blockKind === 'meditation' ? '白昼之火' : '陨落';
       const kindCn = pa.blockKind === 'meditation' ? '冥想' : '攻击';
       parts.push({ text: `（受 ` });
-      parts.push({ text: `玩家${pa.attacker}`, color: pa.attacker });
+      parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
       parts.push({ text: ` 的「${skillName}」影响：只能用${kindCn}骰抵挡）` });
     }
     parts.push({ text: '；请选择' });
@@ -2013,21 +2028,21 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
   }
   if (pd) {
     if (pd.kind === 'kuyu') {
-      return [{ text: `（玩家${pd.player} 的「梦魇」）：主要阶段结束，请宣称 1 个能力骰类型；请选择` }];
+      return [{ text: `（${playerName(ctx, pd.player)} 的「梦魇」）：主要阶段结束，请宣称 1 个能力骰类型；请选择` }];
     }
     if (pd.kind === 'tiaolingPick') {
-      return [{ text: `（「凋零」）：玩家${pd.player} 回合结束，请择①全相同/②全不同并弃置自己的能力骰；请选择` }];
+      return [{ text: `（「凋零」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同并弃置自己的能力骰；请选择` }];
     }
     if (pd.kind === 'endDiscard') {
-      return [{ text: `（玩家${pd.player}）：结束阶段，能力骰总数超出意志上限，请自行选择要弃置的能力骰；请选择` }];
+      return [{ text: `（${playerName(ctx, pd.player)}）：结束阶段，能力骰总数超出意志上限，请自行选择要弃置的能力骰；请选择` }];
     }
     if (pd.kind === 'wanzhangDiscard') {
-      return [{ text: `（玩家${pd.player} 的「千劫」）：主要阶段开始，请弃置 2 个能力骰；请选择` }];
+      return [{ text: `（${playerName(ctx, pd.player)} 的「千劫」）：主要阶段开始，请弃置 2 个能力骰；请选择` }];
     }
     if (pd.kind === 'putiPick') {
       return [
         {
-          text: `（玩家${pd.player} 的「金刚」）：对方${pd.mode === 'block' ? '用防御骰抵挡' : '使用了攻击骰'}——可移除神器上 ${pd.value} 点存放骰以取消其效果；请选择`,
+          text: `（${playerName(ctx, pd.player)} 的「金刚」）：对方${pd.mode === 'block' ? '用防御骰抵挡' : '使用了攻击骰'}——可移除神器上 ${pd.value} 点存放骰以取消其效果；请选择`,
         },
       ];
     }
@@ -2136,7 +2151,7 @@ function hintBox(ctx: Ctx): HTMLElement {
   const turn = el('span', 'hint-turn');
   turn.appendChild(document.createTextNode('轮到 '));
   const who = el('span', `hint-player player-${actor}`);
-  who.textContent = `玩家${actor}`;
+  who.textContent = playerName(ctx, actor);
   turn.appendChild(who);
   turn.appendChild(document.createTextNode(' 操作'));
   // 待决策属于非当前玩家（跨回合强制触发，如 018 强制必杀 / 017 帷幕）→ 明确标注
