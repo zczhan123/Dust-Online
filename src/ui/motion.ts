@@ -2503,28 +2503,45 @@ export function playLegendSpawn(
   const total = inDur + holdDur + flyDur + settleDur;
   const delay = Math.max(0, delayMs);
   const midXs = sideBySideXs(pool.x, items.length, AREA_ROW_DIE_W);
-  // 按区域分组：落点＝该区域 `.dice` 行里**接着已有真骰**依次并排
+  // 落点：**优先＝该真骰的实际位置**（按 id 找 DOM 里的真骰、量它的矩形）——
+  //  挑战模式里"昔传的新骰"通常**已经在区里渲染好了**（含枭首"按升/降序重排后"的最终排列），
+  //  直接落到它的实测位置＝所见即所得、绝不"闪现跳"。
+  //  只有"真骰不在 DOM"（如枭首把骰立刻移进攻击队列）时才退回"按槽位计算"。
   const slotOf = new Map<string, number>();
   items.forEach((it, i) => {
     const areaEl = root.querySelector<HTMLElement>(`.panel--challenge .area[data-kind="${it.area}"]`);
     if (!areaEl) return; // 目标区域量不到 → 本颗不做动画（绝不飞向快速操作栏）
-    const existing = areaEl.querySelectorAll('.dice .die').length;
-    const k = existing + (slotOf.get(it.area) ?? 0);
-    slotOf.set(it.area, (slotOf.get(it.area) ?? 0) + 1);
-    const landing = areaDiceLanding(areaEl, k + 1);
-    if (!landing) return;
-    const tcX = landing.xs[k];
-    const tcY = landing.y;
-    const el = makeFlyingDie('solid', 'B', it.value);
-    el.style.left = `${pool.x}px`;
-    el.style.top = `${pool.y}px`;
-    el.style.position = 'absolute';
-    layer.appendChild(el);
     // 飞行期间把区里那颗**真骰**藏起来（否则它会立刻"弹"在落点，与飞行动画重影）；落位后揭出
     const realEl = ids[i]
       ? root.querySelector<HTMLElement>(`.panel--challenge .die[data-id="${ids[i]}"]`)
       : null;
-    if (realEl) realEl.style.visibility = 'hidden';
+    let tcX: number | null = null;
+    let tcY = 0;
+    if (realEl) {
+      const rr = realEl.getBoundingClientRect();
+      if (rr.width > 0 || rr.height > 0) {
+        tcX = rr.left + rr.width / 2;
+        tcY = rr.top + rr.height / 2;
+        realEl.style.visibility = 'hidden';
+      }
+    }
+    if (tcX === null) {
+      // 退回：该区 `.dice` 行里"接着已有骰子"依次并排（此处 `existing` 数的是"当前已渲染"的骰子，
+      // 本批"不在 DOM"的这几颗不被计入 → 不会重复计数、不会向右多偏）
+      const existing = areaEl.querySelectorAll('.dice .die').length;
+      const k = existing + (slotOf.get(it.area) ?? 0);
+      slotOf.set(it.area, (slotOf.get(it.area) ?? 0) + 1);
+      const landing = areaDiceLanding(areaEl, k + 1);
+      if (!landing) return;
+      tcX = landing.xs[k];
+      tcY = landing.y;
+    }
+    const el = makeFlyingDie('solid', 'B', it.value);
+    // `pool` 是**中心点**；骰子是 26×26 → 左上角要减半个骰子，否则中心恒偏 (+13,+13)（真事故）。
+    el.style.left = `${pool.x - AREA_ROW_DIE_W / 2}px`;
+    el.style.top = `${pool.y - AREA_ROW_DIE_W / 2}px`;
+    el.style.position = 'absolute';
+    layer.appendChild(el);
     if (typeof el.animate === 'function') {
       const sx = midXs[i] - pool.x;
       el.animate(
