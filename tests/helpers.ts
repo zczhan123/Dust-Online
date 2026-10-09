@@ -28,7 +28,13 @@ export function driveLegendTurn(g: GameState): void {
       const legal = getLegalActions(g);
       const block = legal.find((a) => a.t === 'block') ?? legal[0];
       applyAction(g, block);
-    } else if (g.pending) throw new Error(`legend turn left a pending: ${(g.pending as { kind: string }).kind}`);
-    else applyAction(g, { t: 'challengeStep' });
+    } else if (g.pending) {
+      // 代决：取第一个候选（确定性），以便把传奇回合驱动到底
+      if (g.pending.kind === 'challengePick') {
+        applyAction(g, { t: 'challengePick', id: g.pending.options[0].id });
+      } else {
+        throw new Error(`legend turn left a pending: ${(g.pending as { kind: string }).kind}`);
+      }
+    } else applyAction(g, { t: 'challengeStep' });
   }
 }

@@ -149,36 +149,37 @@ export function capLegendDefense(g: GameState, cap: number): { outIds: string[] 
   return { outIds };
 }
 
-/**
- * 「相同」槽且 `maxSameGroups > 1`（如「遁入暗影」）：从 `driven` 尽量凑出**最多 `maxGroups` 组**
- * （每组 `slot.count` 颗**同点**）。`order`＝取组的点数方向（`asc`＝先小、`desc`＝先大）：
- * **结算模式** `favor`＝`asc`（点数小）、`against`＝`desc`（点数大）、`manual`＝`asc`（现状默认）。
- * **只消耗成组的骰**，零头留在 `driven`。凑不出 1 组返回 `null`（该技能跳过）。
- */
-function matchSameGroups(
-  slot: ChallengeSlot,
-  driven: Die[],
-  maxGroups: number,
-  order: 'asc' | 'desc' = 'asc',
-): { consumed: Die[]; groups: number[][] } | null {
+/** 「相同」槽：把 `driven` 里所有"同点成组"的组都列出来（每组 `slot.count` 颗；按点数升序）。
+ *  用于「遁入暗影」——**候选组 > 上限**时由代决/策略**选哪几组**。 */
+function allSameGroups(slot: ChallengeSlot, driven: Die[]): { value: number; dice: Die[] }[] {
   const n = slot.count;
-  if (n <= 0) return null;
+  if (n <= 0) return [];
   const byVal = new Map<number, Die[]>();
   for (const d of driven) byVal.set(d.value, [...(byVal.get(d.value) ?? []), d]);
-  const consumed: Die[] = [];
-  const groups: number[][] = [];
-  const vals = [...byVal.keys()].sort((a, b) => (order === 'asc' ? a - b : b - a));
-  for (const v of vals) {
+  const out: { value: number; dice: Die[] }[] = [];
+  for (const v of [...byVal.keys()].sort((a, b) => a - b)) {
     const pool = byVal.get(v)!;
-    for (let i = 0; i + n <= pool.length && groups.length < maxGroups; i += n) {
-      const slice = pool.slice(i, i + n);
-      groups.push(slice.map((d) => d.value));
-      consumed.push(...slice);
-    }
-    if (groups.length >= maxGroups) break;
+    for (let i = 0; i + n <= pool.length; i += n) out.push({ value: v, dice: pool.slice(i, i + n) });
   }
-  if (groups.length === 0) return null;
-  return { consumed, groups };
+  return out;
+}
+
+/** 从 `0..n-1` 里取 `k` 个的组合（确定性；n 很小）。 */
+function combinations(n: number, k: number): number[][] {
+  const out: number[][] = [];
+  const dfs = (start: number, cur: number[]): void => {
+    if (cur.length === k) {
+      out.push([...cur]);
+      return;
+    }
+    for (let i = start; i < n; i++) {
+      cur.push(i);
+      dfs(i + 1, cur);
+      cur.pop();
+    }
+  };
+  if (k > 0) dfs(0, []);
+  return out;
 }
 
 /** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
@@ -516,17 +517,44 @@ function continueLegendTurn(g: GameState, once = false): void {
       // 「相同」槽且 maxSameGroups>1（遁入暗影）：一次容纳最多 N 组，**只消耗成组的骰**（零头留 driven）
       const multi = skill.slots.length === 1 && skill.slots[0].kind === 'same' && (skill.maxSameGroups ?? 1) > 1;
       if (multi) {
-        const r = matchSameGroups(
-          skill.slots[0],
-          g.challenge.driven,
-          skill.maxSameGroups!,
-          g.challenge.settleMode === 'against' ? 'desc' : 'asc',
-        );
-        if (!r) {
+        const groups = allSameGroups(skill.slots[0], g.challenge.driven);
+        const maxG = skill.maxSameGroups!;
+        if (groups.length === 0) {
           logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
           continue;
         }
-        consumed = r.consumed;
+        const dec = (g.challenge.decisions ??= {});
+        const chosenStr = (dec[skill.id] ?? [])[0];
+        let chosenIdx: number[] | null = chosenStr ? chosenStr.split(',').map(Number) : null;
+        if (groups.length > maxG && !chosenIdx) {
+          const mode = g.challenge.settleMode;
+          if (mode && mode !== 'manual') {
+            // 自动：favor＝点数小、against＝点数大
+            chosenIdx = groups
+              .map((gr, idx) => ({ idx, value: gr.value }))
+              .sort((a, b) => (mode === 'against' ? b.value - a.value : a.value - b.value))
+              .slice(0, maxG)
+              .map((x) => x.idx);
+            dec[skill.id] = [chosenIdx.join(',')];
+          } else {
+            // 自选：弹面板让挑战者选哪几组（候选组 > 上限时才问）
+            const combos = combinations(groups.length, maxG);
+            g.challenge.activeSkill = i;
+            g.challenge.resumeAt = i;
+            g.pending = {
+              kind: 'challengePick',
+              player: 'A',
+              prompt: `「${skill.name}」：移入哪些同点组？（选 ${maxG} 组）`,
+              options: combos.map((c) => ({
+                id: c.join(','),
+                label: c.map((idx) => `${groups[idx].value}点组`).join('、'),
+              })),
+            };
+            return;
+          }
+        }
+        const useIdx = chosenIdx ?? groups.map((_, idx) => idx);
+        consumed = useIdx.flatMap((idx) => groups[idx]?.dice ?? []);
       } else {
         const m = matchSlots(skill.slots, g.challenge.driven);
         if (!m) {

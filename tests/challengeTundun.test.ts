@@ -3,7 +3,8 @@ import { createChallengeGame, applyAction, skipInitialReroll } from '../src/core
 import type { Die, DiceKind, GameState } from '../src/core/model/types';
 
 const die = (id: string, value: number, kind: DiceKind = 'meditation'): Die => ({ id, value, kind });
-const make = () => createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+const make = (mode: 'manual' | 'favor' | 'against' = 'manual') =>
+  createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: mode });
 
 /** 把局面停在"轮到传奇、下一条＝遁入暗影（z02-5 = skills[5]）"。 */
 function atTundun(g: GameState, drivenVals: number[], defenseVals: number[]): void {
@@ -67,8 +68,8 @@ describe('挑战模式 · 遁入暗影（逐组 攻击→移入，上限"超出�
     expect(g.challenge!.deferred).toBeUndefined();
   });
 
-  it('候选 > 2 组：只取 2 组（默认点数最小优先），其余留在 driven', () => {
-    const g = make();
+  it('候选 > 2 组：有利模式只取 2 组（点数最小优先），其余留在 driven', () => {
+    const g = make('favor');
     atTundun(g, [2, 2, 4, 4, 6, 6], []);
     applyAction(g, { t: 'challengeStep' });
     expect(g.challenge!.deferred).toMatchObject({ groups: [[2, 2], [4, 4]] });

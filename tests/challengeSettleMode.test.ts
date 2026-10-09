@@ -85,4 +85,22 @@ describe('挑战模式 · 结算模式（自动·有利/不利）', () => {
       expect(g.challenge!.deferred).toMatchObject({ groups: expected });
     }
   });
+
+  it('遁入暗影·自选：候选组 > 2 时弹面板让玩家选，按所选组结算', () => {
+    const g = make('manual');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 5;
+    g.challenge!.driven = [
+      die('d2a', 2), die('d2b', 2), die('d4a', 4), die('d4b', 4), die('d6a', 6), die('d6b', 6),
+    ];
+    g.players.B.areas.defense = [];
+    g.players.A.areas.defense = [];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.pending?.kind).toBe('challengePick');
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    expect(g.pending.options.map((o) => o.label)).toEqual(['2点组、4点组', '2点组、6点组', '4点组、6点组']);
+    applyAction(g, { t: 'challengePick', id: '1,2' }); // 选 4点组 + 6点组
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.challenge!.deferred).toMatchObject({ groups: [[4, 4], [6, 6]] });
+  });
 });

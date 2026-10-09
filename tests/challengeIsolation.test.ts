@@ -113,8 +113,21 @@ describe('挑战模式 · 隔离守护（不得外溢到标准模式）', () => 
       fxTake();
       skipInitialReroll(g);
       expect(fxTake().some((e) => e.kind === 'legendRoll')).toBe(true);
-      applyAction(g, { t: 'challengeStep' });
-      expect(fxTake().some((e) => e.kind === 'legendSkill')).toBe(true);
+      // 逐步驱动，直到出现一次 legendSkill（或回合结束）——现已能自动处理代决
+      let saw = false;
+      let guard = 0;
+      while (g.activePlayer === 'B' && g.phase !== 'gameOver' && guard++ < 80) {
+        if (fxTake().some((e) => e.kind === 'legendSkill')) {
+          saw = true;
+          break;
+        }
+        if (g.pendingAttack) applyAction(g, { t: 'block' });
+        else if (g.pending?.kind === 'challengePick') applyAction(g, { t: 'challengePick', id: g.pending.options[0].id });
+        else if (g.pending) break;
+        else applyAction(g, { t: 'challengeStep' });
+      }
+      if (!saw && fxTake().some((e) => e.kind === 'legendSkill')) saw = true;
+      expect(saw).toBe(true);
     });
   });
 
