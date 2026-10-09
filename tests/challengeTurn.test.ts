@@ -34,13 +34,17 @@ describe('挑战模式 · 传奇回合骨架', () => {
     expect(t).toContain('「永暗之刃」：锋芒\n'); // 无槽 → 必执行（该行不以"跳过"结尾）
   });
 
-  it('有槽但驱动骰不够 → 跳过（Z01 未登记 rollDice → 0 个驱动骰）', () => {
+  it('有槽但驱动骰不够 → 跳过（确定性：龙腾万丈 需 3 颗 2/5，只给 1 颗）', () => {
     const g = make('Z01');
     skipInitialReroll(g);
-    driveLegendTurn(g);
+    g.challenge!.resumeAt = 3; // z01-3 龙腾万丈
+    g.challenge!.driven = [
+      { id: 'd1', value: 1, kind: 'meditation' as const },
+      { id: 'd2', value: 2, kind: 'meditation' as const },
+    ];
+    applyAction(g, { t: 'challengeStep' });
     const t = g.log.map((l) => l.text).join('\n');
     expect(t).toContain('「雨中剑圣」：龙腾万丈 — 驱动骰不足，跳过');
-    expect(t).toContain('「雨中剑圣」：裁雨流'); // 无槽 → 必执行
   });
 
   it('怜悯*：传奇第一回合跳过该条（Z01「断斩一斩」）', () => {

@@ -203,6 +203,25 @@ function challengeDecisions(
   const defOpts = (): { id: string; label: string }[] =>
     A.areas.defense.map((d) => ({ id: d.id, label: `防${d.value}` }));
   switch (skill.id) {
+    case 'z01-4': {
+      // 雨落狂流：不符合分布数 n → 弃 k=floor(n/3) 个挑战者防御骰；仅当"有得挑"（0<k<防御骰数）时才问
+      const dist = emptyDistribution(B);
+      let off = 0;
+      for (const kd of KINDS_ORDER) for (const d of B.areas[kd]) if (!dist || !dist[kd].includes(d.value)) off++;
+      const k = Math.floor(off / 3);
+      const m = A.areas.defense.length;
+      if (k <= 0 || m <= k) return [];
+      return [
+        {
+          prompt: `「雨落狂流」：不符合分布 ${off} 个 → 弃置挑战者 ${k} 个防御骰`,
+          options: combinations(m, k).map((c) => ({
+            id: c.map((i) => A.areas.defense[i].id).join(','),
+            label: c.map((i) => `防${A.areas.defense[i].value}`).join('、'),
+          })),
+          prefer: 'smaller',
+        },
+      ];
+    }
     case 'z02-2':
       return A.areas.defense.length > 1
         ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts(), prefer: 'larger' }]
@@ -252,7 +271,8 @@ function autoPick(
     return (opts.find((o) => o.id === wantId) ?? opts[0]).id;
   }
   if (prefer === 'larger' || prefer === 'smaller') {
-    const num = (o: { label: string }): number => Number(String(o.label).replace(/[^\d-]/g, '')) || 0;
+    const num = (o: { label: string }): number =>
+      (String(o.label).match(/\d+/g) ?? []).reduce((s, x) => s + Number(x), 0);
     const sorted = [...opts].sort((a, b) => num(a) - num(b));
     const pickLarger = mode === 'favor' ? prefer === 'larger' : prefer === 'smaller';
     return (pickLarger ? sorted[sorted.length - 1] : sorted[0]).id;
@@ -285,6 +305,36 @@ export function applyChallengeSkill(
     spawn.push({ id: d.id, value, area });
   };
   switch (skill.id) {
+    case 'z01-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z01-1':
+      // 龙游万象：将所有 1/6 点的驱动骰**各重掷 1 次**（点数变化 → 通用"骰子翻转"动画）
+      withRng(g, (rng) => {
+        for (const d of g.challenge!.driven) {
+          if (d.value === 1 || d.value === 6) d.value = rng.rollDie();
+        }
+      });
+      return { spawn, outIds };
+    case 'z01-4': {
+      // 雨落狂流：数昔传区域中"不符合骰点分布"（第二列＝002 游龙）的能力骰 → 每 3 个弃挑战者 1 防御骰
+      const dist = emptyDistribution(B);
+      let off = 0;
+      for (const k of KINDS_ORDER) for (const d of B.areas[k]) if (!dist || !dist[k].includes(d.value)) off++;
+      const k = Math.floor(off / 3);
+      if (k <= 0) return { spawn, outIds };
+      const chosen = g.challenge!.decisions?.[skill.id] ?? [];
+      let ids: string[];
+      if (chosen[0]) {
+        ids = chosen[0].split(',').filter(Boolean);
+      } else {
+        const mode = g.challenge!.settleMode;
+        const def = [...A.areas.defense].sort((a, b) => a.value - b.value);
+        ids = (mode === 'against' ? def.slice(-k) : def.slice(0, k)).map((d) => d.id);
+      }
+      ids = ids.filter((id) => A.areas.defense.some((d) => d.id === id));
+      if (ids.length) consumeDice(g, A, 'defense', ids);
+      return { spawn, outIds };
+    }
     case 'z02-0':
       return { spawn, outIds }; // 投驱动骰已在回合开始完成
     case 'z02-1':

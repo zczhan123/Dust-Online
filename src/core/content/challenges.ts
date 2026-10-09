@@ -11,6 +11,8 @@ export interface ChallengeSlot {
   count: number;
   /** kind==='pips' 时必填：每格可接受的点数（count>1＝任选；逐格不同＝拆成多条 count:1） */
   faces?: number[];
+  /** **无限数量**（规则书 §7）：本槽容纳**全部**符合 `faces` 的驱动骰（`count` 忽略）。如 Z01「裁雨流」。 */
+  unlimited?: boolean;
 }
 
 export interface ChallengeSkill {
@@ -58,14 +60,14 @@ export interface ChallengeCard {
 export const CHALLENGES: ChallengeCard[] = [
   {
     id: 'Z01', legacy: '雨中剑圣', artifacts: ['001', '002', '003'],
-    life: 50, defenseCap: 5, defenseRule: '只抵挡伤害 ≥ 2 的攻击', defenseMin: 2,
+    life: 50, defenseCap: 5, defenseRule: '只抵挡伤害 ≥ 2 的攻击', defenseMin: 2, rollDice: 7,
     skills: [
       { id: 'z01-0', name: '回合开始', slots: null, effect: '投掷 7 个驱动骰。' },
       { id: 'z01-1', name: '龙游万象', marker: '∞', slots: null, effect: '将所有 1 点 和 6 点 的驱动骰重新投掷 1 次。' },
       { id: 'z01-2', name: '断斩一斩', marker: '怜悯*', slots: [{ kind: 'pips', count: 5, faces: [2, 5] }], endsTurn: true, effect: '弃置双方的全部能力骰。对挑战者造成 10 点真实伤害，并获得 3 个随机点数的防御骰，然后立即结束回合。' },
       { id: 'z01-3', name: '龙腾万丈', slots: [{ kind: 'pips', count: 3, faces: [2, 5] }], effect: '获得 4 个随机点数的能力骰，将其中点数最大和最小的能力骰各 1 个移动到攻击骰区，将另外 2 个能力骰移动到防御骰区。' },
       { id: 'z01-4', name: '雨落狂流', marker: '∞', slots: null, effect: '检查「雨中剑圣」的区域中不符合骰点分布的能力骰数量。每有 3 个不符合骰点分布的能力骰，弃置挑战者的 1 个防御骰。' },
-      { id: 'z01-5', name: '裁雨流', slots: null, effect: '将本技能上的驱动骰全部移动到攻击骰区，并使用所有攻击骰进行攻击。前 3 次成功造成伤害的攻击骰移动至防御骰区。' },
+      { id: 'z01-5', name: '裁雨流', slots: [{ kind: 'pips', count: 0, faces: [3, 4], unlimited: true }], effect: '将本技能上的驱动骰全部移动到攻击骰区，并使用所有攻击骰进行攻击。前 3 次成功造成伤害的攻击骰移动至防御骰区。' },
     ],
   },
   {
@@ -97,6 +99,10 @@ export const CHALLENGES: ChallengeCard[] = [
 export function slotPhrase(slots: ChallengeSlot[] | null): string {
   if (!slots || slots.length === 0) return '（必发）';
   const single = slots.length === 1 ? slots[0] : null;
+  if (single?.unlimited) {
+    const faces = (single.faces ?? []).join('/');
+    return `（满足无限颗${faces}点时发动）`;
+  }
   if (single && single.kind === 'pips') {
     const faces = (single.faces ?? []).join('/');
     return single.count === 1 ? `（满足${faces}点时发动）` : `（满足${single.count}颗${faces}点时发动）`;

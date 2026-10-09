@@ -29,6 +29,12 @@ function combos<T>(arr: T[], n: number, limit = 400): T[][] {
 /** 单个槽的候选分组（每组＝要消耗的骰 id），按确定性顺序排列。 */
 function candidates(slot: ChallengeSlot, dice: Die[], taken: Set<string>): string[][] {
   const free = sortedDice(dice.filter((d) => !taken.has(d.id)));
+  // 无限槽：容纳**全部**符合 `faces` 的驱动骰（整体作为"一组"）；一颗都没有则视为填不满
+  if (slot.unlimited) {
+    const faces = slot.faces ?? [];
+    const ok = faces.length ? free.filter((d) => faces.includes(d.value)) : free;
+    return ok.length ? [ok.map((d) => d.id)] : [];
+  }
   const n = slot.count;
   if (n <= 0) return [[]];
   switch (slot.kind) {
