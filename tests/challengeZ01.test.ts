@@ -70,4 +70,44 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     applyAction(g, { t: 'challengeStep' });
     expect(g.players.A.areas.defense.map((d) => d.value)).toEqual([2]);
   });
+
+  it('断斩一斩：弃双方全部区域骰 + 对挑战者 10 真伤 + 昔传得 3 防御骰 + 立即结束回合', () => {
+    const g = make('manual');
+    skipInitialReroll(g);
+    g.challenge!.turn = 1; // 非首回合（怜悯* 只在首回合跳过）
+    g.challenge!.resumeAt = 2;
+    g.challenge!.driven = [die('a2', 2), die('a2b', 2), die('a5', 5), die('a5b', 5), die('a5c', 5)];
+    g.players.A.areas = {
+      attack: [die('aa', 3, 'attack')],
+      defense: [die('ad', 4, 'defense')],
+      meditation: [die('am', 1, 'meditation')],
+    };
+    g.players.B.areas.attack = [die('ba', 6, 'attack')];
+    const life0 = g.players.A.life;
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.players.A.areas.attack).toEqual([]);
+    expect(g.players.A.areas.defense).toEqual([]);
+    expect(g.players.A.areas.meditation).toEqual([]);
+    expect(g.players.B.areas.attack).toEqual([]); // 昔传的骰也全弃
+    expect(g.players.A.life).toBe(life0 - 10);
+    expect(g.players.B.areas.defense).toHaveLength(3); // 之后获得 3 随机防御骰
+    expect(g.activePlayer).toBe('A'); // 立即结束回合 → 交还挑战者
+  });
+
+  it('龙腾万丈：得 4 能力骰 → 最大/最小各 1 进攻击区、其余 2 进防御区', () => {
+    const g = make('manual');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 3;
+    g.challenge!.driven = [die('a2', 2), die('a2b', 2), die('a5', 5)];
+    g.players.A.areas.attack = [];
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [];
+    applyAction(g, { t: 'challengeStep' });
+    const atk = g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b);
+    const def = g.players.B.areas.defense.map((d) => d.value).sort((a, b) => a - b);
+    const all = [...atk, ...def].sort((a, b) => a - b);
+    expect(all).toHaveLength(4);
+    expect(atk).toEqual([all[0], all[3]]); // 最小 + 最大
+    expect(def).toEqual([all[1], all[2]]); // 中间 2 个
+  });
 });

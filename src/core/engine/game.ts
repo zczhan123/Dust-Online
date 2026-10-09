@@ -315,6 +315,33 @@ export function applyChallengeSkill(
         }
       });
       return { spawn, outIds };
+    case 'z01-2': {
+      // 断斩一斩：① 弃双方全部能力骰（区域骰）→ ② 对挑战者 10 真伤 → ③ 昔传得 3 个随机点数防御骰 → ④ 立即结束回合（状态机处理 endsTurn）
+      for (const p of [A, B]) {
+        for (const kd of KINDS_ORDER) {
+          const ids = p.areas[kd].map((d) => d.id);
+          if (ids.length) consumeDice(g, p, kd, ids);
+        }
+      }
+      dealTrueDamage(g, 'A', 10, 'B');
+      withRng(g, (rng) => {
+        for (let i = 0; i < 3; i++) gain('defense', rng.rollDie());
+      });
+      return { spawn, outIds };
+    }
+    case 'z01-3': {
+      // 龙腾万丈：得 4 个随机点数能力骰 → 最大 1 + 最小 1 移攻击骰区、其余 2 移防御骰区（并列等价）
+      const vals: number[] = [];
+      withRng(g, (rng) => {
+        for (let i = 0; i < 4; i++) vals.push(rng.rollDie());
+      });
+      const sorted = [...vals].sort((a, b) => a - b);
+      gain('attack', sorted[sorted.length - 1]); // 最大
+      gain('attack', sorted[0]); // 最小
+      gain('defense', sorted[1]); // 中间 2 个
+      gain('defense', sorted[2]);
+      return { spawn, outIds };
+    }
     case 'z01-4': {
       // 雨落狂流：数昔传区域中"不符合骰点分布"（第二列＝002 游龙）的能力骰 → 每 3 个弃挑战者 1 防御骰
       const dist = emptyDistribution(B);
