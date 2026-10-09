@@ -151,13 +151,15 @@ export function capLegendDefense(g: GameState, cap: number): { outIds: string[] 
 
 /**
  * 「相同」槽且 `maxSameGroups > 1`（如「遁入暗影」）：从 `driven` 尽量凑出**最多 `maxGroups` 组**
- * （每组 `slot.count` 颗**同点**；按点数升序取组）。**只消耗成组的骰**，零头留在 `driven`。
- * 凑不出 1 组返回 `null`（该技能跳过）。
+ * （每组 `slot.count` 颗**同点**）。`order`＝取组的点数方向（`asc`＝先小、`desc`＝先大）：
+ * **结算模式** `favor`＝`asc`（点数小）、`against`＝`desc`（点数大）、`manual`＝`asc`（现状默认）。
+ * **只消耗成组的骰**，零头留在 `driven`。凑不出 1 组返回 `null`（该技能跳过）。
  */
 function matchSameGroups(
   slot: ChallengeSlot,
   driven: Die[],
   maxGroups: number,
+  order: 'asc' | 'desc' = 'asc',
 ): { consumed: Die[]; groups: number[][] } | null {
   const n = slot.count;
   if (n <= 0) return null;
@@ -165,7 +167,8 @@ function matchSameGroups(
   for (const d of driven) byVal.set(d.value, [...(byVal.get(d.value) ?? []), d]);
   const consumed: Die[] = [];
   const groups: number[][] = [];
-  for (const v of [...byVal.keys()].sort((a, b) => a - b)) {
+  const vals = [...byVal.keys()].sort((a, b) => (order === 'asc' ? a - b : b - a));
+  for (const v of vals) {
     const pool = byVal.get(v)!;
     for (let i = 0; i + n <= pool.length && groups.length < maxGroups; i += n) {
       const slice = pool.slice(i, i + n);
@@ -513,7 +516,12 @@ function continueLegendTurn(g: GameState, once = false): void {
       // 「相同」槽且 maxSameGroups>1（遁入暗影）：一次容纳最多 N 组，**只消耗成组的骰**（零头留 driven）
       const multi = skill.slots.length === 1 && skill.slots[0].kind === 'same' && (skill.maxSameGroups ?? 1) > 1;
       if (multi) {
-        const r = matchSameGroups(skill.slots[0], g.challenge.driven, skill.maxSameGroups!);
+        const r = matchSameGroups(
+          skill.slots[0],
+          g.challenge.driven,
+          skill.maxSameGroups!,
+          g.challenge.settleMode === 'against' ? 'desc' : 'asc',
+        );
         if (!r) {
           logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
           continue;

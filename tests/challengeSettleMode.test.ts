@@ -67,4 +67,22 @@ describe('挑战模式 · 结算模式（自动·有利/不利）', () => {
     applyAction(g, { t: 'challengeStep' });
     expect(g.pending?.kind).toBe('challengePick');
   });
+
+  it('遁入暗影·选组：有利＝点数小的组；不利＝点数大的组（最多 2 组）', () => {
+    for (const [mode, expected] of [
+      ['favor', [[2, 2], [4, 4]]],
+      ['against', [[6, 6], [4, 4]]],
+    ] as const) {
+      const g = make(mode);
+      skipInitialReroll(g);
+      g.challenge!.resumeAt = 5; // z02-5
+      g.challenge!.driven = [
+        die('d2a', 2), die('d2b', 2), die('d4a', 4), die('d4b', 4), die('d6a', 6), die('d6b', 6),
+      ];
+      g.players.B.areas.defense = [];
+      g.players.A.areas.defense = [];
+      applyAction(g, { t: 'challengeStep' });
+      expect(g.challenge!.deferred).toMatchObject({ groups: expected });
+    }
+  });
 });
