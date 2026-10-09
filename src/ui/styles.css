@@ -2614,6 +2614,20 @@ html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; bac
 /* 生命条按内容定高（不要 height:100%：挑战 band 无战术条定高，100% 会被信息框压成 30 → 生命条溢出 10px 压到骰区框）；
    行高回到 44 → 信息框随 grid stretch 同高（生命条框与"防御骰上限"框等高）。 */
 .panel--challenge .playband--single > .lifeline { height: auto; }
+/* 挑战·结算模式提醒（设置按钮旁）：自选 / 有利 / 不利 */
+.settle-mode-badge {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1b1b1b;
+  background: #ececec;
+  border: 1px solid #cfc8ba;
+}
+.settle-mode-badge[data-settle="favor"] { background: #e9f2ec; color: #1d6b43; }
+.settle-mode-badge[data-settle="against"] { background: #fadfd0; color: #a33a12; }
 .challenge-legacy-info {
   display: flex;
   align-items: center;

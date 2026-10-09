@@ -193,7 +193,7 @@ function challengeDecisions(
   skill: ChallengeSkill,
   consumedCount = 0,
   atDeferred = false,
-): { prompt: string; options: { id: string; label: string }[] }[] {
+): { prompt: string; options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' }[] {
   const A = g.players.A;
   const B = g.players.B;
   const defOpts = (): { id: string; label: string }[] =>
@@ -201,12 +201,12 @@ function challengeDecisions(
   switch (skill.id) {
     case 'z02-2':
       return A.areas.defense.length > 1
-        ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts() }]
+        ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts(), prefer: 'larger' }]
         : [];
     case 'z02-3':
       // 卡面顺序：先 8 点攻击 →（攻击结算后）才问"弃哪颗防御骰"
       return atDeferred && A.areas.defense.length > 0
-        ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts() }]
+        ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts(), prefer: 'smaller' }]
         : [];
     case 'z02-4': {
       // 会用它全部攻击骰逐个攻击时才需要定顺序
@@ -219,6 +219,7 @@ function challengeDecisions(
                 { id: 'asc', label: '由小到大' },
                 { id: 'desc', label: '由大到小' },
               ],
+              prefer: 'desc',
             },
           ]
         : [];
@@ -226,6 +227,33 @@ function challengeDecisions(
     default:
       return [];
   }
+}
+
+/**
+ * **自动结算**（`settleMode != 'manual'`）：替昔传从 `want.options` 里挑一个 id。
+ * - `prefer: 'asc'|'desc'`（顺序类）：favor→desc、against→asc（`prefer` 即"对挑战者有利"的方向）。
+ * - `prefer: 'larger'|'smaller'`（选骰类，label 形如 `防N`）：favor 取"该方向"、against 取反向。
+ * - 无 `prefer`：取第一个（现有确定性默认）。
+ * 只从引擎给的**合法 options** 里选 → 天然守约束（如死亡亦逝不能多弃）。
+ */
+function autoPick(
+  want: { options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' },
+  mode: 'favor' | 'against',
+): string | undefined {
+  const opts = want.options;
+  if (opts.length === 0) return undefined;
+  const prefer = want.prefer;
+  if (prefer === 'asc' || prefer === 'desc') {
+    const wantId = mode === 'favor' ? prefer : prefer === 'desc' ? 'asc' : 'desc';
+    return (opts.find((o) => o.id === wantId) ?? opts[0]).id;
+  }
+  if (prefer === 'larger' || prefer === 'smaller') {
+    const num = (o: { label: string }): number => Number(String(o.label).replace(/[^\d-]/g, '')) || 0;
+    const sorted = [...opts].sort((a, b) => num(a) - num(b));
+    const pickLarger = mode === 'favor' ? prefer === 'larger' : prefer === 'smaller';
+    return (pickLarger ? sorted[sorted.length - 1] : sorted[0]).id;
+  }
+  return opts[0].id;
 }
 
 /**
@@ -372,11 +400,22 @@ function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {
-      const w = wants[got.length];
-      // 让代决归到**这条技能**（challengePick 按 activeSkill 存选择）
-      g.challenge.activeSkill = (card.skills ?? []).indexOf(skill);
-      g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
-      return; // 停在代决
+      const mode = g.challenge.settleMode;
+      if (mode && mode !== 'manual') {
+        // 自动结算（有利/不利）：替昔传选齐，不弹面板
+        const arr = dec[skill.id] ?? [];
+        for (let k = got.length; k < wants.length; k++) {
+          const id = autoPick(wants[k], mode);
+          if (id) arr.push(id);
+        }
+        dec[skill.id] = arr;
+      } else {
+        const w = wants[got.length];
+        // 让代决归到**这条技能**（challengePick 按 activeSkill 存选择）
+        g.challenge.activeSkill = (card.skills ?? []).indexOf(skill);
+        g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
+        return; // 停在代决
+      }
     }
     const dropId = (dec[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
     if (dropId) consumeDice(g, A, 'defense', [dropId]);
@@ -494,29 +533,40 @@ function continueLegendTurn(g: GameState, once = false): void {
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {
-      g.challenge.activeSkill = i;
-      g.challenge.resumeAt = i;
-      if (!resuming) {
-        g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
-        // ⚠️ **不写 `slot`**：驱动骰槽只是界面上的"过场" → 那几颗骰由界面影子演「临时区→中间→槽→消失」，
-        //    状态里**不留**（否则界面会露出真骰、之后还要再演一次"从槽飞走"）。记账靠 `pendingConsumed`。
-        g.challenge.pendingConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
-        g.challenge.pendingSkillId = skill.id;
-        // 动效旁路：**先动画（技能名 + 驱骰进槽）**，选择面板由界面延后到动画播完再显示
-        fxPush({
-          kind: 'legendSkill',
-          player: 'B',
-          skillKey: skill.id,
-          skillName: skill.name,
-          consumed: consumed.map((d) => ({ id: d.id, value: d.value })),
-          spawn: [],
-          outIds: [],
-          attack: false,
-        });
+      const mode = g.challenge.settleMode;
+      if (mode && mode !== 'manual') {
+        // 自动结算（有利/不利）：替昔传选齐，不弹面板（下面照常结算）
+        const arr = dec[skill.id] ?? [];
+        for (let k = got.length; k < wants.length; k++) {
+          const id = autoPick(wants[k], mode);
+          if (id) arr.push(id);
+        }
+        dec[skill.id] = arr;
+      } else {
+        g.challenge.activeSkill = i;
+        g.challenge.resumeAt = i;
+        if (!resuming) {
+          g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
+          // ⚠️ **不写 `slot`**：驱动骰槽只是界面上的"过场" → 那几颗骰由界面影子演「临时区→中间→槽→消失」，
+          //    状态里**不留**（否则界面会露出真骰、之后还要再演一次"从槽飞走"）。记账靠 `pendingConsumed`。
+          g.challenge.pendingConsumed = consumed.map((d) => ({ id: d.id, value: d.value }));
+          g.challenge.pendingSkillId = skill.id;
+          // 动效旁路：**先动画（技能名 + 驱骰进槽）**，选择面板由界面延后到动画播完再显示
+          fxPush({
+            kind: 'legendSkill',
+            player: 'B',
+            skillKey: skill.id,
+            skillName: skill.name,
+            consumed: consumed.map((d) => ({ id: d.id, value: d.value })),
+            spawn: [],
+            outIds: [],
+            attack: false,
+          });
+        }
+        const w = wants[got.length];
+        g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
+        return;
       }
-      const w = wants[got.length];
-      g.pending = { kind: 'challengePick', player: 'A', prompt: w.prompt, options: w.options };
-      return;
     }
     g.challenge.driven = g.challenge.driven.filter((d) => !consumed.includes(d)); // 真正扣掉
     g.challenge.slot = []; // 驱动骰槽＝纯过场视觉，状态里不留骰
@@ -889,6 +939,8 @@ export interface ChallengeSetupOptions {
   challenger: [string, string, string];
   /** 挑战者的战术牌（可空） */
   tactic?: string;
+  /** 结算模式（选择界面定）：`manual`（默认）/ `favor`（有利挑战者）/ `against`（不利挑战者） */
+  settleMode?: 'manual' | 'favor' | 'against';
 }
 
 /** 单人挑战建局：挑战者＝A（构筑），传奇＝B（挑战卡预设，无能力骰、生命取卡面、先手）。 */
@@ -906,7 +958,7 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   // 传奇没有初始能力骰（它的骰是每回合投的"驱动骰"），也没有冥想骰区
   g.players.B.areas = { attack: [], defense: [], meditation: [] };
   if (card.life != null) g.players.B.life = g.players.B.lifeMax = card.life;
-  g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0 };
+  g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0, settleMode: opts.settleMode ?? 'manual' };
   logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」（${card.id}）· 生命 ${g.players.B.life}`);
   // 挑战者的战术牌：构筑直接生效
   if (opts.tactic) applyTacticStart(g, 'A');

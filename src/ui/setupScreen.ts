@@ -56,6 +56,8 @@ export interface SetupOptions {
   tacticB?: string;
   /** 单人挑战：所选挑战卡 id（有则走 createChallengeGame；`heroA`＝挑战者构筑、`heroB` 忽略） */
   challengeCardId?: string;
+  /** 单人挑战：结算模式（`manual` 自选 / `favor` 有利 / `against` 不利） */
+  settleMode?: 'manual' | 'favor' | 'against';
 }
 
 type Side = 'A' | 'B';
@@ -1695,7 +1697,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
 
   let legendIdx = 0;
   let pickHeroIdx = 0;
-  let autoResolve: 'favor' | 'against' = 'favor';
+  let settleMode: 'manual' | 'favor' | 'against' = 'manual'; // 默认自选（测试方便）
   let anomaly = false; // 「使用异相神器」开关
   let tacticOn = false; // 「使用战术牌」开关（挑战者；昔日传奇不配战术牌）
   let tacticPick: string | null = null; // 挑战者已选战斗牌 id
@@ -1773,6 +1775,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
         heroB: card.artifacts,
         firstPlayer: 'B', // 说明书：永远从「昔日传奇」回合开始
         challengeCardId: card.id,
+        settleMode,
         tacticA: tacticPick ?? undefined,
       });
     });
@@ -1873,19 +1876,20 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     const full = el('span', 'pick-legend-full'); full.textContent = `传说中的“${card.legacy}”`;
     head.appendChild(who); head.appendChild(full);
     const seg = el('span', 'pick-seg');
-    const segBtn = (val: 'favor' | 'against', label: string): void => {
-      const b = el('span', 'pick-seg-btn' + (autoResolve === val ? ' on' : ''));
+    const segBtn = (val: 'manual' | 'favor' | 'against', label: string): void => {
+      const b = el('span', 'pick-seg-btn' + (settleMode === val ? ' on' : ''));
       b.textContent = label;
-      b.dataset.auto = val;
+      b.dataset.settle = val;
       b.addEventListener('click', () => {
-        if (autoResolve === val) return; // 必填：点当前项不取消
-        autoResolve = val;
+        if (settleMode === val) return; // 必填：点当前项不取消
+        settleMode = val;
         render();
       });
       seg.appendChild(b);
     };
-    segBtn('favor', '结算玩家有利·标准');
-    segBtn('against', '结算玩家不利·挑战自我');
+    segBtn('favor', '结算玩家有利');
+    segBtn('against', '结算玩家不利');
+    segBtn('manual', '结算玩家自选'); // 最右、默认
     head.appendChild(seg);
     col.appendChild(head);
 

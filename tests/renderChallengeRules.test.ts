@@ -261,4 +261,16 @@ describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => 
     const aWho = root.querySelector('.lifeline-who.player-A') as HTMLElement;
     expect(aWho.textContent).toBe('玩家A');
   });
+
+  it('挑战：设置旁显示当前「结算模式」徽标（自选/有利/不利）', () => {
+    const fav = mount(
+      createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'favor' }),
+    );
+    const badge = fav.root.querySelector('.settle-mode-badge') as HTMLElement;
+    expect(badge.textContent).toBe('结算：有利');
+    expect(badge.dataset.settle).toBe('favor');
+
+    const man = mount(createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] }));
+    expect((man.root.querySelector('.settle-mode-badge') as HTMLElement).textContent).toBe('结算：自选');
+  });
 });

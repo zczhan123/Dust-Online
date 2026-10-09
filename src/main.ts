@@ -117,6 +117,42 @@ const scheduleChallengeStep = (): void => {
   }, Math.max(CHALLENGE_STEP_MS, lastFrameDurationMs()));
 };
 
+/** 挑战模式·自动模式：**替昔传自动抵挡**（挑战者攻击、防守方＝昔传）。按策略选挡骰后自动派发。 */
+let legendBlockTimer: number | null = null;
+const scheduleLegendBlock = (): void => {
+  if (legendBlockTimer != null) {
+    window.clearTimeout(legendBlockTimer);
+    legendBlockTimer = null;
+  }
+  if (!state || state.mode !== 'challenge') return;
+  const mode0 = state.challenge?.settleMode;
+  if (!mode0 || mode0 === 'manual') return;
+  const pa0 = state.pendingAttack;
+  if (!pa0 || pa0.attacker !== 'A' || state.pending) return; // 只在"挑战者攻击 → 昔传抵挡"
+  legendBlockTimer = window.setTimeout(() => {
+    legendBlockTimer = null;
+    if (!state) return;
+    const pa = state.pendingAttack;
+    const mode = state.challenge?.settleMode;
+    if (!pa || pa.attacker !== 'A' || state.pending || !mode || mode === 'manual') return;
+    const options = getLegalActions(state).filter((a) => a.t === 'block');
+    if (options.length === 0) return;
+    const withDie = options.filter((a) => a.costSlots && a.costSlots.length > 0);
+    if (withDie.length === 0) {
+      dispatchAction(options[0]); // 无可挡之骰（伤害<门槛/无骰）→ 不抵挡
+      return;
+    }
+    const b = state.players.B;
+    const all = [...b.areas.attack, ...b.areas.defense, ...b.areas.meditation];
+    const val = (a: Action): number => {
+      const id = a.t === 'block' ? a.costSlots?.[0]?.dieIds?.[0] : undefined;
+      return all.find((d) => d.id === id)?.value ?? 0;
+    };
+    const sorted = [...withDie].sort((x, y) => val(x) - val(y));
+    dispatchAction(mode === 'favor' ? sorted[sorted.length - 1] : sorted[0]);
+  }, Math.max(CHALLENGE_STEP_MS, lastFrameDurationMs()));
+};
+
 const render = (): void => {
   if (!state) return;
   renderGame(state, root, {
@@ -142,6 +178,7 @@ else showSetup();
     onAction: (a) => dispatchAction(a),
   });
   scheduleChallengeStep();
+  scheduleLegendBlock();
 };
 
 /** 到点超时：向导/确认条打开 → 关掉＝不发动（不派发）；否则派发引擎默认 / 放弃 / 结束阶段 */
@@ -172,6 +209,7 @@ const startLocal = (opts: SetupOptions): void => {
       cardId: opts.challengeCardId,
       challenger: opts.heroA,
       tactic: opts.tacticA,
+      settleMode: opts.settleMode,
     });
     setLocalViewPlayer('A');
   } else {

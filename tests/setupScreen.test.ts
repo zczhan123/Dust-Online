@@ -728,15 +728,16 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     }
   });
 
-  it('自动结算：默认「标准」、必填单选、点击切换', () => {
+  it('结算模式：三选一（有利/不利/自选）、默认「自选」、必填单选、点击切换', () => {
     renderChallengeSetup(root, () => {});
-    const seg = (val: string): HTMLElement => qa(root, '.pick-seg-btn').find((b) => b.dataset.auto === val)!;
-    expect(seg('favor').textContent).toBe('结算玩家有利·标准');
-    expect(seg('against').textContent).toBe('结算玩家不利·挑战自我');
-    expect(seg('favor').classList.contains('on')).toBe(true);
-    expect(seg('against').classList.contains('on')).toBe(false);
-    seg('against').click();
+    const seg = (val: string): HTMLElement => qa(root, '.pick-seg-btn').find((b) => b.dataset.settle === val)!;
+    const labels = qa(root, '.pick-seg-btn').map((b) => b.textContent);
+    expect(labels).toEqual(['结算玩家有利', '结算玩家不利', '结算玩家自选']);
+    expect(labels[labels.length - 1]).toBe('结算玩家自选'); // 自选在最右
+    expect(seg('manual').classList.contains('on')).toBe(true); // 默认自选
     expect(seg('favor').classList.contains('on')).toBe(false);
+    seg('against').click();
+    expect(seg('manual').classList.contains('on')).toBe(false);
     expect(seg('against').classList.contains('on')).toBe(true);
     seg('against').click(); // 必填：点当前项不取消
     expect(seg('against').classList.contains('on')).toBe(true);

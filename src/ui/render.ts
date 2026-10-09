@@ -1203,6 +1203,13 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
 
   const dice = el('div', 'dice');
   const nonActor = onlineNonActor(ctx);
+  // 挑战·自动模式：昔传抵挡由引擎自动完成 → 昔传的骰子不点选为抵挡
+  const autoLegendBlock =
+    ctx.state.mode === 'challenge' &&
+    ctx.state.challenge?.settleMode !== 'manual' &&
+    !!ctx.state.pendingAttack &&
+    ctx.state.pendingAttack.attacker === 'A' &&
+    player.id === 'B';
   const ap = ctx.areaPick;
   const areaPickable = ap != null && ap.owner === player.id && ap.kinds.includes(kind);
 
@@ -1271,7 +1278,7 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
         die.addEventListener('click', () =>
           ctx.hooks.propose(attackAction, `攻击：用 ${d.value} 点攻击骰`),
         );
-      } else if (blockAction) {
+      } else if (blockAction && !autoLegendBlock) {
         die.classList.add('clickable');
         die.dataset.act = 'block';
         die.title = '点击抵挡';
@@ -2774,6 +2781,18 @@ function operationList(ctx: Ctx): HTMLElement {
   if (ctx.hooks.online && ctx.state.phase !== 'gameOver' && actorOf(ctx.state) !== ctx.hooks.online.myPlayer) {
     const note = el('div', 'actionlist-readonly');
     note.textContent = `对方正在操作：${opponentActingText(ctx)}`;
+    box.appendChild(note);
+    return box;
+  }
+
+  // 挑战·自动模式：昔传抵挡由引擎自动完成 → 不弹可点选项（只给提示）
+  if (
+    ctx.state.mode === 'challenge' &&
+    ctx.state.challenge?.settleMode !== 'manual' &&
+    ctx.state.pendingAttack?.attacker === 'A'
+  ) {
+    const note = el('div', 'actionlist-readonly');
+    note.textContent = '自动结算中：昔传抵挡…';
     box.appendChild(note);
     return box;
   }
@@ -6113,6 +6132,14 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 中段右侧槽：保留原先"双方生命"的占地（留空），放置「设置」按钮；高度随 stretch 与操作栏齐平
   const right = el('div', 'centerband-right');
   right.appendChild(settingsBtn);
+  // 挑战模式：设置旁显示当前「结算模式」（自选/有利/不利）
+  if (state.mode === 'challenge') {
+    const sm = state.challenge?.settleMode ?? 'manual';
+    const badge = el('span', 'settle-mode-badge');
+    badge.dataset.settle = sm;
+    badge.textContent = `结算：${sm === 'manual' ? '自选' : sm === 'favor' ? '有利' : '不利'}`;
+    right.appendChild(badge);
+  }
   // 挑战模式：设置旁加「挑战模式特殊规则」（浮窗＝本模式技能削弱清单）
   if (state.mode === 'challenge') {
     const rulesBtn = document.createElement('button');
