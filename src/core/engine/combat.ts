@@ -529,7 +529,18 @@ export function settleAttack(
   if (g.mode === 'challenge' && pa.sourceDieId) {
     const area = g.players[pa.attacker].areas.attack;
     const idx = area.findIndex((d) => d.id === pa.sourceDieId);
-    if (idx >= 0) area.splice(idx, 1);
+    if (idx >= 0) {
+      // Z01「裁雨流」：**前 3 次造成伤害**的攻击骰 → 移入防御骰区（而非弃掉）；其余照常移走
+      const hits = g.challenge?.caiyuliuHits ?? 0;
+      if (pa.sourceSkill === '裁雨流' && o.damageDealt > 0 && hits < 3) {
+        const die = area.splice(idx, 1)[0];
+        g.players[pa.attacker].areas.defense.push(die);
+        g.challenge!.caiyuliuHits = hits + 1;
+        fxPush({ kind: 'move', player: pa.attacker, dieIds: [die.id] }); // 攻击骰区 → 防御骰区
+      } else {
+        area.splice(idx, 1);
+      }
+    }
   }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;

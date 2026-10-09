@@ -432,6 +432,8 @@ export interface GameState {
      * 只影响"替昔传做的决定"，挑战者自己的回合始终手动。
      */
     settleMode?: 'manual' | 'favor' | 'against';
+    /** Z01「裁雨流」：本轮"用攻击骰逐个攻击"中，**已造成伤害**的次数（前 3 次 → 该攻击骰移入防御骰区） */
+    caiyuliuHits?: number;
     /**
      * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
      * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。

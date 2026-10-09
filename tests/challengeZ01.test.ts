@@ -110,4 +110,31 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     expect(atk).toEqual([all[0], all[3]]); // 最小 + 最大
     expect(def).toEqual([all[1], all[2]]); // 中间 2 个
   });
+
+  it('裁雨流：驱骰（无限 3/4）全部进攻击区并逐个攻击；前 3 次造成伤害的攻击骰移防御区', () => {
+    const g = make('favor'); // 自动（免去顺序选择）
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 5;
+    g.challenge!.driven = [die('d3a', 3), die('d3b', 3), die('d4a', 4), die('d4b', 4), die('d4c', 4)];
+    g.players.A.areas.defense = []; // 挑战者不抵挡 → 全部造成伤害
+    applyAction(g, { t: 'challengeStep' }); // 发动裁雨流 → 队列 + 第一次攻击
+    expect(g.pendingAttack).toBeTruthy();
+    let guard = 0;
+    while (g.pendingAttack && guard++ < 20) applyAction(g, { t: 'block' }); // 逐段承受（不抵挡）
+    // 5 颗攻击骰：前 3 颗（有利=由大到小 → 4/4/4）造成伤害 → 防御区；后 2 颗被移走
+    expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([4, 4, 4]);
+    expect(g.players.B.areas.attack).toHaveLength(0);
+  });
+
+  it('裁雨流·自选：攻击骰 >1 颗时弹面板定攻击顺序', () => {
+    const g = make('manual');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 5;
+    g.challenge!.driven = [die('d3a', 3), die('d4a', 4)];
+    g.players.A.areas.defense = [];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.pending?.kind).toBe('challengePick');
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    expect(g.pending.options.map((o) => o.id)).toEqual(['asc', 'desc']);
+  });
 });

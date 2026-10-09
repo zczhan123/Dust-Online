@@ -222,6 +222,22 @@ function challengeDecisions(
         },
       ];
     }
+    case 'z01-5': {
+      // 裁雨流：用全部攻击骰逐个攻击 → 需定顺序（>1 颗时才问）
+      const atk = B.areas.attack.length + consumedCount;
+      return atk > 1
+        ? [
+            {
+              prompt: '「裁雨流」：用全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+              prefer: 'desc',
+            },
+          ]
+        : [];
+    }
     case 'z02-2':
       return A.areas.defense.length > 1
         ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts(), prefer: 'larger' }]
@@ -360,6 +376,28 @@ export function applyChallengeSkill(
       }
       ids = ids.filter((id) => A.areas.defense.some((d) => d.id === id));
       if (ids.length) consumeDice(g, A, 'defense', ids);
+      return { spawn, outIds };
+    }
+    case 'z01-5': {
+      // 裁雨流：本条驱骰（无限 3/4 点）全部移入攻击骰区 → 用**所有攻击骰**逐个攻击 → 前 3 次"造成伤害"的攻击骰移防御骰区
+      for (const d of consumed) gain('attack', d.value);
+      g.challenge!.caiyuliuHits = 0;
+      if (B.areas.attack.length > 0) {
+        g.virtualQueue = B.areas.attack.map((d) => ({
+          attacker: 'B' as PlayerId,
+          value: d.value,
+          label: '裁雨流',
+          owner: 'B' as PlayerId,
+          dieId: d.id,
+          dieStyle: 'solid' as const,
+        }));
+        const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+        if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+        else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+        const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
+        B.areas.attack.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+        pumpAttackQueue(g);
+      }
       return { spawn, outIds };
     }
     case 'z02-0':
