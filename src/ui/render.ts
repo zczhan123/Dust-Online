@@ -1445,14 +1445,15 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     const no = el('span', 'csk-no');
     no.textContent = String(i);
     r.appendChild(no);
-    const nm = el('span', 'csk-name');
-    nm.textContent = sk.name;
-    r.appendChild(nm);
     if (alwaysOn) {
+      // 药丸放在**序号与技能名之间**
       const onPill = el('span', 'csk-on-pill');
       onPill.textContent = '生效中';
       r.appendChild(onPill);
     }
+    const nm = el('span', 'csk-name');
+    nm.textContent = sk.name;
+    r.appendChild(nm);
     if (sk.marker) {
       const mk = el('span', 'csk-mark');
       mk.textContent = sk.marker;
@@ -6258,7 +6259,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   if (legendSkillEv) {
     // 技能名只在"报消耗的那一帧"弹（代决帧 / 无代决的技能帧）；选完后的那一帧只做第二步/第三步
     if (legendSkillEv.consumed.length > 0) {
-      legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, ''));
+      legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, '', MOTION.legendUltimateHold));
       const items: LegendConsumeItem[] = legendSkillEv.consumed
         .map((c) => {
           const pd = prevDice.get(c.id);
@@ -6290,8 +6291,12 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       );
     }
   }
-  // 传奇这一步"触发攻击"时：攻击动画整体后移到 第一步＋第二步 之后
-  const legendAttackDelay = legendSkillEv?.attack ? legendDur + addsDuration() : 0;
+  // 传奇这一步"触发攻击"时：攻击动画后移到「驱骰进槽」＋（本步有新骰则再等）「新骰飞入」之后。
+  // ⚠️ 不再叠加"技能名横幅"的整段停留（此前 `legendDur + addsDuration()` 会被横幅(1.96s)撑满、
+  //    且"本步无新骰"时仍白等 0.99s → 灰骰迟迟不出，就是"卡顿"）。
+  const legendAttackDelay = legendSkillEv?.attack
+    ? legendConsumeDur + (legendSkillEv.spawn.length > 0 ? addsDuration() : 0)
+    : 0;
 
   // L04 重开：本帧是整盘重置 → 走"全部旧骰 → 中间合成一个 → 新骰从中间冒出"的专用动画
   const resetMerge = fxEvents.some((e) => e.kind === 'reset');

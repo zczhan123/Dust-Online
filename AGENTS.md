@@ -341,13 +341,13 @@
       **攻击骰区的排列＝攻击顺序**：`z02-4` 按代决排完队列后，把 `B.areas.attack` 也按同序重排 →"最左边那颗先飞出去"。
    - **扣驱动骰的时机**：**真正结算前才扣**（曾因"提问前就扣"导致续跑重算槽匹配→整条被跳过）。
 5. **代决（模式 1）**：传奇本该自己做的抉择**全部由挑战者决定**。机制＝`Pending{kind:'challengePick', player:'A', prompt, options[]}` ＋ `Action{t:'challengePick', id}`；`challengeDecisions()` 给出本条需要的选择，`continueLegendTurn` 逐条问、收集齐再结算；选择存 `g.challenge.decisions`（按技能 id）。**已接**：`z02-2` 留哪颗防御骰、`z02-3` 弃哪颗防御骰、`z02-4` 枭首攻击顺序（`asc/desc`）。**未代决时一律有确定性默认**（AI/测试兼容）。
-6. **挑战者侧**：正常流程但无尘落；传奇按 **「防御规则」** 抵挡——`ChallengeCard.defenseMin`（Z01=2 / Z02=3），伤害 < 门槛 → `getLegalActions` **不给任何抵挡动作**（自动不挡）；「防御骰上限」`defenseCap` 在传奇**获得**防御骰时生效，**超出＝保留最新、挤掉最旧**（被挤出的旧骰由界面走通用"飞中间淡出"）。
+6. **挑战者侧**：正常流程但无尘落；传奇按 **「防御规则」** 抵挡——`ChallengeCard.defenseMin`（Z01=2 / Z02=3）：伤害 **< 门槛** → `getLegalActions` **不给任何抵挡动作**（自动不挡）；伤害 **≥ 门槛且传奇有可用骰** → **必须挡**（只给"用哪颗骰抵挡"，**不给"不抵御"**）；**无可用骰**时才退化为"不挡"。这是**全 Z 卡通则**。「防御骰上限」`defenseCap` **口径按技能各定**：默认**超出＝保留最新、挤掉最旧**（`capLegendDefense`，被挤出的旧骰由界面走通用"飞中间淡出"）；「遁入暗影」用"**填到上限为止、超出不获得**"（不挤旧，按当前防御数截断）。
 7. **本模式技能削弱（唯一来源 `CHALLENGE_RULE_NOTES`）——⚠️ 必须按**玩家**分侧，不是按模式一刀切**（实现＝`isInertSkill(g, player, key)`，`challenge.ts`；护栏＝`tests/challengeRules.test.ts` + `tests/challengeIsolation.test.ts`）：
    - `tianfa.bairi` / `tianfa.alt.shenkong`（028 / A05「白昼之火」）：**只废挑战者(A)**。FAQ 27.1.2 / 41.1.1 原文："为了降低『天罚』**面对昔日传奇**时的压制能力，我们设定『天罚·白昼之火』没有任何效果" → 废的是"打向传奇"的那一份；**传奇自己拿到 028 时照常生效**（它面对的是有冥想骰区的挑战者）。
    - `minglei.leibao.continuous` / `youming.weimu`（013 雷暴·持续 / 017 帷幕）：**只废传奇(B)**——「昔日传奇」没有重掷阶段。
    - 标准模式：一律 false（旧路径零变化）。
    - 023 共振选"双方各获得"时**跳过给传奇的冥想骰**；020 兽魂的选择由挑战者定（Z02 无此卡）。
-8. **对手面板（D 方案，`render.ts` 的 `challengePanel()`）**：面板头＝`传说中的「X」` ＋药丸 `昔日传奇 · Z0N` ＋**点数分布**（取第二列神器，同玩家卡头写法）＋计数 `X/上限`；**卡图缩略**（`public/challenges/Z0NN.jpg`，点开＝大图浮窗 `challengeCardOverlay`）＋**技能列**（序号/名称/`∞`·`怜悯*`/槽摘要，**正在结算**一条高亮＝`challenge.activeSkill`）；生命条独占一行；三区＝防御骰区 / 攻击骰区 / **驱动骰槽**（＝原冥想骰区槽位，**仅本模式**改名）。图上不显示三神器。
+8. **对手面板（D 方案，`render.ts` 的 `challengePanel()`）**：面板头＝`传说中的「X」` ＋药丸 `昔日传奇 · Z0N` ＋**点数分布**（取第二列神器，同玩家卡头写法）＋计数 `X/上限`；**卡图缩略**（`public/challenges/Z0NN.jpg`，**右键/长按＝「技能详情」浮窗 `challengeSkillsOverlay`**，**不再显示整张大图**）＋**技能列**（序号/名称/`∞`·`怜悯*`/槽摘要，**正在结算**一条高亮＝`challenge.activeSkill`；**持续生效中**（如 Z02「锋芒」计数>0）＝`.is-on` 左绿条＋药丸「生效中」，位于序号与名称之间）；生命条独占一行；三区＝防御骰区 / 攻击骰区 / **驱动骰槽**（＝原冥想骰区槽位，**仅本模式**改名）。图上不显示三神器。
 9. **固定视角**：本模式**不做 A/B 换位**——宿主 `main.ts` 在挑战局用 `setLocalViewPlayer('A')`（`viewOwnerOf` 唯一开关）⇒ `holdView` 恒假。
 10. **入口**：`setupScreen` 主页菜单「挑战模式」→ 已有的 4 列选择界面 → 「开始挑战」按钮带 `challengeCardId` → `main.ts` 的 `startLocal` 分支走 `createChallengeGame`。中段右槽在挑战模式多一个 **`挑战模式特殊规则`** 按钮（浮窗＝第 7 条清单）。
 11. **新卡义务**：转写 Z03–Z12 时，除 `CHALLENGES` 数据外，必须在 `applyChallengeSkill` 里逐条实现效果、在 `challengeDecisions` 登记其**代决点**、并更新代决清单；**槽/`∞`/`怜悯*`/`endsTurn` 由状态机统一处理，不要各写一遍**。
@@ -356,8 +356,8 @@
    - 护栏测试：**`tests/challengeIsolation.test.ts`**（标准局动作表无 `challengeStep`/`challengePick`、战报仍「玩家B」、横幅照弹尘起/主要、尘落照推、`virtualAttack` 口径不回归、削弱只作用在正确一侧）。**动 `render.ts` / `motion.ts` / `styles.css` 之前先跑它；改完再跑一遍。**
    - 挑战模式**不做联机、不做传奇英雄面板**（刻意的）。
 13. **新卡开发清单**：`..\plans\挑战模式-新卡开发清单.md`——转写 Z01 / Z03–Z12 **动手前先读**（15 条踩坑 + 隔离 / 代决 / 命名 / 测试口径）。
-14. **传奇回合的过场动画（2026-10-08）**：引擎**只报事实**（2 个 fx 事件），界面照 `fx` 编排：`legendRoll` → 驱动骰从**快速操作栏中心**并排冒出、飞入「临时驱动骰区域」（复用通用"获得骰"动画 `playLegendRoll`）；`legendSkill` → 中央弹**技能名**（**复用必杀横幅** `playUltimate`，`prefix` 传空）＋ 被选中的驱动骰「临时区 → 中间 → 驱动骰槽 → 消失」（`playLegendConsume`，影子演出）。第二步"新骰飞入对应区"由**通用获得动画**承担但推迟到第一步之后（`beforeAddsMs`），**不播**驱动骰槽→区域的搬家（引擎本就是新建骰）；第三步攻击接在第二步之后（`attackStart` 的 `costDur` 加 `legendAttackDelay`）。
-    - ⚠️ 枭首/遁入暗影触发攻击时，新骰**被立刻移进攻击队列**（结算后区域里看不到）→ 界面**拿不到区域差集**，必须靠 `legendSkill.spawn`（引擎报出）：真骰还在区里 → 交给通用"获得骰"动画；**DOM 里找不到真骰 → 用 `playLegendSpawn` 影子补演**（中间冒出→飞入对应区）。
+14. **传奇回合的过场动画（2026-10-08）**：引擎**只报事实**（2 个 fx 事件），界面照 `fx` 编排：`legendRoll` → 驱动骰从**快速操作栏中心**并排冒出、飞入「临时驱动骰区域」（复用通用"获得骰"动画 `playLegendRoll`）；`legendSkill` → 中央弹**技能名**（**复用必杀横幅** `playUltimate`，`prefix` 传空）＋ 被选中的驱动骰「临时区 → 中间 → 驱动骰槽 → 消失」（`playLegendConsume`，影子演出）。第二步"新骰飞入对应区"由**通用获得动画**承担但推迟到第一步之后（`beforeAddsMs`），**不播**驱动骰槽→区域的搬家（引擎本就是新建骰）；第三步攻击接在第二步之后（`attackStart` 的 `costDur` 加 `legendAttackDelay`）。**攻击延迟公式（2026-10-09 提速）＝ `legendConsumeDur +（本步有新骰 ? addsDuration() : 0）`**，**不再叠加技能名横幅的整段停留**（旧式 `legendDur + addsDuration()` 会被横幅 1.96s 撑满、且"无新骰"时白等 0.99s → 灰骰迟迟不出）；挑战技能名横幅停留＝`MOTION.legendUltimateHold`(800ms)，**仅挑战**、不动标准必杀横幅。
+    - ⚠️ 枭首（攻击骰立刻进队列）/ **遁入暗影（防御骰在每组攻击结算后才移入，用 `challenge.deferred.groups` 逐组接力）** 都可能"新骰在 DOM 里找不到/后到" → 界面**拿不到区域差集**，必须靠 `legendSkill.spawn`（引擎报出）：真骰还在区里 → 交给通用"获得骰"动画；**DOM 里找不到真骰 → 用 `playLegendSpawn` 影子补演**（中间冒出→飞入对应区）。遁入暗影每一步的 `legendSkill`（`consumed:[]`、`spawn`＝该组、`attack`＝之后是否还有下一组）**不重复弹技能名**。
     - 传奇的**攻击**＝实体红骰样式（`virtual:false`，从它的攻击骰区飞出，逐颗走现成攻击动画）。
     - ⚠️ **落点必须用"骰区矩形"算，不能用里面那个 `.dice` 容器**：`.dice` 为空时**高度＝0**（`flex-wrap` 容器）→ 曾因此把落点退化成 `pool`（快速操作栏）→ 骰子飞进操作栏就消失。落点＝该区 `.dice` **行左起并排**（26+5，与真实骰同排）、行中心＝**区域竖向中心**（`.area{align-items:center}`）；**任何情况下都不得退回 `pool`**（目标量不到就本颗不做动画）。`areaDiceLanding()` 即此口径。
     - 真伤白墨线：来源是传奇时起点＝**昔日卡图**（`.challenge-thumb`）中心、终点＝受伤者生命条中心。

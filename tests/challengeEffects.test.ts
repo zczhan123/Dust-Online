@@ -60,27 +60,12 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.players.B.areas.attack.map((d) => d.value).sort()).toEqual([1, 6]);
   });
 
-  it('遁入暗影：驱动骰变成传奇防御骰；超出「防御骰上限 4」时**保留最新、挤掉最旧**', () => {
+  it('遁入暗影：激活时**先发起攻击**、暂不移入（移入延后到该组攻击结算后）', () => {
     const g = make();
-    applyChallengeSkill(g, CARD, SK('z02-5'), [die('drv1', 3, 'meditation'), die('drv2', 4, 'meditation')]);
-    expect(g.players.B.areas.defense.map((d) => d.value).sort()).toEqual([3, 4]);
-    const res = applyChallengeSkill(
-      g,
-      CARD,
-      SK('z02-5'),
-      [
-        die('x1', 1, 'meditation'),
-        die('x2', 2, 'meditation'),
-        die('x3', 5, 'meditation'),
-        die('x4', 6, 'meditation'),
-      ],
-    );
-    // 最新 4 颗留下；最旧的 2 颗被挤出（界面走通用"飞中间淡出"）
-    expect(g.players.B.areas.defense.map((d) => d.value).sort()).toEqual([1, 2, 5, 6]);
-    expect(res.outIds).toHaveLength(2);
-    for (const id of res.outIds) {
-      expect(g.players.B.areas.defense.some((d) => d.id === id)).toBe(false);
-    }
+    applyChallengeSkill(g, CARD, SK('z02-5'), [die('drv1', 3, 'meditation'), die('drv2', 3, 'meditation')]);
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2 });
+    expect(g.players.B.areas.defense).toHaveLength(0); // 攻击前**还没移入**
+    expect(g.challenge!.deferred).toMatchObject({ skillId: 'z02-5', step: 0, groups: [[3, 3]] });
   });
 
   it('锋芒：传奇的攻击伤害加成 = 传奇计数（走统一口径 attackDamageBonus）', () => {

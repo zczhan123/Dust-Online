@@ -32,6 +32,8 @@ export interface MotionTokens {
   bump: number;
   /** 必杀横幅停留时长 */
   ultimateHold: number;
+  /** 挑战模式·传奇技能名横幅停留时长（比 ultimateHold 短：让"驱骰进槽"结束后尽快出骰/选择） */
+  legendUltimateHold: number;
 }
 
 export const MOTION: MotionTokens = {
@@ -49,6 +51,7 @@ export const MOTION: MotionTokens = {
   bannerHoldTransient: 600,
   bump: 180,
   ultimateHold: 1500,
+  legendUltimateHold: 800,
 };
 
 export const EASE = {
@@ -2333,14 +2336,21 @@ export function setScaleX(el: HTMLElement, ratio: number, from?: number): void {
 /** 必杀横幅：从**快速操作栏正中心**弹出 `${prefix}${name}`（黑底白字、放大），从小变大浮现 → 停 → 原地淡出。
  *  `delayMs` 用于"跨卡顺序"（如先弹「没有怜悯」卡图气泡、再弹必杀横幅）。
  *  `prefix` 默认「必杀·」；**挑战模式**传 `''` 只显示技能名（复用同一套视觉，不另造）。 */
-export function playUltimate(root: HTMLElement, name: string, delayMs = 0, prefix = '必杀·'): number {
+export function playUltimate(
+  root: HTMLElement,
+  name: string,
+  delayMs = 0,
+  prefix = '必杀·',
+  /** 停留时长覆盖（挑战模式传 `MOTION.legendUltimateHold`；缺省＝标准必杀横幅时长） */
+  holdMs = MOTION.ultimateHold,
+): number {
   if (!canAnimate(root)) return 0;
   const layer = ensureFxLayer();
   if (!layer) return 0;
   ensureBubbleInkFilter();
   const p = poolPoint(root);
   const inDur = ms(MOTION.emerge);
-  const holdDur = ms(MOTION.ultimateHold);
+  const holdDur = ms(holdMs);
   const outDur = ms(MOTION.bubbleOut);
   const total = inDur + holdDur + outDur;
   const delay = Math.max(0, delayMs);

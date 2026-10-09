@@ -14,7 +14,7 @@ import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnS
 import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
-import { CHALLENGES, type ChallengeCard, type ChallengeSkill } from '../content/challenges';
+import { CHALLENGES, type ChallengeCard, type ChallengeSkill, type ChallengeSlot } from '../content/challenges';
 import { matchSlots, legendCanBlock } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
@@ -138,13 +138,44 @@ function rollDrivenDice(g: GameState, n: number): void {
   });
 }
 
-/** 传奇防御骰上限截断：**保留最新、挤掉最旧**（被挤出的旧骰交给界面走通用"飞中间淡出"）。 */
-function capLegendDefense(g: GameState, cap: number): { outIds: string[] } {
+/** 传奇防御骰上限截断：**保留最新、挤掉最旧**（被挤出的旧骰交给界面走通用"飞中间淡出"）。
+ *  注：每个技能的上限口径**按技能各定**——「遁入暗影」用"填到上限为止、超出不获得"（见 `resolveLegendDeferred`）；
+ *  本函数保留给"保留最新、挤掉最旧"口径的其它技能（导出供将来 Z 卡复用）。 */
+export function capLegendDefense(g: GameState, cap: number): { outIds: string[] } {
   const def = g.players.B.areas.defense;
   if (def.length <= cap) return { outIds: [] };
   const outIds = def.slice(0, def.length - cap).map((d) => d.id);
   g.players.B.areas.defense = def.slice(-cap);
   return { outIds };
+}
+
+/**
+ * 「相同」槽且 `maxSameGroups > 1`（如「遁入暗影」）：从 `driven` 尽量凑出**最多 `maxGroups` 组**
+ * （每组 `slot.count` 颗**同点**；按点数升序取组）。**只消耗成组的骰**，零头留在 `driven`。
+ * 凑不出 1 组返回 `null`（该技能跳过）。
+ */
+function matchSameGroups(
+  slot: ChallengeSlot,
+  driven: Die[],
+  maxGroups: number,
+): { consumed: Die[]; groups: number[][] } | null {
+  const n = slot.count;
+  if (n <= 0) return null;
+  const byVal = new Map<number, Die[]>();
+  for (const d of driven) byVal.set(d.value, [...(byVal.get(d.value) ?? []), d]);
+  const consumed: Die[] = [];
+  const groups: number[][] = [];
+  for (const v of [...byVal.keys()].sort((a, b) => a - b)) {
+    const pool = byVal.get(v)!;
+    for (let i = 0; i + n <= pool.length && groups.length < maxGroups; i += n) {
+      const slice = pool.slice(i, i + n);
+      groups.push(slice.map((d) => d.value));
+      consumed.push(...slice);
+    }
+    if (groups.length >= maxGroups) break;
+  }
+  if (groups.length === 0) return null;
+  return { consumed, groups };
 }
 
 /** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
@@ -277,18 +308,15 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     }
     case 'z02-5': {
-      for (const d of consumed) gain('defense', d.value);
-      outIds.push(...capLegendDefense(g, card.defenseCap ?? Number.POSITIVE_INFINITY).outIds);
-      // 每 1 组 → 1 次 2 点攻击（组数＝消耗骰数 ÷ 每槽颗数；Z02 单槽 → 1 组）
-      const per = (skill.slots ?? []).reduce((s, x) => s + x.count, 0) || consumed.length || 1;
-      const groups = Math.max(1, Math.floor(consumed.length / per));
-      g.virtualQueue = Array.from({ length: groups }, () => ({
-        attacker: 'B' as PlayerId,
-        value: 2,
-        label: '遁入暗影',
-        owner: 'B' as PlayerId,
-      }));
-      pumpAttackQueue(g);
+      // 遁入暗影：驱动骰按「每 2 颗同点＝1 组」成组（最多 2 组，见 `continueLegendTurn` 的 `matchSameGroups`）。
+      // **逐组**「先攻击 → 攻击结算后再移入防御骰区（填到上限为止、超出不获得、不挤旧）」。
+      // 第 0 组：本步先发起攻击；移入延后到 `resolveLegendDeferred`（攻击结算后）。
+      const n = skill.slots?.[0]?.count ?? 2;
+      const groups: number[][] = [];
+      for (let i = 0; i + n <= consumed.length; i += n) groups.push(consumed.slice(i, i + n).map((d) => d.value));
+      if (groups.length === 0) return { spawn, outIds };
+      g.challenge!.deferred = { skillId: skill.id, step: 0, groups };
+      virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
       return { spawn, outIds };
     }
     default:
@@ -361,6 +389,47 @@ function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     g.challenge.deferred = undefined;
     return;
   }
+  if (skill.id === 'z02-5') {
+    // 遁入暗影：**逐组**「先攻击 → 攻击结算后 → 移入防御骰区（填到上限为止、超出不获得、不挤旧）」。
+    // 本函数在"上一组的攻击已结算完"时被调用 → 此刻执行"移入第 step 组、再发起下一组攻击"。
+    const groups = d.groups ?? [];
+    const step = d.step ?? 0;
+    if (step >= groups.length) {
+      g.challenge.deferred = undefined;
+      return;
+    }
+    const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
+    const room = Math.max(0, cap - g.players.B.areas.defense.length);
+    const movedVals = groups[step].slice(0, room);
+    const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+    for (const v of movedVals) {
+      const die = createDie(newDieId('chg-B-'), v, 'defense');
+      g.players.B.areas.defense.push(die);
+      spawn.push({ id: die.id, value: v, area: 'defense' });
+    }
+    logLine(
+      g,
+      `「${card.legacy}」：${skill.name} — 第 ${step + 1} 组移入防御骰区（${movedVals.length} 颗${
+        movedVals.length < groups[step].length ? '；已到上限，其余不获得' : ''
+      }）`,
+    );
+    d.step = step + 1;
+    const hasNext = d.step < groups.length;
+    if (hasNext) virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
+    else g.challenge.deferred = undefined;
+    // 动效旁路：本步移入的骰（`spawn`）；`attack`＝之后是否还有下一组攻击（界面把攻击动画后移到"移入"之后）
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: hasNext,
+    });
+    return;
+  }
   g.challenge.deferred = undefined;
 }
 
@@ -402,12 +471,23 @@ function continueLegendTurn(g: GameState, once = false): void {
     if (resuming) {
       consumed = g.challenge.pendingConsumed!.map((x) => ({ id: x.id, value: x.value, kind: 'meditation' }));
     } else if (skill.slots && skill.slots.length > 0) {
-      const m = matchSlots(skill.slots, g.challenge.driven);
-      if (!m) {
-        logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
-        continue;
+      // 「相同」槽且 maxSameGroups>1（遁入暗影）：一次容纳最多 N 组，**只消耗成组的骰**（零头留 driven）
+      const multi = skill.slots.length === 1 && skill.slots[0].kind === 'same' && (skill.maxSameGroups ?? 1) > 1;
+      if (multi) {
+        const r = matchSameGroups(skill.slots[0], g.challenge.driven, skill.maxSameGroups!);
+        if (!r) {
+          logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+          continue;
+        }
+        consumed = r.consumed;
+      } else {
+        const m = matchSlots(skill.slots, g.challenge.driven);
+        if (!m) {
+          logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+          continue;
+        }
+        consumed = g.challenge.driven.filter((d) => m.includes(d.id));
       }
-      consumed = g.challenge.driven.filter((d) => m.includes(d.id));
     }
     // 代决（模式 1）：本条需要的选择还没收集齐 → **先把骰子扣下、发第一步动效**，再挂代决
     const wants = challengeDecisions(g, skill, consumed.length);

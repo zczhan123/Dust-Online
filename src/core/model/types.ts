@@ -427,8 +427,9 @@ export interface GameState {
     /**
      * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
      * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。
+     * `groups`（遁入暗影）：逐组「先攻击 → 攻击结算后再移入防御骰区」的每组点数（每组 count 颗）。
      */
-    deferred?: { skillId: string; step: number };
+    deferred?: { skillId: string; step: number; groups?: number[][] };
   };
   dustfall: number;
   turnIndex: number;

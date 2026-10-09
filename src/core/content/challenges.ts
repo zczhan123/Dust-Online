@@ -23,6 +23,12 @@ export interface ChallengeSkill {
   endsTurn?: boolean;
   /** 纯被动（如 Z02「锋芒」＝按计数加伤害）：**不占"逐条结算"的步**，只在内部同步即可 */
   passive?: boolean;
+  /**
+   * 「相同」槽且本值 > 1 时：该技能一次可容纳**最多这么多组**（每组＝`slots[0].count` 颗同点）。
+   * 用于「遁入暗影」这类"本技能上的驱动骰全部…每移动 1 组"的技能（Z02 = 2 组）。
+   * 缺省 = 1（按普通"刚好满足"处理）。
+   */
+  maxSameGroups?: number;
 }
 
 export interface ChallengeCard {
@@ -65,7 +71,7 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z02-2', name: '葬敌的完杀', slots: [{ kind: 'pips', count: 1, faces: [1] }, { kind: 'pips', count: 1, faces: [2] }, { kind: 'pips', count: 1, faces: [3] }, { kind: 'pips', count: 1, faces: [4] }], effect: '尽可能弃置挑战者的防御骰，直至数量降为 1。获得 1、2、3、4 点的攻击骰各 1 个。' },
       { id: 'z02-3', name: '暗夜凶神', slots: [{ kind: 'pips', count: 1, faces: [1] }, { kind: 'pips', count: 1, faces: [4] }, { kind: 'pips', count: 1, faces: [6] }], effect: '进行一次点数视为 8 点的不可抵挡的攻击，并弃置挑战者的 1 个防御骰。然后「永暗之刃」的计数 +1（最高叠加至 3 层）。' },
       { id: 'z02-4', name: '枭首', slots: [{ kind: 'pips', count: 1, faces: [6] }], effect: '将本技能上的驱动骰全部移动至攻击骰区。如果攻击骰的数量超过了挑战者的防御骰数量，则使用所有攻击骰发起攻击。' },
-      { id: 'z02-5', name: '遁入暗影', slots: [{ kind: 'same', count: 2 }], effect: '将本技能上的驱动骰全部移动至防御骰区。每移动 1 组，进行 1 次 2 点攻击。' },
+      { id: 'z02-5', name: '遁入暗影', slots: [{ kind: 'same', count: 2 }], maxSameGroups: 2, effect: '将本技能上的驱动骰全部移动至防御骰区。每移动 1 组，进行 1 次 2 点攻击。' },
     ],
   },
   { id: 'Z03', legacy: '孤塔之王', artifacts: ['007', '008', '009'] },
