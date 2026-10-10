@@ -139,8 +139,8 @@ function rollDrivenDice(g: GameState, n: number): void {
 }
 
 /** 传奇防御骰上限截断：**保留最新、挤掉最旧**（被挤出的旧骰交给界面走通用"飞中间淡出"）。
- *  注：每个技能的上限口径**按技能各定**——「遁入暗影」用"填到上限为止、超出不获得"（见 `resolveLegendDeferred`）；
- *  本函数保留给"保留最新、挤掉最旧"口径的其它技能（导出供将来 Z 卡复用）。 */
+ *  ⚠️ **当前未启用**（2026-10-10 用户改口径）：满上限时新骰**直接弃置**（见 `applyChallengeSkill` 的 `gain`），
+ *  **不再**"挤掉最旧"。本函数**保留给将来可能的"挤旧"特例**（届时在对应技能里显式调用）。 */
 export function capLegendDefense(g: GameState, cap: number): { outIds: string[] } {
   const def = g.players.B.areas.defense;
   if (def.length <= cap) return { outIds: [] };
@@ -318,7 +318,7 @@ function autoPick(
 
 /**
  * 结算传奇的一条技能（导出供测试直接调用；`consumed` ＝本条消耗的驱动骰对象，点数仍保留）。
- * 返回本步的**动效事实**：`spawn`＝新获得的骰（及其区域）、`outIds`＝被「防御骰上限」挤出的旧骰。
+ * 返回本步的**动效事实**：`spawn`＝新获得的骰（及其区域）、`outIds`＝被挤出的旧骰（当前口径下恒为空，保留给将来特例）。
  * （枭首 / 遁入暗影触发攻击时，新骰会被**立刻移进攻击队列**，界面拿不到区域差集 → 只能靠这里报出。）
  */
 export function applyChallengeSkill(
@@ -334,8 +334,12 @@ export function applyChallengeSkill(
   const B = g.players.B;
   const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
   const outIds: string[] = [];
-  /** 传奇新获得一颗能力骰（登记进 `spawn`，供界面演"中间冒出 → 飞入区域"）。 */
+  /** 传奇新获得一颗能力骰（登记进 `spawn`，供界面演"中间冒出 → 飞入区域"）。
+   *  **防御骰上限**：防御骰已满 `card.defenseCap` 时，新防御骰**直接弃置**（不加入区域、不产生 spawn）。
+   *  ⚠️ 口径（2026-10-10 用户定）：满上限＝**新骰弃置**，**不是**"挤掉最旧"（`capLegendDefense` 仅供将来特例，当前不用）。
+   *  「遁入暗影」的"填到上限为止"由 `resolveLegendDeferred` 自行处理（不走这里）。 */
   const gain = (area: 'attack' | 'defense' | 'meditation', value: number): void => {
+    if (area === 'defense' && B.areas.defense.length >= (card.defenseCap ?? Number.POSITIVE_INFINITY)) return;
     const d = createDie(newDieId('chg-B-'), value, area);
     B.areas[area].push(d);
     spawn.push({ id: d.id, value, area });
