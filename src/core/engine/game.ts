@@ -230,6 +230,30 @@ function chooseDefenseMove(
   return null;
 }
 
+/**
+ * 把 `dice` 里"被选中"的若干颗**移入传奇防御骰区**（放不下时由挑战者代决哪几颗，见 `chooseDefenseMove`）。
+ * 返回本步新产生的骰（供 `legendSkill.spawn`）；若需代决但未决 → 返回 `null`（`chooseDefenseMove` 已挂 `pending`）。
+ * 「遁入暗影」与「龙腾万丈」共用——**任何"批量移入防御骰区、受上限截断"的新技能都走它**（勿各写一遍）。
+ */
+function placeDefenseFrom(
+  g: GameState,
+  card: ChallengeCard,
+  skill: ChallengeSkill,
+  dice: { id: string; value: number }[],
+): { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] | null {
+  const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
+  const room = Math.max(0, cap - g.players.B.areas.defense.length);
+  const idxs = chooseDefenseMove(g, card, skill, dice, room);
+  if (idxs === null) return null;
+  const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+  for (const i of idxs) {
+    const die = createDie(newDieId('chg-B-'), dice[i].value, 'defense');
+    g.players.B.areas.defense.push(die);
+    spawn.push({ id: die.id, value: dice[i].value, area: 'defense' });
+  }
+  return spawn;
+}
+
 /** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
 function syncLegendFengmang(g: GameState): void {
   const p = g.players.B;
@@ -370,7 +394,8 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     }
     case 'z01-3': {
-      // 龙腾万丈：得 4 个随机点数能力骰 → 最大 1 + 最小 1 移攻击骰区、其余 2 移防御骰区（并列等价）
+      // 龙腾万丈：得 4 个随机点数能力骰 → 最大 1 + 最小 1 移攻击骰区；**其余 2 颗移防御骰区**。
+      // 防御骰区放不下全部时，由挑战者**代决"哪颗进"**（延后到 `resolveLegendDeferred`，复用 `chooseDefenseMove`）。
       const vals: number[] = [];
       withRng(g, (rng) => {
         for (let i = 0; i < 4; i++) vals.push(rng.rollDie());
@@ -378,8 +403,12 @@ export function applyChallengeSkill(
       const sorted = [...vals].sort((a, b) => a - b);
       gain('attack', sorted[sorted.length - 1]); // 最大
       gain('attack', sorted[0]); // 最小
-      gain('defense', sorted[1]); // 中间 2 个
-      gain('defense', sorted[2]);
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        dice: sorted.slice(1, 3).map((v, i) => ({ id: `${skill.id}-def-${i}`, value: v })), // 中间 2 颗 → 防御区
+        moved: false,
+      };
       return { spawn, outIds };
     }
     case 'z01-4': {
@@ -598,22 +627,33 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     pumpAttackQueue(g);
     return;
   }
+  if (skill.id === 'z01-3') {
+    // 龙腾万丈：把"最大/最小之外的**中间 2 颗**"移入防御骰区；放不下时由挑战者代决"哪颗进"。
+    const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
+    if (spawn === null) return; // 停在代决（challengePick）
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗）`);
+    delete (g.challenge.decisions ?? {})[skill.id];
+    g.challenge.deferred = undefined;
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: false,
+      announce: false, // 移骰步 ≠ 发动帧 → 不重复弹技能名
+    });
+    return;
+  }
   if (skill.id === 'z02-5') {
     // 遁入暗影：① 先"移入防御骰区"（只做一次；放不下时挑战者**任选 room 颗**）→ ② 再逐组发起 2 点攻击。
     const groups = d.groups ?? [];
     if (!d.moved) {
-      const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
-      const room = Math.max(0, cap - g.players.B.areas.defense.length);
-      const dice = d.dice ?? [];
-      const idxs = chooseDefenseMove(g, card, skill, dice, room);
-      if (idxs === null) return; // 停在代决（challengePick）
-      const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
-      for (const i of idxs) {
-        const die = createDie(newDieId('chg-B-'), dice[i].value, 'defense');
-        g.players.B.areas.defense.push(die);
-        spawn.push({ id: die.id, value: dice[i].value, area: 'defense' });
-      }
-      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${idxs.length} 颗）`);
+      const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
+      if (spawn === null) return; // 停在代决（challengePick）
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗）`);
       d.moved = true;
       delete (g.challenge.decisions ?? {})[skill.id];
       // 动效旁路：本步移入的骰（`spawn`）；`attack`＝移入之后逐个攻击（界面把攻击动画后移到"移入"之后）

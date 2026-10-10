@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createChallengeGame, applyChallengeSkill } from '../src/core/engine/game';
+import { createChallengeGame, applyChallengeSkill, resolveLegendDeferred, applyAction } from '../src/core/engine/game';
 import { CHALLENGES } from '../src/core/content/challenges';
 import type { Die, DiceKind } from '../src/core/model/types';
 
@@ -8,9 +8,17 @@ const CARD = CHALLENGES.find((c) => c.id === 'Z01')!;
 const SK = (id: string) => CARD.skills!.find((s) => s.id === id)!;
 const make = () => createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
 
-/** Z01 上限＝5；龙腾万丈（z01-3）会获得 4 个随机能力骰 → 最大/最小进攻击区、其余 2 进防御区。 */
-const longteng = (g: ReturnType<typeof make>) =>
+/** Z01 上限＝5；龙腾万丈（z01-3）得 4 个随机能力骰 → 最大/最小进攻击区、其余 2 进防御区（**防御移入延后到 deferred**）。 */
+const longteng = (g: ReturnType<typeof make>): void => {
   applyChallengeSkill(g, CARD, SK('z01-3'), [die('k1', 2), die('k2', 2), die('k3', 5)]);
+  resolveLegendDeferred(g, CARD); // 移入步
+  const pd = g.pending;
+  if (pd && pd.kind === 'challengePick') {
+    // 只剩部分位、两颗中间骰不同 → 挑战者代决；取第一个选项
+    applyAction(g, { t: 'challengePick', id: pd.options[0].id });
+    resolveLegendDeferred(g, CARD);
+  }
+};
 
 describe('挑战模式 · 传奇防御骰上限（满上限时新骰直接弃置，不挤旧）', () => {
   it('Z01 上限 5：防御骰已满 5 时，龙腾万丈的新防御骰**直接弃置**（攻击骰照常）', () => {

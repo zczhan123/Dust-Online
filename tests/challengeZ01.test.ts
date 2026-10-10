@@ -94,7 +94,7 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     expect(g.activePlayer).toBe('A'); // 立即结束回合 → 交还挑战者
   });
 
-  it('龙腾万丈：得 4 能力骰 → 最大/最小各 1 进攻击区、其余 2 进防御区', () => {
+  it('龙腾万丈：得 4 能力骰 → 最大/最小各 1 进攻击区、其余 2（移入步）进防御区', () => {
     const g = make('manual');
     skipInitialReroll(g);
     g.challenge!.resumeAt = 3;
@@ -102,13 +102,57 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     g.players.A.areas.attack = [];
     g.players.B.areas.attack = [];
     g.players.B.areas.defense = [];
-    applyAction(g, { t: 'challengeStep' });
+    applyAction(g, { t: 'challengeStep' }); // roll 4 + 最大/最小 → 攻击区；防御移入延后
+    expect(g.players.B.areas.attack).toHaveLength(2);
+    expect(g.players.B.areas.defense).toHaveLength(0); // 防御尚未移入
+    applyAction(g, { t: 'challengeStep' }); // 移入中间 2 颗 → 防御区（room 足 → 不弹）
+    expect(g.pending).toBeNull();
     const atk = g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b);
     const def = g.players.B.areas.defense.map((d) => d.value).sort((a, b) => a - b);
     const all = [...atk, ...def].sort((a, b) => a - b);
     expect(all).toHaveLength(4);
     expect(atk).toEqual([all[0], all[3]]); // 最小 + 最大
     expect(def).toEqual([all[1], all[2]]); // 中间 2 个
+  });
+
+  it('龙腾万丈：防御区剩 1 位（满 4）→ 挑战者代决哪颗进（选后按所选进）', () => {
+    const g = make('manual');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 3;
+    g.challenge!.driven = [die('a2', 2), die('a2b', 2), die('a5', 5)];
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [1, 2, 3, 4].map((v, i) => die(`bd${i}`, v, 'defense'));
+    applyAction(g, { t: 'challengeStep' }); // roll + 攻击；防御移入延后
+    applyAction(g, { t: 'challengeStep' }); // 移入步（room 1 < 2）
+    if (g.pending?.kind === 'challengePick') {
+      const opt = g.pending.options[0];
+      const val = Number(opt.label.replace(/[^\d]/g, ''));
+      applyAction(g, { t: 'challengePick', id: opt.id });
+      applyAction(g, { t: 'challengeStep' }); // 移入所选
+      expect(g.players.B.areas.defense).toHaveLength(5);
+      expect(g.players.B.areas.defense[4].value).toBe(val);
+    } else {
+      // 两颗中间骰恰好同点 → 等价，无需代决
+      expect(g.players.B.areas.defense).toHaveLength(5);
+    }
+    expect(g.challenge!.deferred).toBeUndefined();
+  });
+
+  it('龙腾万丈·有利/不利：剩 1 位时自动——有利进小、不利进大', () => {
+    const entered = (mode: 'favor' | 'against'): number => {
+      const g = make(mode);
+      skipInitialReroll(g);
+      g.challenge!.resumeAt = 3;
+      g.challenge!.driven = [die('a2', 2), die('a2b', 2), die('a5', 5)];
+      g.players.B.areas.attack = [];
+      g.players.B.areas.defense = [1, 2, 3, 4].map((v, i) => die(`bd${i}`, v, 'defense'));
+      applyAction(g, { t: 'challengeStep' });
+      applyAction(g, { t: 'challengeStep' });
+      expect(g.pending).toBeNull(); // 自动，不弹面板
+      return g.players.B.areas.defense[4].value;
+    };
+    // 同种子 → 中间两颗相同；有利取小、不利取大
+    expect(entered('favor')).toBeLessThanOrEqual(entered('against'));
   });
 
   it('裁雨流：驱骰（无限 3/4）全部进攻击区并逐个攻击；前 3 次造成伤害的攻击骰移防御区', () => {
