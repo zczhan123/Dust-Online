@@ -836,11 +836,14 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     return;
   }
   if (skill.id === 'z03-4') {
-    // 战车 ③（攻击结算后）：补充随机防御骰**至 4**；每补 1 颗 → 孤塔之王受 **2 点真实伤害**
+    // 战车 ③（攻击结算后）：**随机加 4 颗防御骰**（与当前数量无关；Z03 防御骰区**无上限**、不截断）
+    //   → 每颗 → 孤塔之王受 **2 点真实伤害**（即每次固定 +4 防 / −8 生命）。
+    //   判读依据（2026-10-10 用户）：卡面"防御骰上限：无"只有"防御骰能超过 4"才有意义 → 不是"补至 4"而是"加 4"。
+    const DEF_ADD = 4;
     const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
     let added = 0;
     withRng(g, (rng) => {
-      while (g.players.B.areas.defense.length < 4) {
+      for (let i = 0; i < DEF_ADD; i++) {
         const v = rng.rollDie();
         const die = createDie(newDieId('chg-B-'), v, 'defense');
         if (!addLegendDefense(g, die)) break; // Z03 无上限，理论必成

@@ -113,6 +113,13 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(std.root.querySelector('.panel--challenge')).toBeNull();
   });
 
+  it('Z03（孤塔之王 · 防御骰无上限）：防御信息框显示「防御骰无上限 ｜ 只抵挡伤害 ≥ 2 的攻击」', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z03', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const info = root.querySelector('.panel--challenge .playband--single > .challenge-legacy-info') as HTMLElement | null;
+    expect(info?.textContent).toBe('防御骰无上限　｜　只会抵挡伤害 ≥ 2 的攻击');
+  });
+
   it('完整模式：卡图不加裁剪类（整张全图）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root } = mount(state, 'full');

@@ -1895,7 +1895,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
 
     const info = el('div', 'pick-legend-info');
     const life = card.life != null ? `生命 ${card.life}` : '生命 待转写';
-    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 待转写';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : card.skills ? '防御骰无上限' : '防御骰上限 待转写';
     const rule = card.defenseRule ?? '防御规则 待转写';
     info.textContent = `${life}　｜　${cap}　｜　${rule}`;
     col.appendChild(info);
@@ -1944,7 +1944,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     modalBox.appendChild(title);
     const meta = el('div', 'pick-chal-meta');
     const life = card.life != null ? `生命 ${card.life}` : '生命 待转写';
-    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 待转写';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : card.skills ? '防御骰无上限' : '防御骰上限 待转写';
     const rule = card.defenseRule ?? '防御规则 待转写';
     meta.textContent = `${life}　｜　${cap}　｜　${rule}`;
     modalBox.appendChild(meta);

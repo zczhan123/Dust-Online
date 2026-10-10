@@ -82,7 +82,7 @@ describe('挑战模式 · Z03 效果', () => {
     expect(g.virtualQueue ?? []).toHaveLength(1); // 1 发出 + 1 待
   });
 
-  it('战车：① 5 点攻击 + ② 用全部攻击骰逐个攻击 + ③ 结算后补防御至 4（每颗 2 真伤）', () => {
+  it('战车：① 5 点攻击 + ② 用全部攻击骰逐个攻击 + ③ 结算后**随机加 4 颗**防御骰（每颗 2 真伤、不封顶）', () => {
     const g = make();
     setA(g, {});
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 4, 'attack')];
@@ -97,8 +97,20 @@ describe('挑战模式 · Z03 效果', () => {
     const life0 = g.players.B.life;
     resolveLegendDeferred(g, Z03); // ③
     expect(g.players.B.areas.defense).toHaveLength(4);
-    expect(g.players.B.life).toBe(life0 - 8); // 补 4 颗 → 4×2 真伤
+    expect(g.players.B.life).toBe(life0 - 8); // 加 4 颗 → 4×2 真伤
     expect(g.challenge!.deferred).toBeUndefined();
+
+    // 再发动一次：已有 4 颗 → **再加 4 颗 = 8 颗**（不封顶）、再 −8 生命
+    g.players.B.areas.attack = [];
+    applyChallengeSkill(g, Z03, SK('z03-4'), []);
+    let g2 = 0;
+    while ((g.pendingAttack || (g.virtualQueue ?? []).length) && g2++ < 20) {
+      if (g.pendingAttack) applyAction(g, { t: 'block' });
+    }
+    const life1 = g.players.B.life;
+    resolveLegendDeferred(g, Z03);
+    expect(g.players.B.areas.defense).toHaveLength(8); // 4 → 8（防御骰区无上限）
+    expect(g.players.B.life).toBe(life1 - 8);
   });
 
   it('拔城：本回合未发动震荡/横扫 → 弃全部挑战者能力骰 + 2 次 5 点攻击', () => {

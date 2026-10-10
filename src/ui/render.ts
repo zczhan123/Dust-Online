@@ -1505,7 +1505,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     const info = el('div', 'challenge-legacy-info');
     info.dataset.act = 'challengeLegacyInfo';
     info.style.gridColumn = '3';
-    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰上限 —';
+    const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : '防御骰无上限';
     const rule = card.defenseRule ?? '防御规则 —';
     info.textContent = `${cap}　｜　${rule}`;
     band.appendChild(info);
