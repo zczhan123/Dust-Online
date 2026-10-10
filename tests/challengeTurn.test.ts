@@ -55,6 +55,24 @@ describe('挑战模式 · 传奇回合骨架', () => {
     expect(t).toContain('「雨中剑圣」：断斩一斩 — 首次回合（怜悯*），跳过');
   });
 
+  it('∞ 发动检查（无骰条件）：龙游万象驱动无 1/6 → 无效果，跳过', () => {
+    const g = make('Z01');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 1; // z01-1 龙游万象（∞）
+    g.challenge!.driven = [{ id: 'd1', value: 3, kind: 'meditation' }];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.log.map((l) => l.text).join('\n')).toContain('「雨中剑圣」：龙游万象 — 无效果（条件不满足），跳过');
+  });
+
+  it('∞ 发动检查（无骰条件）：拔城本回合已发动过震荡斩击 → 无效果，跳过', () => {
+    const g = make('Z03');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 5; // z03-5 拔城（∞）
+    g.challenge!.firedThisTurn = ['z03-2'];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.log.map((l) => l.text).join('\n')).toContain('「孤塔之王」：拔城 — 无效果（条件不满足），跳过');
+  });
+
   it('逐条推进：每次 challengeStep 只走"一条真正要执行的技能"', () => {
     const g = make();
     skipInitialReroll(g);

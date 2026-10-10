@@ -15,7 +15,7 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     expect(z1.defenseCap).toBe(5);
     expect(z1.defenseMin).toBe(2);
     expect(z1.skills![5].slots).toEqual([{ kind: 'pips', count: 0, faces: [3, 4], unlimited: true }]);
-    expect(slotPhrase(z1.skills![5].slots)).toBe('（满足无限颗3/4点时发动）');
+    expect(slotPhrase(z1.skills![5].slots)).toBe('（满足任意颗3/4点时发动）');
     expect(z1.skills![1].marker).toBe('∞');
     expect(z1.skills![2].marker).toBe('怜悯*');
     expect(z1.skills![2].endsTurn).toBe(true);

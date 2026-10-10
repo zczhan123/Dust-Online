@@ -19,7 +19,7 @@ export interface ChallengeSkill {
   id: string;
   name: string;
   marker?: '∞' | '怜悯*';
-  /** null＝无槽（必发） */
+  /** null＝无槽（必检：每回合都做一次"发动检查"、无骰子条件） */
   slots: ChallengeSlot[] | null;
   effect: string;
   endsTurn?: boolean;
@@ -113,11 +113,11 @@ export const CHALLENGES: ChallengeCard[] = [
 
 /** 把挑战技能的槽转换成显示文本（**自造记法，求短**；与结构化数据一一对应）。 */
 export function slotPhrase(slots: ChallengeSlot[] | null): string {
-  if (!slots || slots.length === 0) return '（必发）';
+  if (!slots || slots.length === 0) return '（必检）';
   const single = slots.length === 1 ? slots[0] : null;
   if (single?.unlimited) {
     const faces = (single.faces ?? []).join('/');
-    return `（满足无限颗${faces}点时发动）`;
+    return `（满足任意颗${faces}点时发动）`;
   }
   if (single && single.kind === 'pips') {
     const faces = (single.faces ?? []).join('/');
@@ -135,7 +135,7 @@ export function slotPhrase(slots: ChallengeSlot[] | null): string {
   if (s.kind === 'same') return `（满足${s.count}颗同点时发动）`;
   if (s.kind === 'any') return `（满足${s.count}颗任意点时发动）`;
   if (s.kind === 'straight') return `（满足${s.count}颗顺点时发动）`;
-  return '（必发）';
+  return '（必检）';
 }
 
 /** 挑战模式「特殊规则（技能削弱）」单条。**浮窗与引擎共用这一份**，禁止另写文案。 */

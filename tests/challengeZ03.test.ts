@@ -167,7 +167,7 @@ describe('挑战模式 · Z03 代决（自选＝挑战者弹面板 / 有利·不
 
   it('战车·自选：攻击区 > 1 颗 → 弹面板定攻击顺序', () => {
     const g = make();
-    atZ03(g, 4, [6]); // z03-4 ∞ 必发
+    atZ03(g, 4, [6]); // z03-4 ∞ 必检（无骰条件；本步必有效果）
     setA(g, {});
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 4, 'attack')];
     applyAction(g, { t: 'challengeStep' });

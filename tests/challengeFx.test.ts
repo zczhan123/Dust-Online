@@ -85,17 +85,31 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(events.some((e) => e.spawn.length > 0)).toBe(true);
   });
 
-  it('∞/无槽技能（龙游万象）也报 announce=true（不消耗驱动骰也要弹技能名）', () => {
-    const g = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
-    skipInitialReroll(g);
+  it('∞（无骰条件）：有 1/6 驱动骰才"发动"（弹名）；没有则跳过、不弹名', () => {
+    // 有 1/6 → 发动（announce=true）
+    const g1 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
+    skipInitialReroll(g1);
     fxTake();
-    g.challenge!.resumeAt = 1; // z01-1 龙游万象（∞）
-    applyAction(g, { t: 'challengeStep' });
-    const ev = fxTake().find((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
+    g1.challenge!.resumeAt = 1; // z01-1 龙游万象（∞）
+    g1.challenge!.driven = [die('d1', 1, 'meditation'), die('d2', 3, 'meditation')];
+    applyAction(g1, { t: 'challengeStep' });
+    const ev = fxTake().find(
+      (e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill' && e.skillKey === 'z01-1',
+    );
     expect(ev).toBeTruthy();
-    expect(ev!.skillKey).toBe('z01-1');
     expect(ev!.consumed).toEqual([]); // ∞＝不消耗驱动骰
-    expect(ev!.announce).toBe(true); // 但仍是一条“发动”→ 界面弹技能名
+    expect(ev!.announce).toBe(true);
+
+    // 没有 1/6 → 无效果 → 跳过（z01-1 不推 legendSkill、不弹名）
+    const g2 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
+    skipInitialReroll(g2);
+    fxTake();
+    g2.challenge!.resumeAt = 1;
+    g2.challenge!.driven = [die('d1', 3, 'meditation'), die('d2', 4, 'meditation')];
+    applyAction(g2, { t: 'challengeStep' });
+    expect(
+      fxTake().some((e) => e.kind === 'legendSkill' && (e as Extract<FxEvent, { kind: 'legendSkill' }>).skillKey === 'z01-1'),
+    ).toBe(false);
   });
 
   it('枭首：驱动骰移入攻击骰区由 legendSkill.spawn 报出，本步 attack=false（攻击延后到 deferred）', () => {

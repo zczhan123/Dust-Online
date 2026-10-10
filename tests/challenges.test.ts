@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { CHALLENGES, slotPhrase, CHALLENGE_RULE_NOTES, challengeInertSkills } from '../src/core/content/challenges';
 
 describe('挑战卡 · slotPhrase（文本记法）', () => {
-  it('无槽 → （必发）', () => {
-    expect(slotPhrase(null)).toBe('（必发）');
-    expect(slotPhrase([])).toBe('（必发）');
+  it('无槽 → （必检）', () => {
+    expect(slotPhrase(null)).toBe('（必检）');
+    expect(slotPhrase([])).toBe('（必检）');
   });
 
   it('① 统一可任选 → N颗[x/y点]', () => {

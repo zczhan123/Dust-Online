@@ -270,6 +270,35 @@ function busiestAreaOfChallenger(g: GameState): DiceKind {
   return KINDS_ORDER.reduce((best, k) => (p.areas[k].length > p.areas[best].length ? k : best), KINDS_ORDER[0]);
 }
 
+/**
+ * 挑战模式：这条技能**本次是否会真的产生效果**（＝"发动检查"）。
+ * `∞`（无槽）只表示"**每回合都要做一次发动检查**（无骰子条件）"，**不等于必定生效**——
+ * 仅"条件型 ∞ 技能在本步无效果"时返回 `false` → **不弹技能名、不占一步**（照"槽不匹配/怜悯*跳过"处理）。
+ * - 有槽技能：槽匹配即执行（本函数对它们恒 `true`）；「战车」虽 `∞` 但**必有效果**（① 一定打 1 次 5 点攻击）→ `true`。
+ */
+function legendSkillWillFire(g: GameState, skill: ChallengeSkill): boolean {
+  switch (skill.id) {
+    case 'z01-1': // 龙游万象：驱动里有 1/6 点才重掷得起（有则算"发动"，即便重掷回同点）
+      return g.challenge!.driven.some((d) => d.value === 1 || d.value === 6);
+    case 'z01-4': {
+      // 雨落狂流：不符合分布数 ≥ 3（k≥1）才有骰可弃
+      const dist = emptyDistribution(g.players.B);
+      let off = 0;
+      for (const k of KINDS_ORDER) for (const d of g.players.B.areas[k]) if (!dist || !dist[k].includes(d.value)) off++;
+      return Math.floor(off / 3) > 0;
+    }
+    case 'z03-1': // 统御战场：挑战者有攻击骰才改得动
+      return g.players.A.areas.attack.length > 0;
+    case 'z03-5': {
+      // 拔城：本回合未发动过震荡斩击 / 战争横扫才执行
+      const fired = g.challenge!.firedThisTurn ?? [];
+      return !fired.includes('z03-2') && !fired.includes('z03-3');
+    }
+    default:
+      return true;
+  }
+}
+
 /** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
  *  `atDeferred`＝这句话是在"延后一步"阶段问的（例：暗夜凶神的"弃哪颗防御骰"应在 8 点攻击结算**之后**问）。 */
 function challengeDecisions(
@@ -904,6 +933,11 @@ function continueLegendTurn(g: GameState, once = false): void {
     }
     if (skill.marker === '怜悯*' && g.challenge.turn === 0) {
       logLine(g, `「${legacy}」：${skill.name} — 首次回合（怜悯*），跳过`);
+      continue;
+    }
+    // ∞（无骰条件）技能：先做"发动检查"——本步若不会产生效果 → 跳过（不弹技能名、不占一步）
+    if (!legendSkillWillFire(g, skill)) {
+      logLine(g, `「${legacy}」：${skill.name} — 无效果（条件不满足），跳过`);
       continue;
     }
     // 本条消耗的驱动骰：代决暂停期间**已扣下并记住** → 续跑时直接取回（不重算槽匹配，否则骰子已不在 driven 里）

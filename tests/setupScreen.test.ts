@@ -669,12 +669,12 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-chal-title')!.textContent).toBe('传说中的“雨中剑圣”');
     expect(qa(root, '.pick-modal .pick-sk')).toHaveLength(6);
     expect(qa(root, '.pick-chal-phrase').map((n) => n.textContent)).toEqual([
-      '（必发）',
-      '（必发）',
+      '（必检）',
+      '（必检）',
       '（满足5颗2/5点时发动；怜悯*：第一回合跳过检查）',
       '（满足3颗2/5点时发动）',
-      '（必发）',
-      '（满足无限颗3/4点时发动）',
+      '（必检）',
+      '（满足任意颗3/4点时发动）',
     ]);
   });
 
