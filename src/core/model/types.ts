@@ -442,9 +442,17 @@ export interface GameState {
     /**
      * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
      * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。
-     * `groups`（遁入暗影）：逐组「先攻击 → 攻击结算后再移入防御骰区」的每组点数（每组 count 颗）。
+     * `groups`（遁入暗影）：逐组攻击的每组点数（每组 count 颗）。
+     * `dice`（遁入暗影）：本技能的全部骰（成组后的原始骰），供"防御骰区放不下时"由挑战者**任选 room 颗**移入。
+     * `moved`（遁入暗影）：是否已完成"移入"（移入只做一次；之后只剩逐组攻击）。
      */
-    deferred?: { skillId: string; step: number; groups?: number[][] };
+    deferred?: {
+      skillId: string;
+      step: number;
+      groups?: number[][];
+      dice?: { id: string; value: number }[];
+      moved?: boolean;
+    };
   };
   dustfall: number;
   turnIndex: number;

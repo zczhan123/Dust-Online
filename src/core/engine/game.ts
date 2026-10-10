@@ -182,6 +182,54 @@ function combinations(n: number, k: number): number[][] {
   return out;
 }
 
+/**
+ * 挑战模式「遁入暗影」：从**本技能的全部骰**里决定"移入防御骰区的下标"。
+ * - 防御区放得下（room ≥ 总数）→ 全移；已满（room ≤ 0）→ 不移。
+ * - 放不下（0 < room < 总数）→ 挑战者**任选 room 颗（可跨组）**；先按"点数多重集"去重，
+ *   只在有 ≥2 种不同结果时才问（如同 1 组、room=1 时两个下标等价 → 不问）。
+ * - 需代决但未决 → 挂 `pending`（challengePick）并返回 `null`；favor=取小（利挑战者→传奇防御更差）、against=取大。
+ */
+function chooseDefenseMove(
+  g: GameState,
+  card: ChallengeCard,
+  skill: ChallengeSkill,
+  dice: { id: string; value: number }[],
+  room: number,
+): number[] | null {
+  const total = dice.length;
+  if (room <= 0) return [];
+  if (room >= total) return dice.map((_, i) => i);
+  const seen = new Set<string>();
+  const opts: { id: string; label: string; idx: number[] }[] = [];
+  for (const c of combinations(total, room)) {
+    const key = c
+      .map((i) => dice[i].value)
+      .sort((a, b) => a - b)
+      .join(',');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    opts.push({ id: c.join(','), label: c.map((i) => `${dice[i].value}点`).join('、'), idx: c });
+  }
+  if (opts.length <= 1) return opts[0]?.idx ?? dice.slice(0, room).map((_, i) => i);
+  const dec = (g.challenge!.decisions ??= {});
+  const chosen = (dec[skill.id] ?? [])[0];
+  if (chosen) return chosen.split(',').map(Number);
+  const mode = g.challenge!.settleMode;
+  if (mode && mode !== 'manual') {
+    const id = autoPick({ options: opts.map((o) => ({ id: o.id, label: o.label })), prefer: 'smaller' }, mode)!;
+    dec[skill.id] = [id];
+    return id.split(',').map(Number);
+  }
+  g.challenge!.activeSkill = (card.skills ?? []).indexOf(skill);
+  g.pending = {
+    kind: 'challengePick',
+    player: 'A',
+    prompt: `「${skill.name}」：防御骰区还能放 ${room} 颗，请选择移入哪几颗`,
+    options: opts.map((o) => ({ id: o.id, label: o.label })),
+  };
+  return null;
+}
+
 /** 「锋芒」＝传奇攻击伤害 +计数：写成一个 thisTurn buff，走统一口径 `attackDamageBonus`。 */
 function syncLegendFengmang(g: GameState): void {
   const p = g.players.B;
@@ -397,13 +445,19 @@ export function applyChallengeSkill(
     }
     case 'z02-5': {
       // 遁入暗影：驱动骰按「每 2 颗同点＝1 组」成组（最多 2 组，见 `continueLegendTurn` 的 `matchSameGroups`）。
-      // **逐组「先移入防御骰区（填到上限为止、超出不获得、不挤旧）→ 再发起本组的 2 点攻击」**（顺序 A）。
-      // 本步只挂 `deferred`；实际"移入 + 攻击"由 `resolveLegendDeferred` 逐组执行（每次 challengeStep 处理一组）。
+      // ① 先把本技能全部骰**移入防御骰区**（防御区放不下时由挑战者任选 room 颗）；
+      // ② 再逐组发起 2 点攻击。二者都延后到 `resolveLegendDeferred`。
       const n = skill.slots?.[0]?.count ?? 2;
       const groups: number[][] = [];
       for (let i = 0; i + n <= consumed.length; i += n) groups.push(consumed.slice(i, i + n).map((d) => d.value));
       if (groups.length === 0) return { spawn, outIds };
-      g.challenge!.deferred = { skillId: skill.id, step: 0, groups };
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        groups,
+        dice: consumed.map((d) => ({ id: d.id, value: d.value })),
+        moved: false,
+      };
       return { spawn, outIds };
     }
     default:
@@ -541,49 +595,46 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     return;
   }
   if (skill.id === 'z02-5') {
-    // 遁入暗影（顺序 A）：**逐组「先移入防御骰区（填到上限为止、超出不获得、不挤旧）→ 再发起本组的 2 点攻击」**。
-    // 每次 challengeStep 处理一组；本函数负责"移入第 step 组、再发起**本组**攻击"。
+    // 遁入暗影：① 先"移入防御骰区"（只做一次；放不下时挑战者**任选 room 颗**）→ ② 再逐组发起 2 点攻击。
     const groups = d.groups ?? [];
-    const step = d.step ?? 0;
-    if (step >= groups.length) {
+    if (!d.moved) {
+      const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
+      const room = Math.max(0, cap - g.players.B.areas.defense.length);
+      const dice = d.dice ?? [];
+      const idxs = chooseDefenseMove(g, card, skill, dice, room);
+      if (idxs === null) return; // 停在代决（challengePick）
+      const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+      for (const i of idxs) {
+        const die = createDie(newDieId('chg-B-'), dice[i].value, 'defense');
+        g.players.B.areas.defense.push(die);
+        spawn.push({ id: die.id, value: dice[i].value, area: 'defense' });
+      }
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${idxs.length} 颗）`);
+      d.moved = true;
+      delete (g.challenge.decisions ?? {})[skill.id];
+      // 动效旁路：本步移入的骰（`spawn`）；`attack`＝移入之后逐个攻击（界面把攻击动画后移到"移入"之后）
+      fxPush({
+        kind: 'legendSkill',
+        player: 'B',
+        skillKey: skill.id,
+        skillName: skill.name,
+        consumed: [],
+        spawn,
+        outIds: [],
+        attack: groups.length > 0,
+        announce: false, // 遁入的移骰步 ≠ 发动帧 → 不重复弹技能名
+      });
+      return;
+    }
+    // ② 逐组 2 点攻击（带序号/总数供提示栏显示「（第 K / N 次）」）
+    if (d.step >= groups.length) {
       g.challenge.deferred = undefined;
       return;
     }
-    // ① 先移入本组
-    const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
-    const room = Math.max(0, cap - g.players.B.areas.defense.length);
-    const movedVals = groups[step].slice(0, room);
-    const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
-    for (const v of movedVals) {
-      const die = createDie(newDieId('chg-B-'), v, 'defense');
-      g.players.B.areas.defense.push(die);
-      spawn.push({ id: die.id, value: v, area: 'defense' });
-    }
-    logLine(
-      g,
-      `「${card.legacy}」：${skill.name} — 第 ${step + 1} 组移入防御骰区（${movedVals.length} 颗${
-        movedVals.length < groups[step].length ? '；已到上限，其余不获得' : ''
-      }）`,
-    );
-    // ② 移入之后再发起**本组**的 2 点攻击（顺序 A：先落区、再攻击）；带序号/总数供提示栏显示「（第 K / N 次）」
-    d.step = step + 1;
+    d.step += 1;
     virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
-    if (g.pendingAttack) g.pendingAttack.legendGroup = { index: step + 1, total: groups.length };
-    // 本组是最后一组 → 清 deferred；否则保留，等本组攻击结算后回来处理下一组
-    const hasNext = d.step < groups.length;
-    if (!hasNext) g.challenge.deferred = undefined;
-    // 动效旁路：本步移入的骰（`spawn`）；`attack`＝本组移入后紧跟一次攻击（界面把攻击动画后移到"移入"之后）
-    fxPush({
-      kind: 'legendSkill',
-      player: 'B',
-      skillKey: skill.id,
-      skillName: skill.name,
-      consumed: [],
-      spawn,
-      outIds: [],
-      attack: true,
-      announce: false, // 遁入的后续移骰步 ≠ 发动帧 → 不重复弹技能名
-    });
+    if (g.pendingAttack) g.pendingAttack.legendGroup = { index: d.step, total: groups.length };
+    if (d.step >= groups.length) g.challenge.deferred = undefined;
     return;
   }
   g.challenge.deferred = undefined;

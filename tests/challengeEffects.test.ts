@@ -104,12 +104,14 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.pendingAttack).toBeNull();
   });
 
-  it('遁入暗影：逐组「先移入本组 → 再 2 点攻击」（顺序 A，由 deferred 接力）', () => {
+  it('遁入暗影：「先移入防御骰区 → 再逐组 2 点攻击」（由 deferred 接力）', () => {
     const g = make();
     applyChallengeSkill(g, CARD, SK('z02-5'), [die('s1', 4, 'meditation'), die('s2', 4, 'meditation')]);
-    expect(g.pendingAttack).toBeNull(); // 激活时不攻击
-    resolveLegendDeferred(g, CARD); // 移入本组 + 发起本组攻击
-    expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([4, 4]); // **先**移入
+    expect(g.pendingAttack).toBeNull(); // 激活时不攻击、不移入
+    resolveLegendDeferred(g, CARD); // ① 移入（room ≥ 总数 → 全移）
+    expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([4, 4]);
+    expect(g.pendingAttack).toBeNull();
+    resolveLegendDeferred(g, CARD); // ② 再发起本组攻击
     expect(g.pendingAttack).toMatchObject({
       attacker: 'B',
       baseValue: 2,
