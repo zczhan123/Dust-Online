@@ -6,6 +6,7 @@ import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
+import { addLegendDefense } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -534,9 +535,10 @@ export function settleAttack(
       const hits = g.challenge?.caiyuliuHits ?? 0;
       if (pa.sourceSkill === '裁雨流' && o.damageDealt > 0 && hits < 3) {
         const die = area.splice(idx, 1)[0];
-        g.players[pa.attacker].areas.defense.push(die);
+        // 移入防御骰区（**受 `defenseCap` 约束**；已满 → 直接弃置＝移除后不加入）。边界：仍占"前 3 次"名额。
+        const placed = addLegendDefense(g, die);
         g.challenge!.caiyuliuHits = hits + 1;
-        fxPush({ kind: 'move', player: pa.attacker, dieIds: [die.id] }); // 攻击骰区 → 防御骰区
+        if (placed) fxPush({ kind: 'move', player: pa.attacker, dieIds: [die.id] }); // 攻击骰区 → 防御骰区
       } else {
         area.splice(idx, 1);
       }

@@ -3,6 +3,14 @@ import { createChallengeGame, applyChallengeSkill, resolveLegendDeferred, applyA
 import { CHALLENGES } from '../src/core/content/challenges';
 import type { Die, DiceKind } from '../src/core/model/types';
 
+/** `src/core/engine/*.ts` 源码原文（Vite `?raw`）：门禁用。 */
+const RAW = import.meta.glob('../src/core/engine/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<
+  string,
+  string
+>;
+const srcOf = (name: string): string =>
+  Object.entries(RAW).find(([k]) => k.endsWith(`/${name}.ts`))?.[1] ?? '';
+
 const die = (id: string, value: number, kind: DiceKind = 'meditation'): Die => ({ id, value, kind });
 const CARD = CHALLENGES.find((c) => c.id === 'Z01')!;
 const SK = (id: string) => CARD.skills!.find((s) => s.id === id)!;
@@ -49,5 +57,21 @@ describe('挑战模式 · 传奇防御骰上限（满上限时新骰直接弃置
     longteng(g);
     expect(g.players.B.areas.defense).toHaveLength(5); // 4 旧 + 1 新
     expect(g.players.B.areas.defense.slice(0, 4).map((d) => d.id)).toEqual(['bd0', 'bd1', 'bd2', 'bd3']);
+  });
+});
+
+describe('挑战模式 · 传奇防御骰上限 · 门禁（源码扫描）', () => {
+  it('game.ts / combat.ts 内 **0 处**直接 `areas.defense.push`（传奇加防御骰只走 `addLegendDefense`）', () => {
+    for (const f of ['game', 'combat']) {
+      const src = srcOf(f);
+      expect(src.length).toBeGreaterThan(0); // 确认读到了源码
+      expect(src.match(/\.areas\.defense\.push\(/g) ?? []).toEqual([]);
+    }
+  });
+
+  it('challenge.ts 的 `addLegendDefense` 是**唯一**往防御骰区 push 的地方', () => {
+    const src = srcOf('challenge');
+    expect(src.length).toBeGreaterThan(0);
+    expect((src.match(/\.areas\.defense\.push\(/g) ?? []).length).toBe(1);
   });
 });

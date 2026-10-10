@@ -172,6 +172,23 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     expect(g.players.B.areas.attack).toHaveLength(0);
   });
 
+  it('裁雨流·上限：防御骰已达 5 → "造成伤害的攻击骰"不进展防御区、直接弃置（防御仍 5）', () => {
+    const g = make('favor');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 5;
+    g.challenge!.driven = [die('d3a', 3), die('d3b', 3), die('d4a', 4), die('d4b', 4), die('d4c', 4)];
+    g.players.A.areas.defense = []; // 挑战者不抵挡 → 全部造成伤害
+    g.players.B.areas.defense = [1, 2, 3, 4].map((v, i) => die(`bd${i}`, v, 'defense')); // 已 4 → room 1
+    g.players.B.areas.attack = [];
+    applyAction(g, { t: 'challengeStep' }); // 移入攻击骰区
+    applyAction(g, { t: 'challengeStep' }); // 自动定顺序 + 逐个攻击
+    let guard = 0;
+    while (g.pendingAttack && guard++ < 20) applyAction(g, { t: 'block' });
+    expect(g.players.B.areas.defense).toHaveLength(5); // 旧 4 + 仅 1 颗进；其余"造成伤害的攻击骰"直接弃置
+    expect(g.players.B.areas.attack).toHaveLength(0);
+    expect(g.challenge!.deferred).toBeUndefined();
+  });
+
   it('裁雨流·自选：攻击骰 >1 颗时弹面板定攻击顺序', () => {
     const g = make('manual');
     skipInitialReroll(g);

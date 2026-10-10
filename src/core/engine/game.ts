@@ -15,7 +15,7 @@ import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
 import { CHALLENGES, type ChallengeCard, type ChallengeSkill, type ChallengeSlot } from '../content/challenges';
-import { matchSlots, legendCanBlock } from './challenge';
+import { matchSlots, legendCanBlock, addLegendDefense } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
@@ -248,8 +248,7 @@ function placeDefenseFrom(
   const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
   for (const i of idxs) {
     const die = createDie(newDieId('chg-B-'), dice[i].value, 'defense');
-    g.players.B.areas.defense.push(die);
-    spawn.push({ id: die.id, value: dice[i].value, area: 'defense' });
+    if (addLegendDefense(g, die)) spawn.push({ id: die.id, value: dice[i].value, area: 'defense' });
   }
   return spawn;
 }
@@ -359,13 +358,15 @@ export function applyChallengeSkill(
   const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
   const outIds: string[] = [];
   /** 传奇新获得一颗能力骰（登记进 `spawn`，供界面演"中间冒出 → 飞入区域"）。
-   *  **防御骰上限**：防御骰已满 `card.defenseCap` 时，新防御骰**直接弃置**（不加入区域、不产生 spawn）。
-   *  ⚠️ 口径（2026-10-10 用户定）：满上限＝**新骰弃置**，**不是**"挤掉最旧"（`capLegendDefense` 仅供将来特例，当前不用）。
-   *  「遁入暗影」的"填到上限为止"由 `resolveLegendDeferred` 自行处理（不走这里）。 */
+   *  **防御骰**统一走 `addLegendDefense`（满上限 → 新骰直接弃置、不加入、不产生 spawn）。
+   *  ⚠️ 口径（2026-10-10 用户定）：满上限＝**新骰弃置**，**不是**"挤掉最旧"。 */
   const gain = (area: 'attack' | 'defense' | 'meditation', value: number): void => {
-    if (area === 'defense' && B.areas.defense.length >= (card.defenseCap ?? Number.POSITIVE_INFINITY)) return;
     const d = createDie(newDieId('chg-B-'), value, area);
-    B.areas[area].push(d);
+    if (area === 'defense') {
+      if (!addLegendDefense(g, d)) return; // 已满 → 直接弃置
+    } else {
+      B.areas[area].push(d);
+    }
     spawn.push({ id: d.id, value, area });
   };
   switch (skill.id) {

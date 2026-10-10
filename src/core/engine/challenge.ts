@@ -1,5 +1,5 @@
 import type { Die, GameState, PlayerId } from '../model/types';
-import { challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
+import { CHALLENGES, challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
 
 /** 从小到大、按 id 稳定排序（保证"确定性默认分配"可测）。 */
 function sortedDice(dice: Die[]): Die[] {
@@ -99,6 +99,21 @@ export function matchSlots(slots: ChallengeSlot[], driven: Die[]): string[] | nu
 /** 传奇按「防御规则」是否**愿意/可以**抵挡这次攻击（伤害 < 门槛 → 不挡）。 */
 export function legendCanBlock(card: ChallengeCard, damage: number): boolean {
   return damage >= (card.defenseMin ?? 0);
+}
+
+/**
+ * 往**传奇（B）防御骰区**加 1 颗骰（新造 / 从别处搬入）；**已达 `card.defenseCap` → 直接弃置**（不加入，返回 `false`）。
+ * **唯一入口**——⚠️ 任何"传奇获得 / 搬入防御骰"的代码**都必须走它**，**禁止**在别处直接 `areas.defense.push`。
+ * 口径（2026-10-10 用户定）：满上限＝**新骰弃置**，**不是**"挤掉最旧"。挑战模式以外不设限。
+ */
+export function addLegendDefense(g: GameState, die: Die): boolean {
+  if (g.mode === 'challenge') {
+    const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+    const cap = card?.defenseCap ?? Number.POSITIVE_INFINITY;
+    if (g.players.B.areas.defense.length >= cap) return false; // 已满 → 直接弃置
+  }
+  g.players.B.areas.defense.push(die);
+  return true;
 }
 
 /** 「昔日传奇」固定坐 B 席（挑战者坐 A 席）——削弱判定要用到。 */

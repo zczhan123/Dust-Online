@@ -380,5 +380,7 @@
       - **自选**：挑战者代决"哪几颗进"（弹 `challengePick`）；
       - **有利（对挑战者有利）**：自动放**点数小**的防御骰（传奇防御更差）；
       - **不利（对挑战者不利）**：自动放**点数大**的防御骰。
-      - 实现**唯一入口**＝`placeDefenseFrom`（内部走 `chooseDefenseMove`）：**「遁入暗影」「龙腾万丈」共用**；**任何同类新技能都必须走它，勿各写一遍**。（镜像提醒：方向随"移入哪一方 / 获得还是弃置"变——**弃置挑战者**的防御骰（雨落狂流）＝有利**弃小**保大。）
+      - 实现分层（**两个唯一入口**）：① **凡往传奇防御骰区加骰**（新造 / 从别处搬入）**唯一入口＝`addLegendDefense(g, die)`**（已达 `defenseCap` → 返回 `false`＝直接弃置）——**禁止**在别处直接 `areas.defense.push`；② **"批量移入 + 放不下时代决"唯一入口＝`placeDefenseFrom`**（内部走 `chooseDefenseMove` + `addLegendDefense`），**「遁入暗影」「龙腾万丈」「裁雨流搬入」共用**。
+      - **改完必须用 `grep`（ripgrep）全量清点"写防御骰区"的点**（`areas\.defense\.push`）**核验只出现在 `addLegendDefense` 一处**，**不许只补显眼那处**。真实事故：2026-10-10 只修了 `gain`/`placeDefenseFrom`、**漏了 `combat.ts` 里「裁雨流」的 `areas.defense.push`** → 防御骰仍能超上限（用户实测发现）。门禁测试 `tests/challengeDefenseCap.test.ts` 扫源码锁死。
+      - （镜像提醒：方向随"移入哪一方 / 获得还是弃置"变——**弃置挑战者**的防御骰（雨落狂流）＝有利**弃小**保大。）
     - **挑战"正在结算"提示必须排除 `pendingAttack`**：否则昔传攻击、挑战者选是否抵挡时，该分支抢先 `return`、盖住"被攻击提示（含加伤）"。
