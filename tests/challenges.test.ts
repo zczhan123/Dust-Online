@@ -31,6 +31,16 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
     ).toBe('（满足1、4、6点时发动）');
   });
 
+  it('② 逐格·**多点格** → 逐格渲染、不平铺（Z03 战争横扫）', () => {
+    expect(
+      slotPhrase([
+        { kind: 'pips', count: 1, faces: [1, 2] },
+        { kind: 'pips', count: 1, faces: [3, 4] },
+        { kind: 'pips', count: 1, faces: [5, 6] },
+      ]),
+    ).toBe('（满足1/2点、3/4点、5/6点时发动）');
+  });
+
   it('③ 特殊 → 同点 / 任意点 / 顺点', () => {
     expect(slotPhrase([{ kind: 'same', count: 2 }])).toBe('（满足2颗同点时发动）');
     expect(slotPhrase([{ kind: 'any', count: 3 }])).toBe('（满足3颗任意点时发动）');
@@ -45,6 +55,9 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
     expect(slotPhrase(z2.skills![2].slots)).toBe('（满足1、2、3、4点时发动）');
     expect(slotPhrase(z2.skills![3].slots)).toBe('（满足1、4、6点时发动）');
     expect(slotPhrase(z2.skills![5].slots)).toBe('（满足2颗同点时发动）');
+    const z3 = CHALLENGES.find((c) => c.id === 'Z03')!;
+    expect(slotPhrase(z3.skills![2].slots)).toBe('（满足3颗同点时发动）');
+    expect(slotPhrase(z3.skills![3].slots)).toBe('（满足1/2点、3/4点、5/6点时发动）');
   });
 
   it('Z02 元数据：投 8 个驱动骰、计数上限 3、防御骰上限 4、生命 50', () => {

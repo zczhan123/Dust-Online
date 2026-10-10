@@ -125,8 +125,14 @@ export function slotPhrase(slots: ChallengeSlot[] | null): string {
   }
   if (slots.every((s) => s.kind === 'pips')) {
     if (slots.every((s) => s.count === 1)) {
-      const faces = slots.flatMap((s) => s.faces ?? []);
-      return `（满足${faces.join('、')}点时发动）`;
+      // 每格都是**单点** → 合并（如 1、2、3、4）；**存在多点的格** → 逐格渲染、**不平铺**（如 1/2点、3/4点、5/6点）
+      const allSingle = slots.every((s) => (s.faces ?? []).length === 1);
+      if (allSingle) {
+        const faces = slots.flatMap((s) => s.faces ?? []);
+        return `（满足${faces.join('、')}点时发动）`;
+      }
+      const parts = slots.map((s) => `${(s.faces ?? []).join('/')}点`).join('、');
+      return `（满足${parts}时发动）`;
     }
     const parts = slots.map((s) => `${s.count}颗${(s.faces ?? []).join('/')}`).join('＋');
     return `（满足${parts}点时发动）`;
