@@ -274,3 +274,42 @@ describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => 
     expect((man.root.querySelector('.settle-mode-badge') as HTMLElement).textContent).toBe('结算：自选');
   });
 });
+
+describe('挑战模式 · 被攻击提示（遁入暗影 / 加伤 / 第 K/N 次）', () => {
+  it('昔传发起攻击时（等你选是否抵挡）：提示"攻击 + 加成 + 第 K/N 次"，**不再**显示"正在结算"', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.activePlayer = 'B';
+    state.challenge!.resumeAt = 5; // 遁入暗影
+    state.challenge!.activeSkill = 5;
+    state.challenge!.count = 1; // 锋芒 +1
+    state.pendingAttack = {
+      attacker: 'B',
+      value: 3,
+      unblockable: false,
+      physical: false,
+      baseValue: 2,
+      sourceSkill: '遁入暗影',
+      sourceSkillOwner: 'B',
+      bonusValue: 1,
+      bonusLabel: '传奇锋芒',
+      legendGroup: { index: 1, total: 2 },
+    };
+    const { root } = mount(state);
+    const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
+    expect(hint).toContain('发起攻击'); // 攻击提示显示出来了（原被"正在结算"盖住）
+    expect(hint).toContain('加成 1 伤害'); // 加伤可见
+    expect(hint).toContain('（第 1 / 2 次）'); // 遁入暗影的 K/N 序号
+    expect(hint).not.toContain('正在结算'); // 不再被"正在结算"遮蔽
+  });
+
+  it('昔传仅"结算中"（未发起攻击）：提示栏仍显示"正在结算：遁入暗影"（原行为不变）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    state.activePlayer = 'B';
+    state.challenge!.resumeAt = 5;
+    state.challenge!.activeSkill = 5;
+    const { root } = mount(state);
+    const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
+    expect(hint).toContain('正在结算');
+    expect(hint).toContain('遁入暗影');
+  });
+});

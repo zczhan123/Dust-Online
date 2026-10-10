@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createChallengeGame, applyChallengeSkill, applyAction, skipInitialReroll } from '../src/core/engine/game';
+import { createChallengeGame, applyChallengeSkill, resolveLegendDeferred, applyAction, skipInitialReroll } from '../src/core/engine/game';
 import { attackDamageBonus } from '../src/core/engine/combat';
 import { CHALLENGES } from '../src/core/content/challenges';
 import { toMain, driveLegendTurn } from './helpers';
@@ -60,11 +60,11 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.players.B.areas.attack.map((d) => d.value).sort()).toEqual([1, 6]);
   });
 
-  it('遁入暗影：激活时**先发起攻击**、暂不移入（移入延后到该组攻击结算后）', () => {
+  it('遁入暗影：激活时**只扣驱动骰、记下分组**（顺序 A：移入/攻击推迟到后续步）', () => {
     const g = make();
     applyChallengeSkill(g, CARD, SK('z02-5'), [die('drv1', 3, 'meditation'), die('drv2', 3, 'meditation')]);
-    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2 });
-    expect(g.players.B.areas.defense).toHaveLength(0); // 攻击前**还没移入**
+    expect(g.pendingAttack).toBeNull(); // 激活本身**不发起攻击**
+    expect(g.players.B.areas.defense).toHaveLength(0); // 也**未移入**
     expect(g.challenge!.deferred).toMatchObject({ skillId: 'z02-5', step: 0, groups: [[3, 3]] });
   });
 
@@ -101,10 +101,18 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.pendingAttack).toBeNull();
   });
 
-  it('遁入暗影：每 1 组 → 1 次 2 点攻击', () => {
+  it('遁入暗影：逐组「先移入本组 → 再 2 点攻击」（顺序 A，由 deferred 接力）', () => {
     const g = make();
     applyChallengeSkill(g, CARD, SK('z02-5'), [die('s1', 4, 'meditation'), die('s2', 4, 'meditation')]);
-    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2, physical: false });
+    expect(g.pendingAttack).toBeNull(); // 激活时不攻击
+    resolveLegendDeferred(g, CARD); // 移入本组 + 发起本组攻击
+    expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([4, 4]); // **先**移入
+    expect(g.pendingAttack).toMatchObject({
+      attacker: 'B',
+      baseValue: 2,
+      physical: false,
+      legendGroup: { index: 1, total: 1 },
+    });
   });
 
   it('逐条推进：传奇回合按 challengeStep 一条条走；攻击处停下等响应，响应后继续到交还', () => {

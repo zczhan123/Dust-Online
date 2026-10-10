@@ -162,6 +162,11 @@ export interface PendingAttack {
    * `'solid'`＝实体色骰（例：挑战模式「枭首」用攻击骰区里的真骰逐颗发起攻击）；未设＝按 `physical` 判定（虚拟攻击＝灰骰）。
    */
   dieStyle?: 'solid';
+  /**
+   * **表现层**提示（不影响任何规则）：挑战模式「遁入暗影」逐组攻击时的**序号/总数**（1 基）。
+   * 供提示栏显示「（第 K / N 次）」，让挑战者事前知道还会挨几次 2 点攻击。
+   */
+  legendGroup?: { index: number; total: number };
 }
 
 export type Pending =

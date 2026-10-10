@@ -1770,10 +1770,13 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     ];
   }
   // 挑战模式：昔传回合（逐条结算中）→ 提示"正在结算哪一条"（技能名用昔传玩家色）
+  // ⚠️ 必须排除 `pendingAttack`——昔传发起攻击、挑战者正选"是否抵挡"时，要走下面的"攻击提示"分支
+  //    （否则这句会盖住攻击提示，连"本次伤害/加伤"都看不到；真实事故 2026-10-10）。
   if (
     ctx.state.mode === 'challenge' &&
     ctx.state.activePlayer === 'B' &&
     !pd &&
+    !ctx.state.pendingAttack &&
     ctx.state.challenge?.resumeAt != null
   ) {
     const card = CHALLENGES.find((c) => c.id === ctx.state.challenge?.cardId);
@@ -2030,6 +2033,8 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
       parts.push({ text: ` 的「${skillName}」影响：只能用${kindCn}骰抵挡）` });
     }
+    // 挑战模式「遁入暗影」逐组攻击：显示「（第 K / N 次）」，让挑战者事前知道还会挨几次 2 点攻击
+    if (pa.legendGroup) parts.push({ text: `（第 ${pa.legendGroup.index} / ${pa.legendGroup.total} 次）` });
     parts.push({ text: '；请选择' });
     return parts;
   }

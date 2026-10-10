@@ -456,14 +456,13 @@ export function applyChallengeSkill(
     }
     case 'z02-5': {
       // 遁入暗影：驱动骰按「每 2 颗同点＝1 组」成组（最多 2 组，见 `continueLegendTurn` 的 `matchSameGroups`）。
-      // **逐组**「先攻击 → 攻击结算后再移入防御骰区（填到上限为止、超出不获得、不挤旧）」。
-      // 第 0 组：本步先发起攻击；移入延后到 `resolveLegendDeferred`（攻击结算后）。
+      // **逐组「先移入防御骰区（填到上限为止、超出不获得、不挤旧）→ 再发起本组的 2 点攻击」**（顺序 A）。
+      // 本步只挂 `deferred`；实际"移入 + 攻击"由 `resolveLegendDeferred` 逐组执行（每次 challengeStep 处理一组）。
       const n = skill.slots?.[0]?.count ?? 2;
       const groups: number[][] = [];
       for (let i = 0; i + n <= consumed.length; i += n) groups.push(consumed.slice(i, i + n).map((d) => d.value));
       if (groups.length === 0) return { spawn, outIds };
       g.challenge!.deferred = { skillId: skill.id, step: 0, groups };
-      virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
       return { spawn, outIds };
     }
     default:
@@ -504,7 +503,7 @@ function runLegendTurn(g: GameState): void {
  * 收尾"延后一步"的效果（**按卡面顺序**：例「暗夜凶神」＝①8点攻击 →（攻击结算后）②弃挑战者1防御骰 →③计数+1）。
  * 只在攻击已结算完、回到传奇回合时执行；遇到"②的代决"就挂起等待。
  */
-function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
+export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
   const d = g.challenge?.deferred;
   if (!g.challenge || !d) return;
   const skill = (card.skills ?? []).find((s) => s.id === d.skillId);
@@ -548,14 +547,15 @@ function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     return;
   }
   if (skill.id === 'z02-5') {
-    // 遁入暗影：**逐组**「先攻击 → 攻击结算后 → 移入防御骰区（填到上限为止、超出不获得、不挤旧）」。
-    // 本函数在"上一组的攻击已结算完"时被调用 → 此刻执行"移入第 step 组、再发起下一组攻击"。
+    // 遁入暗影（顺序 A）：**逐组「先移入防御骰区（填到上限为止、超出不获得、不挤旧）→ 再发起本组的 2 点攻击」**。
+    // 每次 challengeStep 处理一组；本函数负责"移入第 step 组、再发起**本组**攻击"。
     const groups = d.groups ?? [];
     const step = d.step ?? 0;
     if (step >= groups.length) {
       g.challenge.deferred = undefined;
       return;
     }
+    // ① 先移入本组
     const cap = card.defenseCap ?? Number.POSITIVE_INFINITY;
     const room = Math.max(0, cap - g.players.B.areas.defense.length);
     const movedVals = groups[step].slice(0, room);
@@ -571,11 +571,14 @@ function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
         movedVals.length < groups[step].length ? '；已到上限，其余不获得' : ''
       }）`,
     );
+    // ② 移入之后再发起**本组**的 2 点攻击（顺序 A：先落区、再攻击）；带序号/总数供提示栏显示「（第 K / N 次）」
     d.step = step + 1;
+    virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
+    if (g.pendingAttack) g.pendingAttack.legendGroup = { index: step + 1, total: groups.length };
+    // 本组是最后一组 → 清 deferred；否则保留，等本组攻击结算后回来处理下一组
     const hasNext = d.step < groups.length;
-    if (hasNext) virtualAttack(g, 'B', 2, { skill: '遁入暗影', owner: 'B' });
-    else g.challenge.deferred = undefined;
-    // 动效旁路：本步移入的骰（`spawn`）；`attack`＝之后是否还有下一组攻击（界面把攻击动画后移到"移入"之后）
+    if (!hasNext) g.challenge.deferred = undefined;
+    // 动效旁路：本步移入的骰（`spawn`）；`attack`＝本组移入后紧跟一次攻击（界面把攻击动画后移到"移入"之后）
     fxPush({
       kind: 'legendSkill',
       player: 'B',
@@ -584,7 +587,7 @@ function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       consumed: [],
       spawn,
       outIds: [],
-      attack: hasNext,
+      attack: true,
     });
     return;
   }
@@ -642,30 +645,37 @@ function continueLegendTurn(g: GameState, once = false): void {
         const chosenStr = (dec[skill.id] ?? [])[0];
         let chosenIdx: number[] | null = chosenStr ? chosenStr.split(',').map(Number) : null;
         if (groups.length > maxG && !chosenIdx) {
-          const mode = g.challenge.settleMode;
-          if (mode && mode !== 'manual') {
-            // 自动：favor＝点数小、against＝点数大
-            chosenIdx = groups
-              .map((gr, idx) => ({ idx, value: gr.value }))
-              .sort((a, b) => (mode === 'against' ? b.value - a.value : a.value - b.value))
-              .slice(0, maxG)
-              .map((x) => x.idx);
-            dec[skill.id] = [chosenIdx.join(',')];
+          // 昔传防御骰**已满**（= 上限）：本组移入不会发生（移 0 颗）、攻击次数恒为组数 → 选哪几组**无实际影响**，
+          // 不再打扰挑战者（攻击次数已在"攻击提示"里由「（第 K / N 次）」讲清）→ 用确定性默认＝前 maxG 组。
+          const defFull = g.players.B.areas.defense.length >= (card.defenseCap ?? Number.POSITIVE_INFINITY);
+          if (defFull) {
+            chosenIdx = groups.slice(0, maxG).map((_, idx) => idx);
           } else {
-            // 自选：弹面板让挑战者选哪几组（候选组 > 上限时才问）
-            const combos = combinations(groups.length, maxG);
-            g.challenge.activeSkill = i;
-            g.challenge.resumeAt = i;
-            g.pending = {
-              kind: 'challengePick',
-              player: 'A',
-              prompt: `「${skill.name}」：移入哪些同点组？（选 ${maxG} 组）`,
-              options: combos.map((c) => ({
-                id: c.join(','),
-                label: c.map((idx) => `${groups[idx].value}点组`).join('、'),
-              })),
-            };
-            return;
+            const mode = g.challenge.settleMode;
+            if (mode && mode !== 'manual') {
+              // 自动：favor＝点数小、against＝点数大
+              chosenIdx = groups
+                .map((gr, idx) => ({ idx, value: gr.value }))
+                .sort((a, b) => (mode === 'against' ? b.value - a.value : a.value - b.value))
+                .slice(0, maxG)
+                .map((x) => x.idx);
+              dec[skill.id] = [chosenIdx.join(',')];
+            } else {
+              // 自选：弹面板让挑战者选哪几组（候选组 > 上限时才问）
+              const combos = combinations(groups.length, maxG);
+              g.challenge.activeSkill = i;
+              g.challenge.resumeAt = i;
+              g.pending = {
+                kind: 'challengePick',
+                player: 'A',
+                prompt: `「${skill.name}」：移入哪些同点组？（选 ${maxG} 组）`,
+                options: combos.map((c) => ({
+                  id: c.join(','),
+                  label: c.map((idx) => `${groups[idx].value}点组`).join('、'),
+                })),
+              };
+              return;
+            }
           }
         }
         const useIdx = chosenIdx ?? groups.map((_, idx) => idx);
