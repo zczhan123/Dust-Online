@@ -73,6 +73,24 @@ describe('挑战模式 · 传奇回合骨架', () => {
     expect(g.log.map((l) => l.text).join('\n')).toContain('「孤塔之王」：拔城 — 无效果（条件不满足），跳过');
   });
 
+  it('∞ 发动检查：统御战场攻击骰**全是 1**（改成 1 是空操作）→ 跳过、不弹名', () => {
+    const g = make('Z03');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 1; // z03-1 统御战场（∞）
+    g.players.A.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' as const }];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.log.map((l) => l.text).join('\n')).toContain('「孤塔之王」：统御战场 — 无效果（条件不满足），跳过');
+  });
+
+  it('∞ 发动检查：统御战场存在点数 ≠ 1 的攻击骰 → 发动（不写"无效果"）', () => {
+    const g = make('Z03');
+    skipInitialReroll(g);
+    g.challenge!.resumeAt = 1;
+    g.players.A.areas.attack = [{ id: 'a1', value: 3, kind: 'attack' as const }];
+    applyAction(g, { t: 'challengeStep' });
+    expect(g.log.map((l) => l.text).join('\n')).not.toContain('统御战场 — 无效果');
+  });
+
   it('逐条推进：每次 challengeStep 只走"一条真正要执行的技能"', () => {
     const g = make();
     skipInitialReroll(g);

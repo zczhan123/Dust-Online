@@ -287,8 +287,8 @@ function legendSkillWillFire(g: GameState, skill: ChallengeSkill): boolean {
       for (const k of KINDS_ORDER) for (const d of g.players.B.areas[k]) if (!dist || !dist[k].includes(d.value)) off++;
       return Math.floor(off / 3) > 0;
     }
-    case 'z03-1': // 统御战场：挑战者有攻击骰才改得动
-      return g.players.A.areas.attack.length > 0;
+    case 'z03-1': // 统御战场：只有在"存在点数 ≠ 1 的攻击骰"（改点确实产生变化）时才发动；全是 1 / 没有 → 空操作
+      return g.players.A.areas.attack.some((d) => d.value !== 1);
     case 'z03-5': {
       // 拔城：本回合未发动过震荡斩击 / 战争横扫才执行
       const fired = g.challenge!.firedThisTurn ?? [];
