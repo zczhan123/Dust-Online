@@ -83,7 +83,23 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z02-5', name: '遁入暗影', slots: [{ kind: 'same', count: 2 }], maxSameGroups: 2, effect: '将本技能上的驱动骰全部移动至防御骰区。每移动 1 组，进行 1 次 2 点攻击。' },
     ],
   },
-  { id: 'Z03', legacy: '孤塔之王', artifacts: ['007', '008', '009'] },
+  {
+    id: 'Z03', legacy: '孤塔之王', artifacts: ['007', '008', '009'],
+    life: 70, defenseRule: '只会抵挡伤害 ≥ 2 的攻击', defenseMin: 2, rollDice: 6,
+    // 防御骰上限：无（不填 defenseCap → 不截断）
+    skills: [
+      { id: 'z03-0', name: '回合开始', slots: null, effect: '投掷 6 个驱动骰。' },
+      { id: 'z03-1', name: '统御战场', marker: '∞', slots: null, effect: '将挑战者的所有攻击骰点数变更为 1 点，并保留在原本的区域。' },
+      { id: 'z03-2', name: '震荡斩击', slots: [{ kind: 'same', count: 3 }], effect: '弃置挑战者能力骰数量最多的区域中的 4 个能力骰。如果弃置的数量不足 4 个，进行 1 次 5 点的攻击。' },
+      {
+        id: 'z03-3', name: '战争横扫',
+        slots: [{ kind: 'pips', count: 1, faces: [1, 2] }, { kind: 'pips', count: 1, faces: [3, 4] }, { kind: 'pips', count: 1, faces: [5, 6] }],
+        effect: '弃置挑战者每种类型的能力骰各 1 个。每有一种未能成功弃置的能力骰，便进行 1 次 5 点的攻击。',
+      },
+      { id: 'z03-4', name: '战车', marker: '∞', slots: null, effect: '进行 1 次 5 点的攻击。如果攻击骰区有攻击骰，也使用所有攻击骰进行攻击。补充随机点数的防御骰，直至防御骰的数量为 4。每补充 1 个防御骰，「孤塔之王」受到 2 点真实伤害。' },
+      { id: 'z03-5', name: '拔城', marker: '∞', slots: null, effect: '如果本回合「孤塔之王」既没有发动「震荡斩击」，也没有发动「战争横扫」：弃置挑战者的全部能力骰，并进行 2 次 5 点的攻击。' },
+    ],
+  },
   { id: 'Z04', legacy: '地狱的魔女', artifacts: ['010', '011', '012'] },
   { id: 'Z05', legacy: '轰鸣审判官', artifacts: ['013', '014', '015'] },
   { id: 'Z06', legacy: '漆黑死神', artifacts: ['016', '017', '018'] },

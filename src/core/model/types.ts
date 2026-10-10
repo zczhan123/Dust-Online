@@ -439,6 +439,8 @@ export interface GameState {
     settleMode?: 'manual' | 'favor' | 'against';
     /** Z01「裁雨流」：本轮"用攻击骰逐个攻击"中，**已造成伤害**的次数（前 3 次 → 该攻击骰移入防御骰区） */
     caiyuliuHits?: number;
+    /** Z03「拔城」：**本传奇回合内**已"发动"过的技能 id（每回合清；用于"既没发动 X 也没发动 Y"判定） */
+    firedThisTurn?: string[];
     /**
      * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
      * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。

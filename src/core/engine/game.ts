@@ -261,6 +261,15 @@ function syncLegendFengmang(g: GameState): void {
   if (add > 0) p.buffs.push({ attr: 'attackDamage', add, duration: 'thisTurn', source: '传奇锋芒' });
 }
 
+/** 骰区中文（攻/防/冥），供代决文案。 */
+const KIND_CN: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+
+/** 挑战者(A)**能力骰数量最多**的区域（并列取 KINDS_ORDER 靠前者，确定性）。供 Z03「震荡斩击」。 */
+function busiestAreaOfChallenger(g: GameState): DiceKind {
+  const p = g.players.A;
+  return KINDS_ORDER.reduce((best, k) => (p.areas[k].length > p.areas[best].length ? k : best), KINDS_ORDER[0]);
+}
+
 /** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
  *  `atDeferred`＝这句话是在"延后一步"阶段问的（例：暗夜凶神的"弃哪颗防御骰"应在 8 点攻击结算**之后**问）。 */
 function challengeDecisions(
@@ -305,6 +314,51 @@ function challengeDecisions(
       // 卡面顺序：先 8 点攻击 →（攻击结算后）才问"弃哪颗防御骰"
       return atDeferred && A.areas.defense.length > 0
         ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts(), prefer: 'smaller' }]
+        : [];
+    case 'z03-2': {
+      // 震荡斩击：弃"骰最多的区域"里的至多 4 颗；仅当该区域 > 4 颗才有得挑 → 问"弃哪 4 颗"
+      const busiest = busiestAreaOfChallenger(g);
+      const pool = A.areas[busiest];
+      if (pool.length <= 4) return [];
+      return [
+        {
+          prompt: `「震荡斩击」：弃置【${KIND_CN[busiest]}】里最多的 4 颗`,
+          options: combinations(pool.length, 4).map((c) => ({
+            id: c.map((i) => pool[i].id).join(','),
+            label: c.map((i) => `${KIND_CN[busiest]}${pool[i].value}`).join('、'),
+          })),
+          prefer: 'smaller',
+        },
+      ];
+    }
+    case 'z03-3': {
+      // 战争横扫：每种类型各弃 1 颗；仅当某类型 > 1 颗才有得挑 → 每类型各一个 want（按 KINDS_ORDER）
+      const wants: { prompt: string; options: { id: string; label: string }[]; prefer: 'smaller' }[] = [];
+      for (const k of KINDS_ORDER) {
+        const pool = A.areas[k];
+        if (pool.length > 1) {
+          wants.push({
+            prompt: `「战争横扫」：弃置【${KIND_CN[k]}】里的哪 1 颗？`,
+            options: pool.map((d) => ({ id: d.id, label: `${KIND_CN[k]}${d.value}` })),
+            prefer: 'smaller',
+          });
+        }
+      }
+      return wants;
+    }
+    case 'z03-4':
+      // 战车：若攻击区有 > 1 颗攻击骰 → 定"逐个攻击"的顺序（照 z01 裁雨流 / z02 枭首）
+      return B.areas.attack.length > 1
+        ? [
+            {
+              prompt: '「战车」：用全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+              prefer: 'desc',
+            },
+          ]
         : [];
     default:
       return [];
@@ -494,6 +548,108 @@ export function applyChallengeSkill(
       };
       return { spawn, outIds };
     }
+    case 'z03-1': {
+      // 统御战场：将挑战者的**所有攻击骰**点数变更为 1（原地改点 → 走通用"骰面翻转"）
+      for (const d of A.areas.attack) d.value = 1;
+      return { spawn, outIds };
+    }
+    case 'z03-2': {
+      // 震荡斩击：弃"挑战者骰最多的区域"里的至多 4 颗；**弃置不足 4 颗 → 1 次 5 点攻击**
+      const busiest = busiestAreaOfChallenger(g);
+      const pool = A.areas[busiest];
+      const n = Math.min(4, pool.length);
+      const chosen = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      let ids: string[];
+      if (chosen) {
+        ids = chosen.split(',').filter((id) => pool.some((d) => d.id === id));
+      } else {
+        const sorted = [...pool].sort((a, b) => a.value - b.value || (a.id < b.id ? -1 : 1));
+        const mode = g.challenge!.settleMode;
+        ids = (mode === 'against' ? sorted.slice(-n) : sorted.slice(0, n)).map((d) => d.id);
+      }
+      if (ids.length) consumeDice(g, A, busiest, ids);
+      g.challenge!.firedThisTurn = [...(g.challenge!.firedThisTurn ?? []), skill.id];
+      if (ids.length < 4) virtualAttack(g, 'B', 5, { skill: skill.name, owner: 'B' });
+      return { spawn, outIds };
+    }
+    case 'z03-3': {
+      // 战争横扫：每种类型各弃 1 颗；**每有一种"无骰可弃" → 1 次 5 点攻击**（多段走 virtualQueue）
+      let missed = 0;
+      const choices = g.challenge!.decisions?.[skill.id] ?? [];
+      let ci = 0;
+      for (const k of KINDS_ORDER) {
+        const pool = A.areas[k];
+        if (pool.length === 0) {
+          missed += 1;
+          continue;
+        }
+        const want = pool.length > 1 ? choices[ci++] : undefined;
+        const sorted = [...pool].sort((a, b) => a.value - b.value);
+        const id =
+          want && pool.some((d) => d.id === want)
+            ? want
+            : sorted[g.challenge!.settleMode === 'against' ? sorted.length - 1 : 0].id;
+        consumeDice(g, A, k, [id]);
+      }
+      g.challenge!.firedThisTurn = [...(g.challenge!.firedThisTurn ?? []), skill.id];
+      if (missed > 0) {
+        // §19⑨ 多段攻击源：战争横扫
+        g.virtualQueue = Array.from({ length: missed }, () => ({
+          attacker: 'B' as PlayerId,
+          value: 5,
+          label: skill.name,
+          owner: 'B' as PlayerId,
+        }));
+        pumpAttackQueue(g);
+      }
+      return { spawn, outIds };
+    }
+    case 'z03-4': {
+      // 战车：① 1 次 5 点攻击 → ② 攻击骰区有骰则**也用全部攻击骰逐个攻击**（顺序＝代决）→ ③ 攻击结算后补防御（deferred）
+      const atk = B.areas.attack;
+      const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      const q: NonNullable<GameState['virtualQueue']> = [{ attacker: 'B', value: 5, label: skill.name, owner: 'B' }]; // ①
+      if (atk.length > 0) {
+        const diceQ = atk.map((d) => ({
+          attacker: 'B' as PlayerId,
+          value: d.value,
+          label: skill.name,
+          owner: 'B' as PlayerId,
+          dieId: d.id,
+          dieStyle: 'solid' as const,
+        }));
+        if (order === 'asc') diceQ.sort((a, b) => a.value - b.value);
+        else if (order === 'desc') diceQ.sort((a, b) => b.value - a.value);
+        // 区里的排列同序 → "最左先飞"
+        const rank = new Map(diceQ.map((x, i) => [x.dieId, i]));
+        atk.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+        q.push(...diceQ);
+      }
+      // §19⑨ 多段攻击源：战车
+      g.virtualQueue = q;
+      g.challenge!.deferred = { skillId: skill.id, step: 0 }; // ③ 攻击结算后补防御
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z03-5': {
+      // 拔城：若本回合**既未**发动震荡斩击**也未**发动战争横扫 → 弃挑战者全部能力骰 + 2 次 5 点攻击
+      const fired = g.challenge!.firedThisTurn ?? [];
+      if (!fired.includes('z03-2') && !fired.includes('z03-3')) {
+        for (const k of KINDS_ORDER) {
+          const ids = A.areas[k].map((d) => d.id);
+          if (ids.length) consumeDice(g, A, k, ids);
+        }
+        // §19⑨ 多段攻击源：拔城
+        g.virtualQueue = [0, 1].map(() => ({
+          attacker: 'B' as PlayerId,
+          value: 5,
+          label: skill.name,
+          owner: 'B' as PlayerId,
+        }));
+        pumpAttackQueue(g);
+      }
+      return { spawn, outIds };
+    }
     default:
       return { spawn, outIds };
   }
@@ -513,6 +669,7 @@ function runLegendTurn(g: GameState): void {
   g.rerollUsed = 0;
   g.dustRiseNormalCount = 0;
   g.dustRiseActed = false;
+  g.challenge.firedThisTurn = []; // Z03「拔城」：每回合清"本回合已发动"标记
   const legacy = card.legacy;
   logLine(g, `——「${legacy}」的回合——`);
   logLine(g, `「${legacy}」：回合开始`);
@@ -611,6 +768,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     const order = (dec[skill.id] ?? [])[0];
     delete dec[skill.id];
     // 骰子**留在攻击骰区**：队列条目带 dieId/dieStyle，轮到它时才从区里飞出并消耗（界面演"逐颗飞出攻击"）
+    // §19⑨ 多段攻击源：裁雨流 / 枭首
     g.virtualQueue = atk.map((x) => ({
       attacker: 'B' as PlayerId,
       value: x.value,
@@ -645,6 +803,37 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       outIds: [],
       attack: false,
       announce: false, // 移骰步 ≠ 发动帧 → 不重复弹技能名
+    });
+    return;
+  }
+  if (skill.id === 'z03-4') {
+    // 战车 ③（攻击结算后）：补充随机防御骰**至 4**；每补 1 颗 → 孤塔之王受 **2 点真实伤害**
+    const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+    let added = 0;
+    withRng(g, (rng) => {
+      while (g.players.B.areas.defense.length < 4) {
+        const v = rng.rollDie();
+        const die = createDie(newDieId('chg-B-'), v, 'defense');
+        if (!addLegendDefense(g, die)) break; // Z03 无上限，理论必成
+        spawn.push({ id: die.id, value: v, area: 'defense' });
+        added += 1;
+      }
+    });
+    if (added > 0) {
+      dealTrueDamage(g, 'B', added * 2, 'B');
+      logLine(g, `「${card.legacy}」：${skill.name} — 补充 ${added} 个防御骰，受到 ${added * 2} 点真实伤害`);
+    }
+    g.challenge.deferred = undefined;
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: false,
+      announce: false,
     });
     return;
   }

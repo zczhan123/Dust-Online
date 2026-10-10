@@ -57,6 +57,22 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
     expect(z2.skills![0].name).toBe('回合开始');
     expect(z2.skills![0].effect).toContain('8');
   });
+
+  it('Z03 元数据：投 6 个驱动骰、生命 70、门槛 2、无防御骰上限', () => {
+    const z3 = CHALLENGES.find((c) => c.id === 'Z03')!;
+    expect(z3.rollDice).toBe(6);
+    expect(z3.life).toBe(70);
+    expect(z3.defenseMin).toBe(2);
+    expect(z3.defenseCap).toBeUndefined();
+    expect(z3.skills![0].name).toBe('回合开始');
+    expect(z3.skills![0].effect).toContain('6');
+    expect(z3.skills![2].slots).toEqual([{ kind: 'same', count: 3 }]); // 震荡斩击＝3 同点一组
+    expect(z3.skills![3].slots).toEqual([
+      { kind: 'pips', count: 1, faces: [1, 2] },
+      { kind: 'pips', count: 1, faces: [3, 4] },
+      { kind: 'pips', count: 1, faces: [5, 6] },
+    ]);
+  });
 });
 
 describe('挑战模式特殊规则（技能削弱）· 唯一数据来源', () => {

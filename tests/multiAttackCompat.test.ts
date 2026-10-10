@@ -2,7 +2,7 @@
 // §19⑨「多段攻击三件套」门禁：自动盘点源码里的多段来源 + 禁止裸调 doAttack 造多段 + 联动用例。
 // 新增第 4 个多段来源（走 attackQueue / virtualQueue）而没登记 → 本文件必须变红。
 import { describe, it, expect } from 'vitest';
-import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
+import { createGame, createChallengeGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
 import { dianxingValuesOf } from '../src/core/engine/combat';
 import type { GameState } from '../src/core/model/types';
 
@@ -13,8 +13,8 @@ const RAW = import.meta.glob('../src/core/engine/*.ts', {
   eager: true,
 }) as Record<string, string>;
 
-/** 多段攻击的"来源"＝创建 attackQueue / virtualQueue 的那一行（`= null` 清理不算） */
-const SOURCE_RE = /g\.(attackQueue|virtualQueue)\s*=\s*(\{|\[)/;
+/** 多段攻击的"来源"＝创建 attackQueue / virtualQueue 的任何非空赋值（`= null` / `= undefined` / `===` 不算） */
+const SOURCE_RE = /g\.(attackQueue|virtualQueue)\s*=\s*(?!\s*(?:null|undefined)\b)(?!=)/;
 /** 来源上方必须有的锚注释：`// §19⑨ 多段攻击源：<技能名>` */
 const ANCHOR_RE = /§19⑨ 多段攻击源：(.+)/;
 
@@ -57,22 +57,18 @@ const g013 = (heroA: [string, string, string] = ['013', '002', '003']): GameStat
 describe('§19⑨ 多段攻击三件套 · 门禁（自动盘点源码）', () => {
   const hits = collectHits();
 
-  it('源码里的多段来源恰好 2 处（013/A08 电刑 + A01 不败之王）', () => {
-    expect(hits.map((h) => `${h.file}:${h.queue}`).sort()).toEqual([
-      'game.ts:attackQueue',
-      'skills.ts:virtualQueue',
-    ]);
+  it('源码里的多段来源：game.ts（attackQueue + virtualQueue）+ skills.ts（virtualQueue）', () => {
+    const uniq = [...new Set(hits.map((h) => `${h.file}:${h.queue}`))].sort();
+    expect(uniq).toEqual(['game.ts:attackQueue', 'game.ts:virtualQueue', 'skills.ts:virtualQueue']);
   });
 
-  it('每个来源上方都有 `§19⑨ 多段攻击源：…` 锚注释，且登记的成员覆盖三件套', () => {
+  it('每个来源上方都有 `§19⑨ 多段攻击源：…` 锚注释，且登记的成员覆盖全部多段技能', () => {
     const missing = hits.filter((h) => !ANCHOR_RE.test(h.prev));
     expect(missing.map((h) => `${h.file}:${h.line}`)).toEqual([]); // 新来源没加锚注释 → 这里红
-    const aq = hits.find((h) => h.queue === 'attackQueue')!;
-    const vq = hits.find((h) => h.queue === 'virtualQueue')!;
-    const anchorOf = (h: Hit) => ANCHOR_RE.exec(h.prev)![1];
-    expect(anchorOf(aq)).toContain('013');
-    expect(anchorOf(aq)).toContain('A08');
-    expect(anchorOf(vq)).toContain('A01');
+    const allAnchors = hits.map((h) => ANCHOR_RE.exec(h.prev)![1]).join('|');
+    for (const name of ['013', 'A08', 'A01', '裁雨流', '枭首', '战争横扫', '战车', '拔城']) {
+      expect(allAnchors).toContain(name);
+    }
   });
 
   it('禁止裸调 doAttack 造多段：调用点只允许出现在 game.ts（combat.ts 仅定义 1 处）', () => {
@@ -122,6 +118,15 @@ describe('§19⑨ 多段攻击三件套 · 联动（中途待决策解决后自�
     const g = g013();
     g.players.A.areas.meditation = [med('m1', 2)];
     g.virtualQueue = [{ attacker: 'A', value: 5, label: '不败之王', owner: 'A' }];
+    g.pending = { kind: 'leibao', player: 'A' };
+    applyAction(g, getLegalActions(g)[0]);
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack?.value ?? g.pendingAttack?.baseValue).toBe(5);
+  });
+
+  it('Z03 拔城（virtualQueue，挑战模式）：中途弹出待决策 → 解决后自动开始下一段', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z03', challenger: ['001', '002', '003'] });
+    g.virtualQueue = [{ attacker: 'B', value: 5, label: '拔城', owner: 'B' }];
     g.pending = { kind: 'leibao', player: 'A' };
     applyAction(g, getLegalActions(g)[0]);
     expect(g.pending).toBeNull();
