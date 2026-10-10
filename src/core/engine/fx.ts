@@ -143,7 +143,10 @@ export type FxEvent =
        *   这些骰会被**立刻移进攻击队列**（结算后区域里看不到）→ 不能靠"区域差集"推，**必须由引擎报出**；
        *   → 界面演「中间冒出 → 飞入对应骰区」；
        * - `attack`：本步是否紧接着发起攻击（界面据此把攻击动画整体后移）；
-       * - `outIds`：被「防御骰上限」**挤出去**的旧骰 id（先出后进；界面走通用"飞中间淡出"）。
+       * - `outIds`：被「防御骰上限」**挤出去**的旧骰 id（先出后进；界面走通用"飞中间淡出"）；
+       * - `announce`：本步是否为**一条技能的"发动帧"**（界面据此弹技能名横幅）——
+       *   ⚠️ **不要**用 `consumed.length > 0` 当替身：`∞`/无槽技能（龙游万象 / 雨落狂流）**不消耗驱动骰**，
+       *   但仍是"发动"、必须弹名；而遁入暗影的后续移骰步 `consumed` 也为空、却**不该重复弹名**。
        */
       kind: 'legendSkill';
       player: PlayerId;
@@ -153,6 +156,7 @@ export type FxEvent =
       spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[];
       outIds: string[];
       attack: boolean;
+      announce?: boolean;
     };
 
 let buf: FxEvent[] = [];

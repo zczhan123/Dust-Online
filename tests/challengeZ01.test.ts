@@ -117,7 +117,9 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     g.challenge!.resumeAt = 5;
     g.challenge!.driven = [die('d3a', 3), die('d3b', 3), die('d4a', 4), die('d4b', 4), die('d4c', 4)];
     g.players.A.areas.defense = []; // 挑战者不抵挡 → 全部造成伤害
-    applyAction(g, { t: 'challengeStep' }); // 发动裁雨流 → 队列 + 第一次攻击
+    applyAction(g, { t: 'challengeStep' }); // 发动裁雨流 → 先把驱动骰移入攻击骰区（本步不攻击）
+    expect(g.pendingAttack).toBeNull();
+    applyAction(g, { t: 'challengeStep' }); // 移入之后 → 自动定顺序 + 第一次攻击
     expect(g.pendingAttack).toBeTruthy();
     let guard = 0;
     while (g.pendingAttack && guard++ < 20) applyAction(g, { t: 'block' }); // 逐段承受（不抵挡）
@@ -132,7 +134,8 @@ describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨�
     g.challenge!.resumeAt = 5;
     g.challenge!.driven = [die('d3a', 3), die('d4a', 4)];
     g.players.A.areas.defense = [];
-    applyAction(g, { t: 'challengeStep' });
+    applyAction(g, { t: 'challengeStep' }); // 先把驱动骰移入攻击骰区
+    applyAction(g, { t: 'challengeStep' }); // 移入之后 → 弹顺序面板
     expect(g.pending?.kind).toBe('challengePick');
     if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
     expect(g.pending.options.map((o) => o.id)).toEqual(['asc', 'desc']);

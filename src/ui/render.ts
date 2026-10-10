@@ -6304,9 +6304,13 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   /** 挑战模式：本帧传奇**新得到**的骰子 → 它们不交给通用「获得骰」（`playLegendSpawn` 独占负责） */
   const legendAddIds = new Set<string>();
   if (legendSkillEv) {
-    // 技能名只在"报消耗的那一帧"弹（代决帧 / 无代决的技能帧）；选完后的那一帧只做第二步/第三步
-    if (legendSkillEv.consumed.length > 0) {
+    // 技能名只在**"发动帧"**弹（由引擎 `announce` 决定）：∞/无槽技能（龙游万象 / 雨落狂流）也弹；
+    // 续跑帧、遁入暗影的后续移骰步不弹（避免重复）。**不要**用 `consumed.length > 0` 当替身。
+    if (legendSkillEv.announce) {
       legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, '', MOTION.legendUltimateHold));
+    }
+    // 驱动骰进槽过场：只在有消耗时演（∞/无槽技能没有）
+    if (legendSkillEv.consumed.length > 0) {
       const items: LegendConsumeItem[] = legendSkillEv.consumed
         .map((c) => {
           const pd = prevDice.get(c.id);
@@ -6317,10 +6321,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
       legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
       legendDur = Math.max(legendDur, legendConsumeDur);
-      // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"，操作区据此延后显示
-      if (state.pending?.kind === 'challengePick') {
-        legendPickHoldUntil = performance.now() + legendDur + 30;
-      }
     }
     // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
     //   **动画隔离**：这几颗**只由 `playLegendSpawn` 负责**（从通用「获得骰」里排除），落点＝区里行尾并排，
@@ -6336,6 +6336,10 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
           legendSkillEv.spawn.map((s) => s.id),
         ),
       );
+    }
+    // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"（等 技能名 + 进槽 + 本步移骰 都播完）
+    if (state.pending?.kind === 'challengePick') {
+      legendPickHoldUntil = performance.now() + legendDur + 30;
     }
   }
   // 传奇这一步"触发攻击"时：攻击动画后移到「驱骰进槽」＋（本步有新骰则再等）「新骰飞入」之后。

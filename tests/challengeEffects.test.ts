@@ -81,12 +81,15 @@ describe('挑战模式 · Z02 非攻击类效果', () => {
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 8, unblockable: true, physical: false });
   });
 
-  it('枭首：攻击骰数 > 挑战者防御骰数 → 用全部攻击骰逐个攻击（进攻击队列；骰子仍在区里，**结算后才移走**）', () => {
+  it('枭首：先移入攻击骰区，再到 deferred 逐个攻击（骰子仍在区里，**结算后才移走**）', () => {
     const g = make();
     g.players.A.areas.defense = [];
     applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
-    // 发起攻击时骰子**留在攻击骰区**（界面里"新骰进区并与旧骰并排"才不会重叠）
+    // 本步只"移入攻击骰区"（不攻击）；骰子留在区里（界面：新骰进区与旧骰并排，不重叠）
     expect(g.players.B.areas.attack).toHaveLength(1);
+    expect(g.pendingAttack).toBeNull();
+    expect(g.challenge!.deferred).toMatchObject({ skillId: 'z02-4' });
+    resolveLegendDeferred(g, CARD); // 移入之后才发起攻击
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 6 });
     // 挑战者承受这次攻击 → 结算 → 该骰才从攻击骰区移走
     applyAction(g, { t: 'block' });

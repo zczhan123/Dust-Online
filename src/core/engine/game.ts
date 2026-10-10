@@ -195,7 +195,6 @@ function syncLegendFengmang(g: GameState): void {
 function challengeDecisions(
   g: GameState,
   skill: ChallengeSkill,
-  consumedCount = 0,
   atDeferred = false,
 ): { prompt: string; options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' }[] {
   const A = g.players.A;
@@ -222,22 +221,11 @@ function challengeDecisions(
         },
       ];
     }
-    case 'z01-5': {
-      // 裁雨流：用全部攻击骰逐个攻击 → 需定顺序（>1 颗时才问）
-      const atk = B.areas.attack.length + consumedCount;
-      return atk > 1
-        ? [
-            {
-              prompt: '「裁雨流」：用全部攻击骰逐个攻击，按什么顺序？',
-              options: [
-                { id: 'asc', label: '由小到大' },
-                { id: 'desc', label: '由大到小' },
-              ],
-              prefer: 'desc',
-            },
-          ]
-        : [];
-    }
+    case 'z01-5':
+    case 'z02-4':
+      // 裁雨流 / 枭首：「攻击顺序」**不在此处问**——必须等"驱动骰已移入攻击骰区"之后再问
+      //（顺序代决挪到 `resolveLegendDeferred`）。这里返回 []，让 `applyChallengeSkill` 先做"移动到攻击骰区"。
+      return [];
     case 'z02-2':
       return A.areas.defense.length > 1
         ? [{ prompt: '「葬敌的完杀」：留哪 1 颗防御骰？（其余弃置）', options: defOpts(), prefer: 'larger' }]
@@ -247,22 +235,6 @@ function challengeDecisions(
       return atDeferred && A.areas.defense.length > 0
         ? [{ prompt: '「暗夜凶神」：弃置挑战者哪 1 颗防御骰？', options: defOpts(), prefer: 'smaller' }]
         : [];
-    case 'z02-4': {
-      // 会用它全部攻击骰逐个攻击时才需要定顺序
-      const atk = B.areas.attack.length + consumedCount;
-      return atk > A.areas.defense.length && atk > 1
-        ? [
-            {
-              prompt: '「枭首」：用全部攻击骰逐个攻击，按什么顺序？',
-              options: [
-                { id: 'asc', label: '由小到大' },
-                { id: 'desc', label: '由大到小' },
-              ],
-              prefer: 'desc',
-            },
-          ]
-        : [];
-    }
     default:
       return [];
   }
@@ -379,25 +351,11 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     }
     case 'z01-5': {
-      // 裁雨流：本条驱骰（无限 3/4 点）全部移入攻击骰区 → 用**所有攻击骰**逐个攻击 → 前 3 次"造成伤害"的攻击骰移防御骰区
+      // 裁雨流：① 本条驱骰（无限 3/4 点）全部移入攻击骰区（**先移、报 spawn**）；
+      //   ② "攻击顺序代决"与"用全部攻击骰逐个攻击"**延后到** `resolveLegendDeferred`（顺序要在移入之后才问）。
       for (const d of consumed) gain('attack', d.value);
       g.challenge!.caiyuliuHits = 0;
-      if (B.areas.attack.length > 0) {
-        g.virtualQueue = B.areas.attack.map((d) => ({
-          attacker: 'B' as PlayerId,
-          value: d.value,
-          label: '裁雨流',
-          owner: 'B' as PlayerId,
-          dieId: d.id,
-          dieStyle: 'solid' as const,
-        }));
-        const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
-        if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
-        else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
-        const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
-        B.areas.attack.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
-        pumpAttackQueue(g);
-      }
+      g.challenge!.deferred = { skillId: skill.id, step: 0 };
       return { spawn, outIds };
     }
     case 'z02-0':
@@ -432,26 +390,9 @@ export function applyChallengeSkill(
     }
     case 'z02-4': {
       for (const d of consumed) gain('attack', d.value);
-      // 若（传奇）攻击骰数 > 挑战者防御骰数 → 用全部攻击骰逐个攻击（走统一多段机制 virtualQueue）
-      if (B.areas.attack.length > A.areas.defense.length) {
-        // 骰子**留在攻击骰区**：队列条目带 dieId/dieStyle，轮到它时才从区里飞出并消耗（界面演"逐颗飞出攻击"）
-        g.virtualQueue = B.areas.attack.map((d) => ({
-          attacker: 'B' as PlayerId,
-          value: d.value,
-          label: '枭首',
-          owner: 'B' as PlayerId,
-          dieId: d.id,
-          dieStyle: 'solid' as const,
-        }));
-        // 代决（模式 1）：攻击顺序（未代决时保持原顺序）
-        const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
-        if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
-        else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
-        // 区里的**排列也按同一顺序重排** → "最左边那颗先飞出去"，观感不错位
-        const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
-        B.areas.attack.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
-        pumpAttackQueue(g);
-      }
+      // 枭首：① 本技能驱动骰全部移入攻击骰区（**先移、报 spawn**）；
+      //   ② "是否攻击 + 攻击顺序代决 + 逐个攻击"**延后到** `resolveLegendDeferred`（顺序要在移入之后才问）。
+      g.challenge!.deferred = { skillId: skill.id, step: 0 };
       return { spawn, outIds };
     }
     case 'z02-5': {
@@ -514,7 +455,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
   const A = g.players.A;
   if (skill.id === 'z02-3') {
     // ② 弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；**攻击结算之后**才问）
-    const wants = challengeDecisions(g, skill, 0, true);
+    const wants = challengeDecisions(g, skill, true);
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {
@@ -544,6 +485,59 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     syncLegendFengmang(g);
     logLine(g, `「${card.legacy}」：${skill.name} — 弃置挑战者 1 个防御骰，计数 +1`);
     g.challenge.deferred = undefined;
+    return;
+  }
+  if (skill.id === 'z01-5' || skill.id === 'z02-4') {
+    // 裁雨流 / 枭首：驱动骰**已移入攻击骰区**（`applyChallengeSkill` 做的）→ 此刻才问"攻击顺序"、再逐个攻击。
+    const atk = g.players.B.areas.attack;
+    // 枭首：只有"攻击骰数 > 挑战者防御骰数"才真的攻击（否则本技能只移入、不打，也不问顺序）
+    if (skill.id === 'z02-4' && atk.length <= A.areas.defense.length) {
+      g.challenge.deferred = undefined;
+      return;
+    }
+    if (atk.length === 0) {
+      g.challenge.deferred = undefined;
+      return;
+    }
+    const dec = (g.challenge.decisions ??= {});
+    const orderOpts = [
+      { id: 'asc', label: '由小到大' },
+      { id: 'desc', label: '由大到小' },
+    ];
+    if (atk.length > 1 && !(dec[skill.id] ?? [])[0]) {
+      const mode = g.challenge.settleMode;
+      if (mode && mode !== 'manual') {
+        // 自动结算（有利/不利）：favor→desc、against→asc（与 `autoPick` 口径一致）
+        dec[skill.id] = [autoPick({ options: orderOpts, prefer: 'desc' }, mode)!];
+      } else {
+        g.challenge.activeSkill = (card.skills ?? []).indexOf(skill);
+        g.pending = {
+          kind: 'challengePick',
+          player: 'A',
+          prompt: `「${skill.name}」：用全部攻击骰逐个攻击，按什么顺序？`,
+          options: orderOpts,
+        };
+        return; // 停在代决
+      }
+    }
+    const order = (dec[skill.id] ?? [])[0];
+    delete dec[skill.id];
+    // 骰子**留在攻击骰区**：队列条目带 dieId/dieStyle，轮到它时才从区里飞出并消耗（界面演"逐颗飞出攻击"）
+    g.virtualQueue = atk.map((x) => ({
+      attacker: 'B' as PlayerId,
+      value: x.value,
+      label: skill.name,
+      owner: 'B' as PlayerId,
+      dieId: x.id,
+      dieStyle: 'solid' as const,
+    }));
+    if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+    else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+    // 区里的**排列也按同一顺序重排** → "最左边那颗先飞出去"，观感不错位
+    const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
+    atk.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+    g.challenge.deferred = undefined;
+    pumpAttackQueue(g);
     return;
   }
   if (skill.id === 'z02-5') {
@@ -588,6 +582,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       spawn,
       outIds: [],
       attack: true,
+      announce: false, // 遁入的后续移骰步 ≠ 发动帧 → 不重复弹技能名
     });
     return;
   }
@@ -690,7 +685,7 @@ function continueLegendTurn(g: GameState, once = false): void {
       }
     }
     // 代决（模式 1）：本条需要的选择还没收集齐 → **先把骰子扣下、发第一步动效**，再挂代决
-    const wants = challengeDecisions(g, skill, consumed.length);
+    const wants = challengeDecisions(g, skill);
     const dec = (g.challenge.decisions ??= {});
     const got = dec[skill.id] ?? [];
     if (wants.length > got.length) {
@@ -722,6 +717,7 @@ function continueLegendTurn(g: GameState, once = false): void {
             spawn: [],
             outIds: [],
             attack: false,
+            announce: true, // 代决帧＝这条技能的"发动帧" → 弹技能名
           });
         }
         const w = wants[got.length];
@@ -746,6 +742,7 @@ function continueLegendTurn(g: GameState, once = false): void {
       spawn: res.spawn,
       outIds: res.outIds,
       attack: !!(g.pendingAttack || g.virtualQueue),
+      announce: !resuming, // 发动帧（非续跑帧）→ 弹技能名；续跑帧不重复弹
     });
     delete dec[skill.id];
     g.challenge.slot = [];

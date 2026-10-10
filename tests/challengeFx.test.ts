@@ -5,6 +5,7 @@ import {
   skipInitialReroll,
   applyAction,
   applyChallengeSkill,
+  resolveLegendDeferred,
   getLegalActions,
 } from '../src/core/engine/game';
 import { fxTake, type FxEvent } from '../src/core/engine/fx';
@@ -84,12 +85,25 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(events.some((e) => e.spawn.length > 0)).toBe(true);
   });
 
-  it('枭首触发攻击时：新产生的骰被立刻移出攻击骰区 → 仍由 legendSkill.spawn 报出（界面才能演"先进区再打"）', () => {
+  it('∞/无槽技能（龙游万象）也报 announce=true（不消耗驱动骰也要弹技能名）', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    fxTake();
+    g.challenge!.resumeAt = 1; // z01-1 龙游万象（∞）
+    applyAction(g, { t: 'challengeStep' });
+    const ev = fxTake().find((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
+    expect(ev).toBeTruthy();
+    expect(ev!.skillKey).toBe('z01-1');
+    expect(ev!.consumed).toEqual([]); // ∞＝不消耗驱动骰
+    expect(ev!.announce).toBe(true); // 但仍是一条“发动”→ 界面弹技能名
+  });
+
+  it('枭首：驱动骰移入攻击骰区由 legendSkill.spawn 报出，本步 attack=false（攻击延后到 deferred）', () => {
     const g = CHAL();
     skipInitialReroll(g);
     fxTake();
-    // 清空挑战者防御骰 → 枭首一旦跑起来必然触发攻击（攻击骰数 > 0）
     let got: Extract<FxEvent, { kind: 'legendSkill' }> | null = null;
+    let inAreaAtFrame = false;
     let guard = 0;
     while (g.activePlayer === 'B' && guard++ < 12) {
       if (g.pendingAttack) {
@@ -110,23 +124,29 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
       }
       applyAction(g, { t: 'challengeStep' });
       for (const e of fxTake()) {
-        if (e.kind === 'legendSkill' && e.skillKey === 'z02-4') got = e;
+        if (e.kind === 'legendSkill' && e.skillKey === 'z02-4' && !got) {
+          got = e;
+          // 本步只"移入" → 骰子**留在**攻击骰区（供界面演"先进区、再逐颗飞出"）
+          inAreaAtFrame = e.spawn.every((s) => g.players.B.areas[s.area].some((d) => d.id === s.id));
+        }
       }
     }
     expect(got).toBeTruthy();
-    expect(got!.attack).toBe(true);
     expect(got!.spawn.length).toBeGreaterThan(0);
-    // 轮到的第一颗已从攻击骰区消耗掉（其余仍留在区里 → 界面演"逐颗飞出"）
-    expect(got!.spawn.every((s) => !g.players.B.areas[s.area].some((d) => d.id === s.id))).toBe(true);
+    expect(got!.attack).toBe(false); // 攻击延后到 resolveLegendDeferred
+    expect(inAreaAtFrame).toBe(true); // 移入的骰当帧仍在攻击骰区
   });
 
   it('枭首（D）：攻击骰**留在攻击骰区**，轮到它攻击、**结算后**才从区里移走（不再一次清空）', () => {
     const g = CHAL();
     g.players.A.areas.defense = []; // 保证满足攻击条件
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 3, 'attack')];
+    g.challenge!.decisions = { 'z02-4': ['asc'] }; // 直接给顺序（跳过代决面板）
     applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
-    // 3 颗（旧 2 + 新 1）全部发起攻击；**这一帧都还在区里**（界面：新骰进区与旧骰并排，不重叠）
+    // 先移入：3 颗（旧 2 + 新 1）都在攻击骰区；**这一帧不攻击**
     expect(g.players.B.areas.attack.map((d) => d.value).sort((a, b) => a - b)).toEqual([2, 3, 6]);
+    expect(g.pendingAttack).toBeNull();
+    resolveLegendDeferred(g, CARD); // 移入之后才逐个攻击
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', sourceDieId: 'b1' });
     expect(g.pendingAttack?.dieStyle).toBe('solid');
     expect(g.virtualQueue?.length).toBe(2);
@@ -141,6 +161,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 5, 'attack')];
     g.challenge!.decisions = { 'z02-4': ['desc'] };
     applyChallengeSkill(g, CARD, SK('z02-4'), [die('k1', 6, 'meditation')]);
+    resolveLegendDeferred(g, CARD); // 顺序代决在"移入之后"才应用
     // 队列/区里都按"由大到小"：6 → 5 → 2
     expect(g.players.B.areas.attack.map((d) => d.value)).toEqual([6, 5, 2]);
     expect(g.virtualQueue?.map((q) => q.value)).toEqual([5, 2]);
@@ -163,6 +184,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     const fx1 = fxTake().filter((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
     expect(fx1.length).toBe(1);
     expect(fx1[0].consumed.length).toBeGreaterThan(0); // 代决帧：报消耗（界面＝弹技能名 + 驱骰进槽）
+    expect(fx1[0].announce).toBe(true); // 代决帧＝发动帧 → 弹技能名
     expect(fx1[0].spawn).toEqual([]);
     expect(fx1[0].attack).toBe(false);
     expect(g.pending?.kind).toBe('challengePick');
@@ -172,6 +194,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     const fx2 = fxTake().filter((e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill');
     expect(fx2.length).toBe(1);
     expect(fx2[0].consumed).toEqual([]); // 不重复报消耗（界面不重复弹名 / 不重复进槽）
+    expect(fx2[0].announce).toBe(false); // 续跑帧不重复弹名
     expect(fx2[0].spawn.length).toBeGreaterThan(0);
   });
 

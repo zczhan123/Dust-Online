@@ -18,7 +18,8 @@ describe('挑战模式 · 结算模式（自动·有利/不利）', () => {
       g.challenge!.driven = [die('d6', 6)];
       g.players.B.areas.attack = [die('a1', 1, 'attack'), die('a2', 2, 'attack')];
       g.players.A.areas.defense = [];
-      applyAction(g, { t: 'challengeStep' });
+      applyAction(g, { t: 'challengeStep' }); // 枭首：先把驱动骰移入攻击骰区（本步不攻击）
+      applyAction(g, { t: 'challengeStep' }); // 移入之后 → 自动定顺序并逐个攻击
       const seq = [g.pendingAttack?.baseValue, ...(g.virtualQueue ?? []).map((x) => x.value)];
       expect(seq).toEqual(expectSeq);
     }

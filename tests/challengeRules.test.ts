@@ -5,6 +5,7 @@ import {
   skipInitialReroll,
   applyAction,
   applyChallengeSkill,
+  resolveLegendDeferred,
   getLegalActions,
 } from '../src/core/engine/game';
 import { legendCanBlock, isInertSkill } from '../src/core/engine/challenge';
@@ -115,6 +116,8 @@ describe('挑战模式 · 规则与削弱', () => {
     g.challenge!.decisions = { 'z02-4': ['asc'] };
     const skill = Z02.skills!.find((s) => s.id === 'z02-4')!;
     applyChallengeSkill(g, Z02, skill, [die('k1', 6, 'meditation')]);
+    expect(g.pendingAttack).toBeNull(); // 本步只移入攻击骰区
+    resolveLegendDeferred(g, Z02); // 移入之后才按 asc 排序并攻击
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 2 });
   });
 });
