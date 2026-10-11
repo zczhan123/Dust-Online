@@ -357,6 +357,7 @@
 12. **隔离红线（动动画/渲染前必读）**：挑战模式是**独立模式**——它的专属分支、战报称呼、阶段横幅、对局动作、以及"部分神器被削弱"**都不得外溢到标准模式**（也**不得反向误伤挑战者自己**）。规则：
    - 任何挑战专属逻辑**一律**以 `g.mode === 'challenge'` 为门禁；凡涉及"**哪一方**"的一律**再加玩家判断**（如 `isInertSkill`），**禁止**只凭"某技能/某状态存在"就改行为。
    - 护栏测试：**`tests/challengeIsolation.test.ts`**（标准局动作表无 `challengeStep`/`challengePick`、战报仍「玩家B」、横幅照弹尘起/主要、尘落照推、`virtualAttack` 口径不回归、削弱只作用在正确一侧）。**动 `render.ts` / `motion.ts` / `styles.css` 之前先跑它；改完再跑一遍。**
+   - **验证范围（2026-10-11 用户定）**：挑战模式改动的**日常验证**＝"全量 **减去** 联机（`net*` / `renderOnline*`）+ 传奇英雄面板（`legends*` / `legendNames` / `legendUltimates` / `renderLegend*` / `renderL1*`）"；**Z 卡之间不会对打 → 无跨 Z 兼容测试**。**提交前的最终门禁仍跑完整全量**（含联机），确认无系统性破坏。
    - 挑战模式**不做联机、不做传奇英雄面板**（刻意的）。
 13. **新卡开发清单**：`..\plans\挑战模式-新卡开发清单.md`——转写 Z01 / Z03–Z12 **动手前先读**（15 条踩坑 + 隔离 / 代决 / 命名 / 测试口径）。
 14. **传奇回合的过场动画（2026-10-08）**：引擎**只报事实**（2 个 fx 事件），界面照 `fx` 编排：`legendRoll` → 驱动骰从**快速操作栏中心**并排冒出、飞入「临时驱动骰区域」（复用通用"获得骰"动画 `playLegendRoll`）；`legendSkill` → 中央弹**技能名**（**复用必杀横幅** `playUltimate`，`prefix` 传空）＋ 被选中的驱动骰「临时区 → 中间 → 驱动骰槽 → 消失」（`playLegendConsume`，影子演出）。第二步"新骰飞入对应区"由**通用获得动画**承担但推迟到第一步之后（`beforeAddsMs`），**不播**驱动骰槽→区域的搬家（引擎本就是新建骰）；第三步攻击接在第二步之后（`attackStart` 的 `costDur` 加 `legendAttackDelay`）。**攻击延迟公式（2026-10-09 提速）＝ `legendConsumeDur +（本步有新骰 ? addsDuration() : 0）`**，**不再叠加技能名横幅的整段停留**（旧式 `legendDur + addsDuration()` 会被横幅 1.96s 撑满、且"无新骰"时白等 0.99s → 灰骰迟迟不出）；挑战技能名横幅停留＝`MOTION.legendUltimateHold`(800ms)，**仅挑战**、不动标准必杀横幅。
@@ -370,7 +371,7 @@
     - **名字**：操作栏/提示/生命条一律用 `playerName(ctx, id)`（挑战模式 B→「昔日传奇」；标准模式→「玩家A/B」；联机→昵称）。**禁止**再手写 `玩家${id}`（否则操作栏会漏出「玩家B」）。
     - **技能名标色**：提示栏技能名用 `.hint-skill player-X`，**按"所属方"取色**（昔传=B 红；挑战者=A 蓝）——**不按名字**，避免神器与昔传技能重名时串色。
     - **过场动画落点**：昔传新骰落点走 `playLegendSpawn`——**优先取该真骰的实测矩形**（按 id 找 DOM 真骰；含枭首"按升/降序重排后"的最终排列）、真骰不在 DOM 才退回"按槽位计算"；且 `pool` 是**中心点**，左上角须减半个骰（26/2）。所有 Z 卡共用。
-    - **持续技能常亮**：数据字段 `ChallengeSkill.alwaysOn`（`true` 始终 / `'count'` 计数>0）。
+    - **持续技能常亮**：数据字段 `ChallengeSkill.alwaysOn`（`true` 始终 / `'count'` 计数>0 / `'lifeBonus'` 生命差攻击加成>0，Z05「绝境天神」）。
     - **护栏**：`tests/renderChallengeRules.test.ts`（操作栏「昔日传奇」+ `.hint-skill.player-B`）；动画无法 jsdom 测 → **交用户实玩反馈**（**不主动起 dev 核对**，见「工作流」的"验证只走自动化"）。
 16. **本会话教训（2026-10-10；转写新 Z 卡时逐条自查）**：
     - **技能名横幅判据＝显式 `announce`**：`legendSkill` 事件带 `announce`（发动帧 `true` / 续跑帧 `!resuming` / 遁入的后续移骰步 `false`）；界面**按 `announce` 弹名**。**禁止**再用 `consumed.length > 0` 当"发动帧"替身——`∞`/无槽技能（龙游万象/雨落狂流）不消耗驱动骰、但仍是发动，必须弹名。
@@ -386,3 +387,8 @@
       - **改完必须用 `grep`（ripgrep）全量清点"写防御骰区"的点**（`areas\.defense\.push`）**核验只出现在 `addLegendDefense` 一处**，**不许只补显眼那处**。真实事故：2026-10-10 只修了 `gain`/`placeDefenseFrom`、**漏了 `combat.ts` 里「裁雨流」的 `areas.defense.push`** → 防御骰仍能超上限（用户实测发现）。门禁测试 `tests/challengeDefenseCap.test.ts` 扫源码锁死。
       - （镜像提醒：方向随"移入哪一方 / 获得还是弃置"变——**弃置挑战者**的防御骰（雨落狂流）＝有利**弃小**保大。）
     - **挑战"正在结算"提示必须排除 `pendingAttack`**：否则昔传攻击、挑战者选是否抵挡时，该分支抢先 `return`、盖住"被攻击提示（含加伤）"。
+    - **"每投出 1 组…"类技能**（Z05 数罪并罚/电刑）：卡面 `skill.perGroup=true` → 各槽**各自独立匹配、可只匹配一部分**（`challenge.ts` 的 `matchGroupsPartial`）；新槽形状 `kind:'exact'`＝一组的**点数多重集恰好等于** `faces`（如 `[1,1]`/`[1,6]`/`[6,6]`）。**别**套用 `matchSlots`（那是"全填才发"）。
+    - **传奇"回合开始额外投骰 / 因生命差加伤"**：写进**卡字段**（`rollDiceBonusOnDamage` + `attackBonusPer10MissingLife`，Z05「绝境天神」），**别按 `skill.id` 硬编码**。前者在 `runLegendTurn` 读 `challenge.damagedDuringChallengerTurn`（`noteLifeDrop` 置位、投完清零；+2 时发 `legendSkill`（`announce`）**弹技能名**），后者走 `attackDamageBonus`（`legendAttackBonus`）。
+    - **提示栏补色（2026-10-11 查漏）**：提示栏里凡"按名字出现的技能名"都要带 `color`（按**所属方**）→ 渲染成 `.hint-skill player-X`。**易漏点**：攻击加成来源（`bonus.label`，属**发起攻击方**）、减半来源（`halveReason`，属**防守方**）、抵挡限制（`blockKind` 的技能名，属攻击方）、以及 `pd` 兜底分支的内联技能名（梦魇/凋零/千劫/金刚）。新增提示分支照 `phaseHintInner` 的 `color` part 写法。
+    - **Z05「不可饶恕」自动结算**：**专用**打分 `z05ChongfuAutoPick`——候选＝并列点数，关键字 `(被弃颗数 → 区域权重 攻击1/防御2/冥想4 → 点值)`；有利取小、不利取大。**不改**通用 `autoPick`、暂不推广别卡。
+    - **"因多组触发的攻击"必须带 `legendGroup` 提示**（Z05 数罪并罚/电刑）：`{index,total}`＝组序号/组数，`sub/subTotal`＝组内第几段；提示栏显示 `（第 K / N 组）`，组内 >1 段时 `（第 K / N 组 · 本组第 j / m 次）`。建队时写进 `virtualQueue` 条目（`pumpAttackQueue` 带到 `pa.legendGroup`）。**今后凡"多组"产生的攻击，照办**（遁入暗影每组 1 段 → 只有组序号）。

@@ -4,12 +4,13 @@
  * 转写规则见仓库外 `尘起时刻_挑战卡规格_Z01-Z12.md`（文本记法 + 结构化 schema）。
  */
 
-export type ChallengeSlotKind = 'pips' | 'any' | 'same' | 'straight';
+export type ChallengeSlotKind = 'pips' | 'any' | 'same' | 'straight' | 'exact';
 
 export interface ChallengeSlot {
   kind: ChallengeSlotKind;
   count: number;
-  /** kind==='pips' 时必填：每格可接受的点数（count>1＝任选；逐格不同＝拆成多条 count:1） */
+  /** kind==='pips'：每格可接受的点数（count>1＝任选；逐格不同＝拆成多条 count:1）。
+   *  kind==='exact'：一组骰的**点数多重集恰好等于**它（升序，如 `[1,1]` / `[1,6]` / `[6,6]`）。Z05「数罪并罚」用。 */
   faces?: number[];
   /** **无限数量**（规则书 §7）：本槽容纳**全部**符合 `faces` 的驱动骰（`count` 忽略）。如 Z01「裁雨流」。 */
   unlimited?: boolean;
@@ -32,12 +33,18 @@ export interface ChallengeSkill {
    */
   maxSameGroups?: number;
   /**
+   * **逐组独立**（"每投出 1 组…"类，Z05「数罪并罚」「电刑」）：各槽**各自独立匹配、可只匹配一部分**
+   * （不是"全填才发"）；效果按**匹配到的组数**结算。缺省＝全填才发。
+   */
+  perGroup?: boolean;
+  /**
    * 该技能是否"**持续生效中**"（＝面板技能列里常亮）。
    * - `true`：始终生效；
    * - `'count'`：当 `g.challenge.count > 0` 时生效（Z02「锋芒」）；
+   * - `'lifeBonus'`：当"因生命差产生的攻击加成 > 0"时生效（Z05「绝境天神」：生命每低 10 点就亮）；
    * 缺省＝不常亮。**数据驱动**（勿再按 `skill.id` 硬编码）。
    */
-  alwaysOn?: boolean | 'count';
+  alwaysOn?: boolean | 'count' | 'lifeBonus';
 }
 
 export interface ChallengeCard {
@@ -52,6 +59,10 @@ export interface ChallengeCard {
   defenseMin?: number;
   /** 回合开始投掷的驱动骰数量（必须与 skills[0] 的卡面文字一致——有测试锁） */
   rollDice?: number;
+  /** 若"**上个挑战者的回合**"本传奇受到过伤害 → 回合开始**额外**投掷这么多驱动骰（Z05「绝境天神」=2）。 */
+  rollDiceBonusOnDamage?: number;
+  /** 当前生命每比初始生命低 10 点 → 其攻击伤害 **+（本值）**（Z05「绝境天神」=1）。 */
+  attackBonusPer10MissingLife?: number;
   /** 传奇「计数」上限（Z02「锋芒」X / 「暗夜凶神」+1 用）；无计数的卡不填 */
   countCap?: number;
   skills?: ChallengeSkill[];
@@ -113,7 +124,35 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z04-5', name: '灵能屏障', marker: '∞', slots: null, effect: '将剩余驱动骰中数量最多的点数的驱动骰移动至防御骰区。' },
     ],
   },
-  { id: 'Z05', legacy: '轰鸣审判官', artifacts: ['013', '014', '015'] },
+  {
+    id: 'Z05', legacy: '轰鸣审判官', artifacts: ['013', '014', '015'],
+    life: 50, defenseCap: 4, defenseRule: '只会抵挡伤害 ≥ 3 的攻击', defenseMin: 3, rollDice: 8,
+    rollDiceBonusOnDamage: 2, attackBonusPer10MissingLife: 1,
+    skills: [
+      { id: 'z05-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },
+      // 纯被动：+2 驱动骰在投骰时处理；"每低 10 点 +1 伤害"走 attackDamageBonus → 不占逐条结算的步
+      { id: 'z05-1', name: '绝境天神', marker: '∞', slots: null, passive: true, alwaysOn: 'lifeBonus', effect: '如果「轰鸣审判官」在上个挑战者的回合受到过伤害，额外投掷 2 个驱动骰。「轰鸣审判官」的当前生命每比初始生命低 10 点，其攻击伤害 +1。' },
+      { id: 'z05-2', name: '不可饶恕', marker: '∞', slots: null, effect: '弃置挑战者的所有 X 点能力骰，X 为本回合投掷的驱动骰中数量最多的点数。' },
+      {
+        id: 'z05-3', name: '数罪并罚', perGroup: true,
+        slots: [
+          { kind: 'exact', count: 2, faces: [1, 1] },
+          { kind: 'exact', count: 2, faces: [1, 6] },
+          { kind: 'exact', count: 2, faces: [6, 6] },
+        ],
+        effect: '每投掷出 1 组：进行 2 次 6 点的攻击，「轰鸣审判官」受到 3 点真实伤害。',
+      },
+      {
+        id: 'z05-4', name: '电刑', perGroup: true,
+        slots: [
+          { kind: 'pips', count: 2, faces: [3, 4] },
+          { kind: 'pips', count: 2, faces: [3, 4] },
+        ],
+        effect: '每投掷出 1 组：以 1、2、3 点依次进行 1 次攻击。如果攻击骰区有攻击骰，也使用所有攻击骰发起攻击。',
+      },
+      { id: 'z05-5', name: '净化', slots: [{ kind: 'pips', count: 2, faces: [2, 5] }], effect: '将本技能上的驱动骰全部移动至防御骰区。' },
+    ],
+  },
   { id: 'Z06', legacy: '漆黑死神', artifacts: ['016', '017', '018'] },
   { id: 'Z07', legacy: '荒野行者', artifacts: ['019', '020', '021'] },
   { id: 'Z08', legacy: '黑枪', artifacts: ['022', '023', '024'] },
@@ -124,16 +163,23 @@ export const CHALLENGES: ChallengeCard[] = [
 ];
 
 /** 把挑战技能的槽转换成显示文本（**自造记法，求短**；与结构化数据一一对应）。 */
-export function slotPhrase(slots: ChallengeSlot[] | null): string {
+export function slotPhrase(slots: ChallengeSlot[] | null, perGroup = false): string {
   if (!slots || slots.length === 0) return '（必检）';
   const single = slots.length === 1 ? slots[0] : null;
   if (single?.unlimited) {
     const faces = (single.faces ?? []).join('/');
     return `（满足任意颗${faces}点时发动）`;
   }
+  if (single && single.kind === 'exact') {
+    return `（满足 ${(single.faces ?? []).join('＋')} 点时发动）`;
+  }
   if (single && single.kind === 'pips') {
     const faces = (single.faces ?? []).join('/');
     return single.count === 1 ? `（满足${faces}点时发动）` : `（满足${single.count}颗${faces}点时发动）`;
+  }
+  if (slots.every((s) => s.kind === 'exact')) {
+    const parts = slots.map((s) => (s.faces ?? []).join('＋')).join('、');
+    return `（满足 ${parts} 中任一组时发动）`;
   }
   if (slots.every((s) => s.kind === 'pips')) {
     if (slots.every((s) => s.count === 1)) {
@@ -145,6 +191,10 @@ export function slotPhrase(slots: ChallengeSlot[] | null): string {
       }
       const parts = slots.map((s) => `${(s.faces ?? []).join('/')}点`).join('、');
       return `（满足${parts}时发动）`;
+    }
+    if (perGroup) {
+      const part = `${slots[0].count}颗${(slots[0].faces ?? []).join('/')}`;
+      return `（每满足 1 组（${part}）时发动，最多 ${slots.length} 组）`;
     }
     const parts = slots.map((s) => `${s.count}颗${(s.faces ?? []).join('/')}`).join('＋');
     return `（满足${parts}点时发动）`;

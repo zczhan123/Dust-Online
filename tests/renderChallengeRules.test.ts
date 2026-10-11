@@ -185,6 +185,42 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     }
   });
 
+  it('Z05 绝境天神：「生效中」只随"生命差攻击加成>0"亮/灭（不是常亮）', () => {
+    const rowOf = (root: HTMLElement): HTMLElement | null => {
+      const rows = Array.from(root.querySelectorAll<HTMLElement>('.challenge-skill'));
+      return rows.find((r) => r.querySelector('.csk-name')?.textContent === '绝境天神') ?? null;
+    };
+    const state = createChallengeGame({ seed: 1, cardId: 'Z05', challenger: ['001', '002', '003'] });
+    state.players.B.life = 50;
+    let { root } = mount(state);
+    expect(rowOf(root)?.classList.contains('is-on')).toBe(false); // 满血 → 不亮
+
+    state.players.B.life = 40; // 低 10 点 → 攻击 +1
+    ({ root } = mount(state));
+    expect(rowOf(root)?.classList.contains('is-on')).toBe(true);
+    expect(rowOf(root)?.querySelector('.csk-on-pill')?.textContent).toBe('生效中');
+  });
+
+  it('提示栏：加成来源按"发起攻击方"上色（昔传发起＝B 红）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z05', challenger: ['001', '002', '003'] });
+    state.pendingAttack = {
+      attacker: 'B',
+      value: 8,
+      baseValue: 6,
+      bonusValue: 2,
+      bonusLabel: '绝境天神',
+      unblockable: false,
+      physical: false,
+      sourceSkill: '数罪并罚',
+      sourceSkillOwner: 'B',
+    };
+    const { root } = mount(state);
+    const skills = Array.from(root.querySelectorAll<HTMLElement>('.hint-skill'));
+    const label = skills.find((s) => s.textContent === '「绝境天神」');
+    expect(label).toBeTruthy();
+    expect(label!.classList.contains('player-B')).toBe(true); // 不再素色
+  });
+
   it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root, hooks } = mount(state);
@@ -311,8 +347,8 @@ describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => 
   });
 });
 
-describe('挑战模式 · 被攻击提示（遁入暗影 / 加伤 / 第 K/N 次）', () => {
-  it('昔传发起攻击时（等你选是否抵挡）：提示"攻击 + 加成 + 第 K/N 次"，**不再**显示"正在结算"', () => {
+describe('挑战模式 · 被攻击提示（遁入暗影 / 加伤 / 第 K/N 组）', () => {
+  it('昔传发起攻击时（等你选是否抵挡）：提示"攻击 + 加成 + 第 K/N 组"，**不再**显示"正在结算"', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     state.activePlayer = 'B';
     state.challenge!.resumeAt = 5; // 遁入暗影
@@ -334,8 +370,29 @@ describe('挑战模式 · 被攻击提示（遁入暗影 / 加伤 / 第 K/N 次�
     const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
     expect(hint).toContain('发起攻击'); // 攻击提示显示出来了（原被"正在结算"盖住）
     expect(hint).toContain('加成 1 伤害'); // 加伤可见
-    expect(hint).toContain('（第 1 / 2 次）'); // 遁入暗影的 K/N 序号
+    expect(hint).toContain('（第 1 / 2 组）'); // 遁入暗影：每组 1 段 → 只有组序号
     expect(hint).not.toContain('正在结算'); // 不再被"正在结算"遮蔽
+  });
+
+  it('电刑/数罪并罚多段：提示"（第 K / N 组 · 本组第 j / m 次）"，技能名按所属方上色', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z05', challenger: ['001', '002', '003'] });
+    state.pendingAttack = {
+      attacker: 'B',
+      value: 3,
+      unblockable: false,
+      physical: false,
+      baseValue: 3,
+      sourceSkill: '电刑',
+      sourceSkillOwner: 'B',
+      legendGroup: { index: 1, total: 2, sub: 3, subTotal: 3 },
+    };
+    const { root } = mount(state);
+    const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
+    expect(hint).toContain('（第 1 / 2 组 · 本组第 3 / 3 次）'); // 组 + 组内序号
+    const skill = Array.from(root.querySelectorAll<HTMLElement>('.hint-skill')).find(
+      (s) => s.textContent === '电刑',
+    );
+    expect(skill?.classList.contains('player-B')).toBe(true); // 技能名＝昔传(B) 玩家色
   });
 
   it('昔传仅"结算中"（未发起攻击）：提示栏仍显示"正在结算：遁入暗影"（原行为不变）', () => {

@@ -15,7 +15,7 @@ import { skillUseKey } from './skill-state';
 import { logLine, pname } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
 import { CHALLENGES, type ChallengeCard, type ChallengeSkill, type ChallengeSlot } from '../content/challenges';
-import { matchSlots, legendCanBlock, addLegendDefense } from './challenge';
+import { matchSlots, matchGroupsPartial, legendCanBlock, addLegendDefense } from './challenge';
 import { TACTIC_POOL, TACTIC_BY_ID } from '../content/tactics';
 import type { Action, Artifact, DiceKind, Die, GameState, LegendPanel, Pending, PlayerId, PlayerState, SkillDef, SlotFill } from '../model/types';
 
@@ -399,9 +399,63 @@ function legendSkillWillFire(g: GameState, skill: ChallengeSkill): boolean {
     case 'z04-4': // 无上剑术：得有"剩余驱动骰"才移得动
     case 'z04-5': // 灵能屏障：同上
       return g.challenge!.driven.length > 0;
+    case 'z05-2': {
+      // 不可饶恕：要有驱动骰（用来算 X），且挑战者确实有"众数点数"里的某一种
+      const dr = g.challenge!.driven;
+      if (dr.length === 0) return false;
+      const tied = z05TiedValues(g);
+      return KINDS_ORDER.some((k) => g.players.A.areas[k].some((d) => tied.includes(d.value)));
+    }
     default:
       return true;
   }
+}
+
+/** Z05「不可饶恕」：本回合驱动骰里"数量最多的点数"所对应的**全部**点数（并列＝多个，升序）。 */
+function z05TiedValues(g: GameState): number[] {
+  const cnt = new Map<number, number>();
+  for (const d of g.challenge?.driven ?? []) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+  const maxN = cnt.size ? Math.max(...cnt.values()) : 0;
+  return [...cnt.entries()].filter(([, n]) => n === maxN).map(([v]) => v).sort((a, b) => a - b);
+}
+
+/** Z05「不可饶恕」的 X：并列时优先取**代决已定**的那个；无代决则**兜底取点数大者**（确定性）。 */
+function z05ChongfuX(g: GameState, skill: ChallengeSkill): number {
+  const chosen = (g.challenge?.decisions?.[skill.id] ?? [])[0];
+  if (chosen) return Number(chosen);
+  const tied = z05TiedValues(g);
+  return tied.length ? tied[tied.length - 1] : 0;
+}
+
+/**
+ * Z05「不可饶恕」**自动结算**专用（手动＝挑战者自选弹面板，不走这里）。
+ * 候选＝并列的各点数；每个候选按"**弃掉挑战者全部该点数骰**"评估：
+ *  · `n` ＝ 被弃**总颗数**； · `w` ＝ 被弃**区域组合权重**（攻击=1、防御=2、冥想=4，**按涉及哪几类**求和）。
+ * - **有利**（顺挑战者）＝取 `(n 小 → w 小 → 点值 小)`；
+ * - **不利** ＝ 完全取反 `(n 大 → w 大 → 点值 大)`。
+ * 例（有利）：候选 3 颗攻击(n=3,w=1) vs 1 防+1 冥(n=2,w=6) → 颗数优先 → 选后者。
+ */
+function z05ChongfuAutoPick(
+  g: GameState,
+  want: { options: { id: string; label: string }[] },
+  mode: 'favor' | 'against',
+): string | null {
+  const A = g.players.A;
+  const items = want.options.map((o) => {
+    const v = Number(o.id);
+    let n = 0;
+    let w = 0;
+    for (const k of KINDS_ORDER) {
+      const mine = A.areas[k].filter((d) => d.value === v);
+      if (mine.length === 0) continue;
+      n += mine.length;
+      w += k === 'attack' ? 1 : k === 'defense' ? 2 : 4;
+    }
+    return { id: o.id, v, n, w };
+  });
+  const dir = mode === 'against' ? -1 : 1; // 有利→取小；不利→取大（取反）
+  items.sort((a, b) => dir * (a.n - b.n) || dir * (a.w - b.w) || dir * (a.v - b.v));
+  return items[0]?.id ?? null;
 }
 
 /** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
@@ -509,6 +563,21 @@ function challengeDecisions(
             },
           ]
         : [];
+    case 'z05-2': {
+      // 不可饶恕：X＝本回合驱动骰的众数；并列（多个点数同为最多）→ 挑战者代决用哪个点数的 X
+      const cnt = new Map<number, number>();
+      for (const d of g.challenge?.driven ?? []) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+      const maxN = cnt.size ? Math.max(...cnt.values()) : 0;
+      const tied = [...cnt.entries()].filter(([, n]) => n === maxN).map(([v]) => v).sort((a, b) => a - b);
+      if (tied.length <= 1) return [];
+      return [
+        {
+          prompt: `「不可饶恕」：多个点数并列最多（各 ${maxN} 个），弃置挑战者哪个点数的能力骰？`,
+          options: tied.map((v) => ({ id: String(v), label: `${v} 点` })),
+          prefer: 'smaller',
+        },
+      ];
+    }
     default:
       return [];
   }
@@ -869,6 +938,75 @@ export function applyChallengeSkill(
       g.challenge!.driven = dr.filter((x) => x.value !== bestV);
       return { spawn, outIds };
     }
+    case 'z05-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z05-1':
+      return { spawn, outIds }; // 纯被动（+2 投骰 / 攻击加成）在别处处理，不占步
+    case 'z05-2': {
+      // 不可饶恕：弃置挑战者的所有 X 点能力骰（X＝本回合驱动骰的众数，并列已由代决定）
+      const x = z05ChongfuX(g, skill);
+      for (const k of KINDS_ORDER) {
+        const ids = A.areas[k].filter((d) => d.value === x).map((d) => d.id);
+        if (ids.length) consumeDice(g, A, k, ids);
+      }
+      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者所有 ${x} 点能力骰`);
+      return { spawn, outIds };
+    }
+    case 'z05-3': {
+      // 数罪并罚：每匹配 1 组 → 2 次 6 点攻击 + 自伤 3 点真实伤害
+      const size = skill.slots?.[0].count || 2;
+      const groups = Math.floor(consumed.length / size);
+      if (groups > 0) {
+        // §19⑨ 多段攻击源：数罪并罚
+        g.virtualQueue = Array.from({ length: groups * 2 }, (_, k) => ({
+          attacker: 'B' as PlayerId,
+          value: 6,
+          label: skill.name,
+          owner: 'B' as PlayerId,
+          // 每组 2 段 → 提示"第 K / N 组 · 本组第 j / 2 次"
+          legendGroup: { index: Math.floor(k / 2) + 1, total: groups, sub: (k % 2) + 1, subTotal: 2 },
+        }));
+        dealTrueDamage(g, 'B', groups * 3, 'B');
+        logLine(g, `「${legacy}」：${skill.name} — ${groups} 组：${groups * 2} 次 6 点攻击，自身受到 ${groups * 3} 点真实伤害`);
+        pumpAttackQueue(g);
+      }
+      return { spawn, outIds };
+    }
+    case 'z05-4': {
+      // 电刑：每匹配 1 组 → 以 1、2、3 点各攻击 1 次；末尾再"若攻击骰区有攻击骰，也一并攻击"
+      const size = skill.slots?.[0].count || 2;
+      const groups = Math.floor(consumed.length / size);
+      const q: NonNullable<GameState['virtualQueue']> = [];
+      for (let gi = 0; gi < groups; gi++) {
+        [1, 2, 3].forEach((v, j) => {
+          q.push({
+            attacker: 'B' as PlayerId,
+            value: v,
+            label: skill.name,
+            owner: 'B' as PlayerId,
+            // 每组 3 段（1/2/3）→ 提示"第 K / N 组 · 本组第 j / 3 次"
+            legendGroup: { index: gi + 1, total: groups, sub: j + 1, subTotal: 3 },
+          });
+        });
+      }
+      for (const d of B.areas.attack) {
+        q.push({ attacker: 'B' as PlayerId, value: d.value, label: skill.name, owner: 'B' as PlayerId, dieId: d.id, dieStyle: 'solid' as const });
+      }
+      if (q.length > 0) {
+        // §19⑨ 多段攻击源：电刑
+        g.virtualQueue = q;
+        pumpAttackQueue(g);
+      }
+      return { spawn, outIds };
+    }
+    case 'z05-5':
+      // 净化：把本技能上的驱动骰（至多 2 颗）移入防御骰区 → **延后一步**（先弹名，再移骰；放不下走代决）
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        dice: consumed.map((d) => ({ id: d.id, value: d.value })),
+      };
+      return { spawn, outIds };
     default:
       return { spawn, outIds };
   }
@@ -892,7 +1030,26 @@ function runLegendTurn(g: GameState): void {
   const legacy = card.legacy;
   logLine(g, `——「${legacy}」的回合——`);
   logLine(g, `「${legacy}」：回合开始`);
-  rollDrivenDice(g, card.rollDice ?? 0);
+  // Z05「绝境天神」：上个挑战者的回合受过伤 → 额外投掷驱动骰（8+2=10）
+  const extra = card.rollDiceBonusOnDamage && g.challenge.damagedDuringChallengerTurn ? card.rollDiceBonusOnDamage : 0;
+  if (extra > 0) {
+    logLine(g, `「${legacy}」：上个挑战者的回合受到过伤害 → 额外投掷 ${extra} 个驱动骰`);
+    // 弹技能名（＝发动帧）：让玩家知道此刻「绝境天神」生效、驱动骰变成 8+2
+    const jj = (card.skills ?? []).find((s) => s.id === 'z05-1');
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: jj?.id ?? 'z05-1',
+      skillName: jj?.name ?? '绝境天神',
+      consumed: [],
+      spawn: [],
+      outIds: [],
+      attack: false,
+      announce: true,
+    });
+  }
+  rollDrivenDice(g, (card.rollDice ?? 0) + extra);
+  g.challenge.damagedDuringChallengerTurn = false; // 只认"上一个挑战者回合"，用掉即清
   const rolled = [...g.challenge.driven]
     .map((d) => d.value)
     .sort((a, b) => a - b)
@@ -1079,6 +1236,26 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     });
     return;
   }
+  if (skill.id === 'z05-5') {
+    // 净化（延后一步）：把本技能上的驱动骰移入防御骰区（上限 4；放不下时挑战者代决"哪颗进"）
+    const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
+    if (spawn === null) return; // 停在代决（challengePick）
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗）`);
+    delete (g.challenge.decisions ?? {})[skill.id];
+    g.challenge.deferred = undefined;
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: false,
+      announce: false,
+    });
+    return;
+  }
   if (skill.id === 'z02-5') {
     // 遁入暗影：① 先"移入防御骰区"（只做一次；放不下时挑战者**任选 room 颗**）→ ② 再逐组发起 2 点攻击。
     const groups = d.groups ?? [];
@@ -1207,6 +1384,15 @@ function continueLegendTurn(g: GameState, once = false): void {
         }
         const useIdx = chosenIdx ?? groups.map((_, idx) => idx);
         consumed = useIdx.flatMap((idx) => groups[idx]?.dice ?? []);
+      } else if (skill.perGroup) {
+        // Z05「数罪并罚」/「电刑」：逐组独立——尽量多匹配、可只匹配一部分（一组都没 → 跳过）
+        const matched = matchGroupsPartial(skill.slots, g.challenge.driven);
+        if (matched.length === 0) {
+          logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+          continue;
+        }
+        const ids = new Set(matched.flatMap((gr) => gr.ids));
+        consumed = g.challenge.driven.filter((d) => ids.has(d.id));
       } else {
         // Z04「D1：开局选骰」——本条的骰由挑战者开局已选定（且与后续技能互不重叠）
         const assigned = g.challenge!.assign?.[skill.id];
@@ -1232,7 +1418,8 @@ function continueLegendTurn(g: GameState, once = false): void {
         // 自动结算（有利/不利）：替昔传选齐，不弹面板（下面照常结算）
         const arr = dec[skill.id] ?? [];
         for (let k = got.length; k < wants.length; k++) {
-          const id = autoPick(wants[k], mode);
+          // Z05「不可饶恕」有**专用口径**（颗数 → 区域权重 → 点值）；其余走通用 autoPick
+          const id = skill.id === 'z05-2' ? z05ChongfuAutoPick(g, wants[k], mode) : autoPick(wants[k], mode);
           if (id) arr.push(id);
         }
         dec[skill.id] = arr;

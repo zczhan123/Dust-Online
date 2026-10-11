@@ -1953,7 +1953,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
         const row = el('div', 'pick-sk');
         const t = el('div', 'pick-sk-t');
         t.textContent = `${i}) ${sk.name}`;
-        let phraseText = slotPhrase(sk.slots);
+        let phraseText = slotPhrase(sk.slots, sk.perGroup);
         if (sk.marker === '怜悯*') phraseText = phraseText.replace(/）$/, '；怜悯*：第一回合跳过检查）');
         const phrase = el('span', 'pick-chal-phrase');
         phrase.textContent = phraseText;

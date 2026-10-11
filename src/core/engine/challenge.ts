@@ -70,6 +70,16 @@ function candidates(slot: ChallengeSlot, dice: Die[], taken: Set<string>): strin
       }
       return out;
     }
+    case 'exact': {
+      // 一组的**点数多重集恰好等于** `faces`（升序）。Z05「数罪并罚」{1,1}/{1,6}/{6,6}
+      const need = [...(slot.faces ?? [])].sort((a, b) => a - b);
+      const out: string[][] = [];
+      for (const g of combos(free, need.length)) {
+        const vs = g.map((d) => d.value).sort((a, b) => a - b);
+        if (vs.length === need.length && vs.every((v, i) => v === need[i])) out.push(g.map((d) => d.id));
+      }
+      return out;
+    }
     default:
       return [];
   }
@@ -96,9 +106,41 @@ export function matchSlots(slots: ChallengeSlot[], driven: Die[]): string[] | nu
   return dfs(0) ? used : null;
 }
 
+/**
+ * `perGroup` 技能（"每投出 1 组…"，Z05 数罪并罚/电刑）：各槽**各自独立**匹配（互不重复），
+ * 返回**匹配到的各组**（槽下标 → 骰 id）。一组都没匹配上 → 空数组（＝本技能不发动）。
+ * 贪心按槽序（确定性）：前面的槽优先占用骰子。
+ */
+export function matchGroupsPartial(
+  slots: ChallengeSlot[],
+  driven: Die[],
+): { slot: number; ids: string[] }[] {
+  const taken = new Set<string>();
+  const out: { slot: number; ids: string[] }[] = [];
+  for (let i = 0; i < slots.length; i++) {
+    const cand = candidates(slots[i], driven, taken);
+    if (cand.length === 0) continue; // 这一组凑不出 → 跳过，继续看后面的组
+    const ids = cand[0];
+    for (const id of ids) taken.add(id);
+    out.push({ slot: i, ids });
+  }
+  return out;
+}
+
 /** 传奇按「防御规则」是否**愿意/可以**抵挡这次攻击（伤害 < 门槛 → 不挡）。 */
 export function legendCanBlock(card: ChallengeCard, damage: number): boolean {
   return damage >= (card.defenseMin ?? 0);
+}
+
+/** 挑战模式 Z05「绝境天神」：传奇的**攻击伤害加成**——当前生命每比初始生命低 10 点 → +N。
+ *  返回 `{value:0}` 表示无加成。（接入统一口径 `attackDamageBonus`。） */
+export function legendAttackBonus(g: GameState): { value: number; label?: string } {
+  if (g.mode !== 'challenge') return { value: 0 };
+  const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+  const per = card?.attackBonusPer10MissingLife ?? 0;
+  if (!per || !card?.life) return { value: 0 };
+  const v = Math.floor((card.life - g.players.B.life) / 10) * per;
+  return v > 0 ? { value: v, label: '绝境天神' } : { value: 0 };
 }
 
 /**

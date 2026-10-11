@@ -134,6 +134,14 @@ export type Action =
   | { t: 'putiResolve'; accept: boolean }
   | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
 
+/** 挑战模式"因多组触发的攻击"的表现层提示：`index/total`＝组序号/组数；`sub/subTotal`＝组内第几段（可选）。 */
+export interface LegendGroup {
+  index: number;
+  total: number;
+  sub?: number;
+  subTotal?: number;
+}
+
 export interface PendingAttack {
   attacker: PlayerId;
   value: number;
@@ -163,10 +171,12 @@ export interface PendingAttack {
    */
   dieStyle?: 'solid';
   /**
-   * **表现层**提示（不影响任何规则）：挑战模式「遁入暗影」逐组攻击时的**序号/总数**（1 基）。
-   * 供提示栏显示「（第 K / N 次）」，让挑战者事前知道还会挨几次 2 点攻击。
+   * **表现层**提示（不影响任何规则）：挑战模式**因"多组"触发的攻击**的**组序号/组数**（1 基）。
+   * 供提示栏显示「（第 K / N 组）」。若一组含多段攻击（数罪并罚=2 段 / 电刑=3 段），
+   * 再用 `sub`/`subTotal` 标"本组第 j / m 次"→「（第 K / N 组 · 本组第 j / m 次）」。
+   * 例：遁入暗影（每组 1 段，不带 `sub`）。
    */
-  legendGroup?: { index: number; total: number };
+  legendGroup?: LegendGroup;
 }
 
 export type Pending =
@@ -443,6 +453,9 @@ export interface GameState {
     caiyuliuHits?: number;
     /** Z03「拔城」：**本传奇回合内**已"发动"过的技能 id（每回合清；用于"既没发动 X 也没发动 Y"判定） */
     firedThisTurn?: string[];
+    /** Z05「绝境天神」：「**上个挑战者的回合**」里，传奇（B）是否受到过伤害 → 本回合额外投 2 个驱动骰。
+     *  在 `noteLifeDrop` 里置位（A 的回合、受伤者为 B）；`runLegendTurn` 读取后清零。 */
+    damagedDuringChallengerTurn?: boolean;
     /**
      * Z04「D1：开局选骰」：**本回合**由挑战者在"投完驱动骰、逐条结算之前"一次性选定的分配
      * （`skillId` → 该条技能要消耗的驱动骰 id 列表）。由 `runLegendTurn` 开局询问、`continueLegendTurn` 消耗。
@@ -499,6 +512,8 @@ export interface GameState {
     owner: PlayerId;
     dieId?: string;
     dieStyle?: 'solid';
+    /** 因"多组"触发的攻击：组序号/组数（+组内第几段），供提示栏显示（见 `LegendGroup`）。 */
+    legendGroup?: LegendGroup;
   }[] | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;

@@ -6,7 +6,7 @@ import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
-import { addLegendDefense } from './challenge';
+import { addLegendDefense, legendAttackBonus } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -110,6 +110,11 @@ export function attackDamageBonus(
   // 战术牌 T16「潜伏」：双方各自的**第二个回合**内，攻击伤害 +1（按用户定的口径：只算自己回合发出的攻击）
   if (g.activePlayer === player && g.players[player].turnsTaken === 2 && t16Active(g)) {
     consider(1, '潜伏');
+  }
+  // 挑战模式 Z05「绝境天神」：传奇当前生命每比初始生命低 10 点 → 其攻击伤害 +N
+  if (player === 'B') {
+    const jj = legendAttackBonus(g);
+    if (jj.value > 0) consider(jj.value, jj.label);
   }
   return best;
 }
@@ -829,12 +834,15 @@ export function pumpAttackQueue(g: GameState): void {
     // ⚠️ 这里**不删**它——骰子留在区里（"用掉"发生在**这次攻击结算后**，见 settleAttack）：
     //   于是"新骰飞进来"与"旧骰还并排在区里"能同帧存在，界面再按"先进后出"演；
     //   等待响应期间由界面把区里那颗真骰**藏起来**（观感＝飞出去后区里就没它了）。
-    if (next.dieId) {
+    if (next.dieId || next.legendGroup) {
       const pa = g.pendingAttack as PendingAttack | null; // TS 在函数开头已把它收窄成 null，这里重新取
       if (pa) {
-        pa.sourceDieId = next.dieId;
-        pa.sourceValue = next.value;
+        if (next.dieId) {
+          pa.sourceDieId = next.dieId;
+          pa.sourceValue = next.value;
+        }
         if (next.dieStyle) pa.dieStyle = next.dieStyle;
+        if (next.legendGroup) pa.legendGroup = next.legendGroup; // 因"多组"触发的攻击 → 提示"第 K / N 组"
       }
     }
   }

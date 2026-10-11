@@ -17,6 +17,7 @@ import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
 import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase } from '../core/content/challenges';
+import { legendAttackBonus } from '../core/engine/challenge';
 import { LEGEND_DISPLAY_NAME } from '../core/engine/log';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
@@ -1384,12 +1385,13 @@ export function challengeImageUrl(id: string): string {
 
 /**
  * 挑战·昔传技能「持续生效中」（长明）判定：**只影响本模式的技能列显示**（标准模式无关）。
- * **数据驱动**：读 `ChallengeSkill.alwaysOn`（`true`＝始终；`'count'`＝计数>0；缺省＝不常亮）。
+ * **数据驱动**：读 `ChallengeSkill.alwaysOn`（`true`＝始终；`'count'`＝计数>0；`'lifeBonus'`＝生命差攻击加成>0；缺省＝不常亮）。
  * 新 Z 卡的持续技能在数据里填 `alwaysOn` 即可，**不要再按 `skill.id` 硬编码**。
  */
-function challengeSkillAlwaysOn(state: GameState, sk: { alwaysOn?: boolean | 'count' }): boolean {
+function challengeSkillAlwaysOn(state: GameState, sk: { alwaysOn?: boolean | 'count' | 'lifeBonus' }): boolean {
   if (sk.alwaysOn === true) return true;
   if (sk.alwaysOn === 'count') return (state.challenge?.count ?? 0) > 0;
+  if (sk.alwaysOn === 'lifeBonus') return legendAttackBonus(state).value > 0;
   return false;
 }
 
@@ -1469,7 +1471,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
       r.appendChild(mk);
     }
     const sl = el('span', 'csk-slot');
-    sl.textContent = slotPhrase(sk.slots ?? null);
+    sl.textContent = slotPhrase(sk.slots ?? null, sk.perGroup);
     r.appendChild(sl);
     const eff = el('span', 'csk-eff');
     eff.textContent = sk.effect; // 完整效果（照卡面）——与上面同一段文字流，不另起两行
@@ -1592,7 +1594,7 @@ function challengeSkillsOverlay(ctx: Ctx): HTMLElement {
       head.appendChild(mk);
     }
     const sl = el('span', 'csk-slot');
-    sl.textContent = slotPhrase(sk.slots ?? null);
+    sl.textContent = slotPhrase(sk.slots ?? null, sk.perGroup);
     head.appendChild(sl);
     item.appendChild(head);
     const eff = el('div', 'csk-detail-eff');
@@ -2024,9 +2026,17 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰）` });
     }
     if (bonus.value > 0) {
-      parts.push({ text: `（${bonus.label ? `「${bonus.label}」` : ''}加成 ${bonus.value} 伤害）` });
+      parts.push({ text: '（' });
+      // 加成归属＝**发起攻击方**（昔传攻击＝B 红）；技能名按所属方取色
+      if (bonus.label) parts.push({ text: `「${bonus.label}」`, color: pa.attacker });
+      parts.push({ text: `加成 ${bonus.value} 伤害）` });
     }
-    if (pa.halveReason) parts.push({ text: `（「${pa.halveReason}」减半）` });
+    if (pa.halveReason) {
+      // 减半来自**防守方**的卡（411 灵能屏障 / 023 畏惧 / 021 满计数）→ 按防守方取色
+      parts.push({ text: '（「' });
+      parts.push({ text: pa.halveReason, color: oppOf(pa.attacker) });
+      parts.push({ text: '」减半）' });
+    }
     if (pa.unblockable) parts.push({ text: '（不可抵挡）' });
     // 028 天罚：说明"受哪张卡影响、只能用哪类骰抵挡"
     if (pa.blockKind) {
@@ -2034,30 +2044,55 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       const kindCn = pa.blockKind === 'meditation' ? '冥想' : '攻击';
       parts.push({ text: `（受 ` });
       parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
-      parts.push({ text: ` 的「${skillName}」影响：只能用${kindCn}骰抵挡）` });
+      parts.push({ text: ' 的「' });
+      parts.push({ text: skillName, color: pa.attacker }); // 该技能属**攻击方**的天罚
+      parts.push({ text: `」影响：只能用${kindCn}骰抵挡）` });
     }
-    // 挑战模式「遁入暗影」逐组攻击：显示「（第 K / N 次）」，让挑战者事前知道还会挨几次 2 点攻击
-    if (pa.legendGroup) parts.push({ text: `（第 ${pa.legendGroup.index} / ${pa.legendGroup.total} 次）` });
+    // 挑战模式"因多组触发的攻击"：显示「（第 K / N 组 · 本组第 j / m 次）」
+    //（遁入暗影每组 1 段 → 只有"（第 K / N 组）"；数罪并罚 2 段 / 电刑 3 段 → 带组内序号）
+    if (pa.legendGroup) {
+      const lg = pa.legendGroup;
+      parts.push({
+        text:
+          lg.sub != null
+            ? `（第 ${lg.index} / ${lg.total} 组 · 本组第 ${lg.sub} / ${lg.subTotal} 次）`
+            : `（第 ${lg.index} / ${lg.total} 组）`,
+      });
+    }
     parts.push({ text: '；请选择' });
     return parts;
   }
   if (pd) {
     if (pd.kind === 'kuyu') {
-      return [{ text: `（${playerName(ctx, pd.player)} 的「梦魇」）：主要阶段结束，请宣称 1 个能力骰类型；请选择` }];
+      return [
+        { text: `（${playerName(ctx, pd.player)} 的「` },
+        { text: '梦魇', color: pd.player },
+        { text: '」）：主要阶段结束，请宣称 1 个能力骰类型；请选择' },
+      ];
     }
     if (pd.kind === 'tiaolingPick') {
-      return [{ text: `（「凋零」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同并弃置自己的能力骰；请选择` }];
+      return [
+        { text: '（「' },
+        { text: '凋零', color: pd.player },
+        { text: `」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同并弃置自己的能力骰；请选择` },
+      ];
     }
     if (pd.kind === 'endDiscard') {
       return [{ text: `（${playerName(ctx, pd.player)}）：结束阶段，能力骰总数超出意志上限，请自行选择要弃置的能力骰；请选择` }];
     }
     if (pd.kind === 'wanzhangDiscard') {
-      return [{ text: `（${playerName(ctx, pd.player)} 的「千劫」）：主要阶段开始，请弃置 2 个能力骰；请选择` }];
+      return [
+        { text: `（${playerName(ctx, pd.player)} 的「` },
+        { text: '千劫', color: pd.player },
+        { text: '」）：主要阶段开始，请弃置 2 个能力骰；请选择' },
+      ];
     }
     if (pd.kind === 'putiPick') {
       return [
+        { text: `（${playerName(ctx, pd.player)} 的「` },
+        { text: '金刚', color: pd.player },
         {
-          text: `（${playerName(ctx, pd.player)} 的「金刚」）：对方${pd.mode === 'block' ? '用防御骰抵挡' : '使用了攻击骰'}——可移除神器上 ${pd.value} 点存放骰以取消其效果；请选择`,
+          text: `」）：对方${pd.mode === 'block' ? '用防御骰抵挡' : '使用了攻击骰'}——可移除神器上 ${pd.value} 点存放骰以取消其效果；请选择`,
         },
       ];
     }
