@@ -38,6 +38,21 @@ export interface ChallengeSkill {
    */
   perGroup?: boolean;
   /**
+   * **同点槽的"选组"代决**（Z06 虚无形态/勾魂镰/圆舞）：当驱动骰里有 **≥2 个不同点数的候选组**时，
+   * 由挑战者代决"本技能上用哪一组同点驱动骰"（自动：有利＝点数大、不利＝点数小）；只有 1 组时直接匹配。
+   */
+  slotChoice?: boolean;
+  /**
+   * **黑白指示物门禁**（Z06「漆黑死神」）：`'black'`/`'white'` ＝ 只有指示物当前面与之相同时，本条才发动。
+   * 缺省＝不受颜色影响（始终参与）。指示物本体见 `ChallengeCard.token`。
+   */
+  color?: 'black' | 'white';
+  /**
+   * **不占"逐条结算"的顺序步**（Z06「死即新生」）：由独立钩子（生命归 0）触发，`continueLegendTurn` 会跳过它；
+   * 面板技能列里序号位显示 `x`（见 `render.ts`）。
+   */
+  unordered?: boolean;
+  /**
    * 该技能是否"**持续生效中**"（＝面板技能列里常亮）。
    * - `true`：始终生效；
    * - `'count'`：当 `g.challenge.count > 0` 时生效（Z02「锋芒」）；
@@ -63,6 +78,8 @@ export interface ChallengeCard {
   rollDiceBonusOnDamage?: number;
   /** 当前生命每比初始生命低 10 点 → 其攻击伤害 **+（本值）**（Z05「绝境天神」=1）。 */
   attackBonusPer10MissingLife?: number;
+  /** 是否使用**黑白指示物**（Z06「漆黑死神」）：战斗开始放黑面朝上、其回合结束翻面；技能按 `color` 决定是否发动。 */
+  token?: boolean;
   /** 传奇「计数」上限（Z02「锋芒」X / 「暗夜凶神」+1 用）；无计数的卡不填 */
   countCap?: number;
   skills?: ChallengeSkill[];
@@ -153,7 +170,20 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z05-5', name: '净化', slots: [{ kind: 'pips', count: 2, faces: [2, 5] }], effect: '将本技能上的驱动骰全部移动至防御骰区。' },
     ],
   },
-  { id: 'Z06', legacy: '漆黑死神', artifacts: ['016', '017', '018'] },
+  {
+    id: 'Z06', legacy: '漆黑死神', artifacts: ['016', '017', '018'],
+    life: 45, defenseCap: 4, defenseRule: '只会抵挡伤害 ≥ 3 的攻击', defenseMin: 3, rollDice: 6,
+    token: true,
+    skills: [
+      { id: 'z06-0', name: '回合开始', slots: null, effect: '投掷 6 个驱动骰。' },
+      { id: 'z06-1', name: '无光领域', marker: '∞', slots: null, passive: true, alwaysOn: true, effect: '战斗开始时，将 1 枚正面为黑色、反面为白色的指示物放在「无光领域」上。「漆黑死神」的行动由该指示物的颜色决定。其回合结束时，将该指示物翻面。' },
+      { id: 'z06-2', name: '虚无形态·黑', color: 'black', slotChoice: true, slots: [{ kind: 'same', count: 3 }], effect: '「漆黑死神」受到 10 点真实伤害。进行 5 次 5 点的攻击。' },
+      { id: 'z06-3', name: '勾魂镰·黑', color: 'black', slotChoice: true, slots: [{ kind: 'same', count: 2 }], effect: '本回合中，「漆黑死神」的攻击伤害 +2。将本技能上的驱动骰全部移动至防御骰区。将其余所有驱动骰移动至攻击骰区，并使用所有攻击骰进行攻击。' },
+      { id: 'z06-4', name: '冥界行走·白', color: 'white', marker: '∞', slots: null, effect: '本回合中，每当「漆黑死神」的攻击造成伤害，「漆黑死神」回复该攻击点数一半的生命（向上取整）。' },
+      { id: 'z06-5', name: '圆舞·白', color: 'white', slotChoice: true, slots: [{ kind: 'same', count: 2 }], effect: '将本技能上的驱动骰全部移动至防御骰区。将其余所有驱动骰移动至攻击骰区，并使用所有攻击骰进行攻击。' },
+      { id: 'z06-x', name: '死即新生', unordered: true, slots: null, effect: '「漆黑死神」死亡时，立即获得点数为 1、2、3、4、5、6 的攻击骰各 1 个，并将生命重设为 13。本技能整局游戏最多生效 1 次。' },
+    ],
+  },
   { id: 'Z07', legacy: '荒野行者', artifacts: ['019', '020', '021'] },
   { id: 'Z08', legacy: '黑枪', artifacts: ['022', '023', '024'] },
   { id: 'Z09', legacy: '天殇的战鬼', artifacts: ['025', '026', '027'] },

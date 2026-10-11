@@ -1,5 +1,8 @@
 import type { Die, GameState, PlayerId } from '../model/types';
 import { CHALLENGES, challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
+import { createDie, newDieId } from '../model/dice';
+import { fxPush } from './fx';
+import { logLine } from './log';
 
 /** 从小到大、按 id 稳定排序（保证"确定性默认分配"可测）。 */
 function sortedDice(dice: Die[]): Die[] {
@@ -141,6 +144,37 @@ export function legendAttackBonus(g: GameState): { value: number; label?: string
   if (!per || !card?.life) return { value: 0 };
   const v = Math.floor((card.life - g.players.B.life) / 10) * per;
   return v > 0 ? { value: v, label: '绝境天神' } : { value: 0 };
+}
+
+/** Z06「死即新生」：传奇（漆黑死神）生命归 0 时 → 立即复活（生命重设为 13 + 得 1..6 攻击骰各 1 个；整局 1 次）。
+ *  返回 `true` ＝ 已复活（调用方**不要**判负）。独立于"逐条结算"顺序，任何时刻生命归 0 都触发。 */
+export function legendDeathRevive(g: GameState): boolean {
+  if (g.mode !== 'challenge' || !g.challenge || g.challenge.deathUsed) return false;
+  if (g.players.B.life > 0) return false;
+  const card = CHALLENGES.find((c) => c.id === g.challenge!.cardId);
+  if (!card?.skills?.some((s) => s.id === 'z06-x')) return false;
+  g.challenge.deathUsed = true;
+  g.challenge.deathJustTriggered = true;
+  g.players.B.life = 13;
+  const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+  for (let v = 1; v <= 6; v++) {
+    const die = createDie(newDieId('chg-B-'), v, 'attack');
+    g.players.B.areas.attack.push(die);
+    spawn.push({ id: die.id, value: v, area: 'attack' });
+  }
+  logLine(g, `「${card.legacy}」：死即新生 — 生命重设为 13，获得 1~6 点攻击骰各 1 个`);
+  fxPush({
+    kind: 'legendSkill',
+    player: 'B',
+    skillKey: 'z06-x',
+    skillName: '死即新生',
+    consumed: [],
+    spawn,
+    outIds: [],
+    attack: false,
+    announce: true,
+  });
+  return true;
 }
 
 /**

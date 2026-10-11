@@ -456,6 +456,14 @@ export interface GameState {
     /** Z05「绝境天神」：「**上个挑战者的回合**」里，传奇（B）是否受到过伤害 → 本回合额外投 2 个驱动骰。
      *  在 `noteLifeDrop` 里置位（A 的回合、受伤者为 B）；`runLegendTurn` 读取后清零。 */
     damagedDuringChallengerTurn?: boolean;
+    /** Z06「漆黑死神」黑白指示物当前面（战斗开始＝`'black'`；传奇回合结束翻面）。技能按 `color` 决定是否发动 */
+    token?: 'black' | 'white';
+    /** Z06「冥界行走」（本回合）：其攻击造成伤害时回复"该攻击点数一半（向上取整）" */
+    mingjieHeal?: boolean;
+    /** Z06「死即新生」：是否已触发过（整局 1 次）→ 面板置灰 */
+    deathUsed?: boolean;
+    /** Z06「死即新生」：本帧刚触发（面板绿色闪一下）——引擎在触发时置位、界面消费后清掉 */
+    deathJustTriggered?: boolean;
     /**
      * Z04「D1：开局选骰」：**本回合**由挑战者在"投完驱动骰、逐条结算之前"一次性选定的分配
      * （`skillId` → 该条技能要消耗的驱动骰 id 列表）。由 `runLegendTurn` 开局询问、`continueLegendTurn` 消耗。

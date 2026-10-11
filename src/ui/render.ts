@@ -1448,6 +1448,7 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   const right = el('div', 'challenge-skills');
   const table = el('div', 'challenge-skill-table');
   (card?.skills ?? []).forEach((sk, i) => {
+    if (sk.unordered) return; // Z06「死即新生」不占顺序步 → 单独一行渲染（见下），不进技能表
     const alwaysOn = challengeSkillAlwaysOn(state, sk);
     const cls = ['challenge-skill'];
     if (alwaysOn) cls.push('is-on'); // 持续生效中（长明，静）
@@ -1479,6 +1480,24 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     table.appendChild(r);
   });
   right.appendChild(table);
+  // Z06「死即新生」：**不占顺序步** → 单独一行放在"临时驱动骰区域"**上方**（与「圆舞」那条分开）；序号位用 `x`。
+  //   触发时绿、用掉后灰（`deathJustTriggered` 只在触发那一帧）。
+  if (card?.skills?.some((s) => s.unordered)) {
+    const dsk = card.skills!.find((s) => s.unordered)!;
+    const drow = el('div', 'challenge-skill challenge-skill--death');
+    if (state.challenge?.deathUsed && !state.challenge?.deathJustTriggered) drow.classList.add('is-used');
+    if (state.challenge?.deathJustTriggered) drow.classList.add('is-triggered');
+    const dno = el('span', 'csk-no');
+    dno.textContent = 'x';
+    drow.appendChild(dno);
+    const dnm = el('span', 'csk-name');
+    dnm.textContent = dsk.name;
+    drow.appendChild(dnm);
+    const deff = el('span', 'csk-eff');
+    deff.textContent = dsk.effect;
+    drow.appendChild(deff);
+    right.appendChild(drow);
+  }
   // 临时驱动骰区域（一整条、跨全宽）：回合开始投出的骰子落在这里
   const staging = el('div', 'challenge-staging');
   staging.dataset.act = 'challengeStaging';
@@ -1531,11 +1550,22 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     ddice.appendChild(chip);
   }
   driven.appendChild(ddice);
+  // Z06「漆黑死神」黑白指示物：贴在驱动骰区**最右**（行布局里 `margin-left:auto` 推到边）
+  if (card?.token) {
+    const face = state.challenge?.token === 'white' ? '白' : '黑';
+    const tok = el('span', `challenge-token challenge-token--${face === '白' ? 'white' : 'black'}`);
+    tok.dataset.act = 'challengeToken';
+    tok.textContent = `无光领域指示物·${face}`;
+    driven.appendChild(tok);
+  }
   for (const k of AREA_ORDER_MIRRORED) {
     if (k === 'meditation') areas.appendChild(driven);
     else areas.appendChild(areaBox(k, player, ctx));
   }
   panel.appendChild(areas);
+
+  // Z06「死即新生」：绿色"刚触发"只亮一帧 → 渲染后即用掉（下一帧转为"已用掉"灰）
+  if (state.challenge?.deathJustTriggered) state.challenge.deathJustTriggered = false;
 
   return panel;
 }
@@ -2052,12 +2082,20 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     //（遁入暗影每组 1 段 → 只有"（第 K / N 组）"；数罪并罚 2 段 / 电刑 3 段 → 带组内序号）
     if (pa.legendGroup) {
       const lg = pa.legendGroup;
-      parts.push({
-        text:
-          lg.sub != null
-            ? `（第 ${lg.index} / ${lg.total} 组 · 本组第 ${lg.sub} / ${lg.subTotal} 次）`
-            : `（第 ${lg.index} / ${lg.total} 组）`,
-      });
+      if (lg.total <= 1 && lg.sub != null) {
+        // 只有 1 组（Z06 虚无形态的 5 段）→ 不写"组"，只显组内序号
+        parts.push({ text: `（第 ${lg.sub} / ${lg.subTotal} 次）` });
+      } else if (lg.sub != null) {
+        parts.push({ text: `（第 ${lg.index} / ${lg.total} 组 · 本组第 ${lg.sub} / ${lg.subTotal} 次）` });
+      } else {
+        parts.push({ text: `（第 ${lg.index} / ${lg.total} 组）` });
+      }
+    }
+    // Z06「冥界行走·白」（本回合）：其攻击造成伤害 → 回复该点数一半（提示挑战者"让它伤到会回血"）
+    if (state.mode === 'challenge' && pa.attacker === 'B' && state.challenge?.mingjieHeal) {
+      parts.push({ text: '（造成伤害后「' });
+      parts.push({ text: '冥界行走·白', color: 'B' });
+      parts.push({ text: '」回复该攻击点数一半的生命（向上取整））' });
     }
     parts.push({ text: '；请选择' });
     return parts;

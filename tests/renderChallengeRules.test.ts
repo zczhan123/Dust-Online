@@ -221,6 +221,83 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(label!.classList.contains('player-B')).toBe(true); // 不再素色
   });
 
+  it('Z06 面板：黑白指示物徽标显示当前面（黑底/白底 + 紫字）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    let { root } = mount(state);
+    let tok = root.querySelector<HTMLElement>('.challenge-token');
+    expect(tok?.textContent).toBe('无光领域指示物·黑');
+    expect(tok?.classList.contains('challenge-token--black')).toBe(true);
+
+    state.challenge!.token = 'white';
+    ({ root } = mount(state));
+    tok = root.querySelector<HTMLElement>('.challenge-token');
+    expect(tok?.textContent).toBe('无光领域指示物·白');
+    expect(tok?.classList.contains('challenge-token--white')).toBe(true);
+  });
+
+  it('Z06 面板：死即新生单独一行（序号 x）、不进技能表；用掉后置灰', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const drow = root.querySelector<HTMLElement>('.challenge-skill--death');
+    expect(drow?.querySelector('.csk-no')?.textContent).toBe('x');
+    expect(drow?.textContent).toContain('死即新生');
+    expect(drow?.classList.contains('is-used')).toBe(false);
+    const tableNames = Array.from(root.querySelectorAll('.challenge-skill-table .csk-name')).map((n) => n.textContent);
+    expect(tableNames).not.toContain('死即新生'); // 只单独一行、不重复进技能表
+
+    state.challenge!.deathUsed = true;
+    const r2 = mount(state);
+    expect(r2.root.querySelector<HTMLElement>('.challenge-skill--death')?.classList.contains('is-used')).toBe(true);
+  });
+
+  it('Z06 面板：指示物徽标在驱动骰区**最右**（直接子元素、排在骰子容器之后）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const area = root.querySelector<HTMLElement>('.area--driven')!;
+    const last = area.lastElementChild as HTMLElement;
+    expect(last.classList.contains('challenge-token')).toBe(true); // 排最后 → 给 margin-left:auto 推到右端
+    expect(area.querySelector('.area-label .challenge-token')).toBeNull(); // 不再塞在标题里
+  });
+
+  it('提示栏：勾魂镰本回合 +2 伤害可见、技能名按所属方上色', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    state.pendingAttack = {
+      attacker: 'B',
+      value: 8,
+      baseValue: 6,
+      bonusValue: 2,
+      bonusLabel: '勾魂镰·黑',
+      unblockable: false,
+      physical: false,
+      sourceSkill: '勾魂镰·黑',
+      sourceSkillOwner: 'B',
+    };
+    const { root } = mount(state);
+    const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
+    expect(hint).toContain('（「勾魂镰·黑」加成 2 伤害）');
+    const sk = Array.from(root.querySelectorAll<HTMLElement>('.hint-skill')).find((s) => s.textContent === '勾魂镰·黑');
+    expect(sk?.classList.contains('player-B')).toBe(true);
+  });
+
+  it('提示栏：冥界行走本回合生效时，被攻击提示写明"造成伤害后回复一半生命"', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    state.challenge!.mingjieHeal = true;
+    state.pendingAttack = {
+      attacker: 'B',
+      value: 7,
+      baseValue: 7,
+      unblockable: false,
+      physical: false,
+      sourceSkill: '勾魂镰·黑',
+      sourceSkillOwner: 'B',
+    };
+    const { root } = mount(state);
+    const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
+    expect(hint).toContain('（造成伤害后「冥界行走·白」回复该攻击点数一半的生命（向上取整））');
+    const sk = Array.from(root.querySelectorAll<HTMLElement>('.hint-skill')).find((s) => s.textContent === '冥界行走·白');
+    expect(sk?.classList.contains('player-B')).toBe(true);
+  });
+
   it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root, hooks } = mount(state);

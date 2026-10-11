@@ -2589,6 +2589,33 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 .challenge-skill .csk-slot { color: #6f6a60; font-size: 12px; margin-right: 6px; }
 .challenge-skill .csk-eff { font-size: 12px; color: #3f3a33; }
 .challenge-skill.is-active .csk-slot { color: #14532d; }
+/* Z06「漆黑死神」黑白指示物徽标：贴在驱动骰区**最右**（行布局里 `margin-left:auto`）；**底色**表示当前面——
+   黑面＝黑底白字、白面＝白底黑字，**不掺紫色**。白面加一道细中性灰边框，保证在浅底上看得见。 */
+.challenge-token {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.challenge-token--black { background: #000; color: #fff; }
+.challenge-token--white { background: #fff; color: #000; border: 1px solid #bdbdbd; }
+/* Z06「死即新生」行：不占顺序步 → 单独一行（序号位 `x`）。触发时绿、用掉后灰。 */
+.challenge-skill--death { border-style: dashed; }
+.challenge-skill--death.is-triggered {
+  background: #e9f2ec;
+  border-color: #1d7a4d;
+  box-shadow: inset 0 0 0 1px #1d7a4d;
+}
+.challenge-skill--death.is-triggered .csk-name,
+.challenge-skill--death.is-triggered .csk-eff { color: #14532d; }
+.challenge-skill--death.is-used { background: #e8e8e8; border-color: #bdbdbd; }
+.challenge-skill--death.is-used .csk-no,
+.challenge-skill--death.is-used .csk-name,
+.challenge-skill--death.is-used .csk-eff { color: #6b6b6b; }
 .challenge-staging {
   flex: 0 0 auto;
   display: flex;

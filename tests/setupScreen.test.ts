@@ -644,11 +644,20 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(chip.querySelector('img')!.getAttribute('src')).toBe('./tactics/T02.jpg');
   });
 
-  it('传：把该英雄设为昔日传奇（名字/头像/信息随动；未转写显示"待转写"）', () => {
+  it('传 Z06（漆黑死神）：已转写 → 显示生命 45 / 防御骰上限 4（不是"待转写"）', () => {
     renderChallengeSetup(root, () => {});
     abOf('xiu', 'legend').click();
     expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“漆黑死神”');
     expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L06.jpg');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 45');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 4');
+    expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
+  });
+
+  it('传 Z07（荒野行者，**未转写**）→ 显示"待转写"', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('nisa', 'legend').click();
+    expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“荒野行者”');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('待转写');
   });
 

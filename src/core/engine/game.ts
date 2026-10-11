@@ -1007,6 +1007,49 @@ export function applyChallengeSkill(
         dice: consumed.map((d) => ({ id: d.id, value: d.value })),
       };
       return { spawn, outIds };
+    case 'z06-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z06-1':
+      return { spawn, outIds }; // 无光领域＝纯被动（指示物在别处处理）
+    case 'z06-2': {
+      // 虚无形态：自身受 10 点真实伤害 → 5 次 5 点攻击
+      dealTrueDamage(g, 'B', 10, 'B');
+      logLine(g, `「${legacy}」：${skill.name} — 受到 10 点真实伤害`);
+      // §19⑨ 多段攻击源：虚无形态
+      g.virtualQueue = Array.from({ length: 5 }, (_, j) => ({
+        attacker: 'B' as PlayerId,
+        value: 5,
+        label: skill.name,
+        owner: 'B' as PlayerId,
+        legendGroup: { index: 1, total: 1, sub: j + 1, subTotal: 5 },
+      }));
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z06-3':
+      // 勾魂镰：本回合其攻击伤害 +2；随后"驱骰→防御区、其余→攻击区并全部攻击"（延后一步做）
+      B.buffs.push({ attr: 'attackDamage', add: 2, duration: 'thisTurn', source: '勾魂镰·黑' });
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        dice: consumed.map((d) => ({ id: d.id, value: d.value })),
+      };
+      return { spawn, outIds };
+    case 'z06-4':
+      // 冥界行走（本回合）：其攻击造成伤害 → 回血（钩子在 `settleAttack`）
+      g.challenge!.mingjieHeal = true;
+      logLine(g, `「${legacy}」：${skill.name} — 本回合其攻击造成伤害时回复一半生命`);
+      return { spawn, outIds };
+    case 'z06-5':
+      // 圆舞：驱骰→防御区、其余→攻击区并全部攻击（延后一步做）
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        dice: consumed.map((d) => ({ id: d.id, value: d.value })),
+      };
+      return { spawn, outIds };
+    case 'z06-x':
+      return { spawn, outIds }; // 死即新生＝独立钩子（生命归 0）
     default:
       return { spawn, outIds };
   }
@@ -1027,6 +1070,8 @@ function runLegendTurn(g: GameState): void {
   g.dustRiseNormalCount = 0;
   g.dustRiseActed = false;
   g.challenge.firedThisTurn = []; // Z03「拔城」：每回合清"本回合已发动"标记
+  g.challenge.mingjieHeal = false; // Z06「冥界行走」：每回合清"本回合攻击回血"标记
+  g.challenge.deathJustTriggered = false; // Z06「死即新生」：绿色"刚触发"只在触发帧
   const legacy = card.legacy;
   logLine(g, `——「${legacy}」的回合——`);
   logLine(g, `「${legacy}」：回合开始`);
@@ -1236,6 +1281,79 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     });
     return;
   }
+  if (skill.id === 'z06-3' || skill.id === 'z06-5') {
+    // 勾魂镰 / 圆舞：① 本技能驱骰 → 防御骰区（受上限 4；放不下挑战者代决）→ ② 其余驱骰 → 攻击骰区 → 全部攻击
+    if (!d.moved) {
+      const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
+      if (spawn === null) return; // 停在代决（challengePick）
+      d.moved = true;
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗）`);
+      delete (g.challenge.decisions ?? {})[skill.id];
+      fxPush({
+        kind: 'legendSkill', player: 'B', skillKey: skill.id, skillName: skill.name,
+        consumed: [], spawn, outIds: [], attack: false, announce: false,
+      });
+      return;
+    }
+    // ②a 其余驱动骰 → 攻击骰区（先播"移入"动画）
+    if (d.step < 1) {
+      const rest = g.challenge.driven;
+      g.challenge.driven = [];
+      const spawn2: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
+      for (const dd of rest) {
+        const die = createDie(newDieId('chg-B-'), dd.value, 'attack');
+        g.players.B.areas.attack.push(die);
+        spawn2.push({ id: die.id, value: dd.value, area: 'attack' });
+      }
+      d.step = 1;
+      logLine(g, `「${card.legacy}」：${skill.name} — 其余驱动骰移入攻击骰区（${spawn2.length} 颗）`);
+      fxPush({
+        kind: 'legendSkill', player: 'B', skillKey: skill.id, skillName: skill.name,
+        consumed: [], spawn: spawn2, outIds: [], attack: g.players.B.areas.attack.length > 0, announce: false,
+      });
+      return;
+    }
+    // ②b 攻击顺序代决（>1 颗才问；自动 favor→desc、against→asc）→ ②c 逐个攻击
+    const atk = g.players.B.areas.attack;
+    if (atk.length === 0) {
+      g.challenge.deferred = undefined;
+      return;
+    }
+    const dec = (g.challenge.decisions ??= {});
+    const orderOpts = [
+      { id: 'asc', label: '由小到大' },
+      { id: 'desc', label: '由大到小' },
+    ];
+    if (atk.length > 1 && !(dec[skill.id] ?? [])[0]) {
+      const mode = g.challenge.settleMode;
+      if (mode && mode !== 'manual') {
+        dec[skill.id] = [autoPick({ options: orderOpts, prefer: 'desc' }, mode)!];
+      } else {
+        g.challenge.activeSkill = (card.skills ?? []).indexOf(skill);
+        g.pending = {
+          kind: 'challengePick',
+          player: 'A',
+          prompt: `「${skill.name}」：用全部攻击骰逐个攻击，按什么顺序？`,
+          options: orderOpts,
+        };
+        return; // 停在代决
+      }
+    }
+    const order = (dec[skill.id] ?? [])[0];
+    delete dec[skill.id];
+    // §19⑨ 多段攻击源：勾魂镰 / 圆舞
+    g.virtualQueue = atk.map((x) => ({
+      attacker: 'B' as PlayerId, value: x.value, label: skill.name, owner: 'B' as PlayerId,
+      dieId: x.id, dieStyle: 'solid' as const,
+    }));
+    if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+    else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+    const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
+    atk.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+    g.challenge.deferred = undefined;
+    pumpAttackQueue(g);
+    return;
+  }
   if (skill.id === 'z05-5') {
     // 净化（延后一步）：把本技能上的驱动骰移入防御骰区（上限 4；放不下时挑战者代决"哪颗进"）
     const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
@@ -1316,6 +1434,13 @@ function continueLegendTurn(g: GameState, once = false): void {
   for (let i = g.challenge.resumeAt; i < card.skills.length; i++) {
     if (g.pendingAttack) return; // 正在等挑战者响应
     const skill = card.skills[i];
+    // Z06「死即新生」：由独立钩子（生命归 0）触发，**不占顺序步**
+    if (skill.unordered) continue;
+    // Z06「漆黑死神」：技能带 `color` → 只有指示物当前面与之相同时才发动
+    if (skill.color && skill.color !== (g.challenge.token ?? 'black')) {
+      logLine(g, `「${legacy}」：${skill.name} — 指示物为「${g.challenge.token === 'black' ? '黑' : '白'}」面，不发动`);
+      continue;
+    }
     // 纯被动（如「锋芒」＝按计数加伤害）：**不占"逐条结算"的步**，内部同步即可
     if (skill.passive) {
       applyChallengeSkill(g, card, skill, []);
@@ -1393,6 +1518,36 @@ function continueLegendTurn(g: GameState, once = false): void {
         }
         const ids = new Set(matched.flatMap((gr) => gr.ids));
         consumed = g.challenge.driven.filter((d) => ids.has(d.id));
+      } else if (skill.slotChoice && skill.slots.length === 1 && skill.slots[0].kind === 'same') {
+        // Z06 虚无形态/勾魂镰/圆舞：有 **≥2 个不同点数**的候选同点组时 → 挑战者代决"本技能用哪一组"
+        const s = skill.slots[0];
+        const groups = allSameGroups(s, g.challenge.driven);
+        if (groups.length === 0) {
+          logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+          continue;
+        }
+        const distinct = [...new Set(groups.map((gr) => gr.value))].sort((a, b) => a - b);
+        const decS = (g.challenge.decisions ??= {});
+        if (distinct.length >= 2 && !(decS[skill.id] ?? [])[0]) {
+          const opts = distinct.map((v) => ({ id: String(v), label: `${v}点组` }));
+          const mode = g.challenge.settleMode;
+          if (mode && mode !== 'manual') {
+            // 自动：**有利＝点数大、不利＝点数小**
+            decS[skill.id] = [autoPick({ options: opts, prefer: 'larger' }, mode)!];
+          } else {
+            g.challenge.activeSkill = i;
+            g.challenge.resumeAt = i;
+            g.pending = {
+              kind: 'challengePick',
+              player: 'A',
+              prompt: `「${skill.name}」：本技能用哪一组同点驱动骰？`,
+              options: opts,
+            };
+            return;
+          }
+        }
+        const wantV = Number((decS[skill.id] ?? [])[0] ?? distinct[0]);
+        consumed = groups.find((gr) => gr.value === wantV)?.dice ?? [];
       } else {
         // Z04「D1：开局选骰」——本条的骰由挑战者开局已选定（且与后续技能互不重叠）
         const assigned = g.challenge!.assign?.[skill.id];
@@ -1488,6 +1643,24 @@ function continueLegendTurn(g: GameState, once = false): void {
   g.challenge.slot = [];
   g.challenge.resumeAt = null;
   g.challenge.activeSkill = null;
+  // Z06「漆黑死神」：**回合结束时翻面**黑白指示物（并弹「无光领域」技能名）
+  if (card.token) {
+    const prev: 'black' | 'white' = g.challenge.token === 'white' ? 'white' : 'black';
+    g.challenge.token = prev === 'black' ? 'white' : 'black';
+    logLine(g, `「${legacy}」：无光领域指示物翻面 → ${g.challenge.token === 'black' ? '黑' : '白'}面`);
+    const wg = (card.skills ?? []).find((s) => s.id === 'z06-1');
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: wg?.id ?? 'z06-1',
+      skillName: wg?.name ?? '无光领域',
+      consumed: [],
+      spawn: [],
+      outIds: [],
+      attack: false,
+      announce: true,
+    });
+  }
   g.challenge.turn += 1;
   endTurn(g); // 交回合给挑战者（其 beginTurn 走正常流程）
 }
@@ -1842,6 +2015,8 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   g.players.B.areas = { attack: [], defense: [], meditation: [] };
   if (card.life != null) g.players.B.life = g.players.B.lifeMax = card.life;
   g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0, settleMode: opts.settleMode ?? 'manual' };
+  // Z06「漆黑死神」：黑白指示物，战斗开始＝**黑面朝上**（回合结束翻面）
+  if (card.token) g.challenge.token = 'black';
   logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」（${card.id}）· 生命 ${g.players.B.life}`);
   // 挑战者的战术牌：构筑直接生效
   if (opts.tactic) applyTacticStart(g, 'A');

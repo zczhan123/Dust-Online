@@ -6,7 +6,7 @@ import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
-import { addLegendDefense, legendAttackBonus } from './challenge';
+import { addLegendDefense, legendAttackBonus, legendDeathRevive } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -268,6 +268,7 @@ function noteDuanexing(g: GameState, target: PlayerId): void {
 
 export function checkLifeEnd(g: GameState): void {
   if (g.phase === 'gameOver') return;
+  if (legendDeathRevive(g)) return; // Z06「死即新生」：传奇生命归 0 → 复活，**不判负**
   const a = g.players.A.life;
   const b = g.players.B.life;
   let winner: PlayerId | null = null;
@@ -555,6 +556,12 @@ export function settleAttack(
         area.splice(idx, 1);
       }
     }
+  }
+  // Z06「冥界行走」（本回合）：传奇（B）的攻击**造成伤害** → 回复该攻击点数一半（向上取整）
+  if (g.mode === 'challenge' && pa.attacker === 'B' && g.challenge?.mingjieHeal && o.damageDealt > 0) {
+    const healAmt = Math.ceil(pa.value / 2);
+    heal(g, 'B', healAmt);
+    logLine(g, `「漆黑死神」：冥界行走 — 攻击造成伤害，回复 ${healAmt} 点生命`);
   }
   g.pendingAttack = null;
   if (g.phase === 'gameOver') return;
