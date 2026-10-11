@@ -80,15 +80,16 @@ let legendPickHoldUntil = 0;
 const legendGoneIds = new Set<string>();
 
 /**
- * 挑战模式「枭首」：把"已飞出去"的骰子从攻击骰区**数据层去掉**（幂等）。
- * **唯一入口**——开飞定时器与"每次渲染"都调它，二者缺一都会坏：
+ * 挑战模式：把"已飞出去"的骰子从**数据层**去掉（幂等）。**唯一入口**——开飞定时器与"每次渲染"都调它，缺一都会坏：
  *  · 只调定时器（v0.16.6）→ 挑战者一交互重绘，元素重建 → 骰子"复活"；
  *  · 只在渲染里做（v0.16.7）→ 开飞当下到下次重绘之间没人去掉它 → 骰子"停留"。
+ * 源骰可能在**攻击骰区**（枭首/裁雨流/无上剑术/战车）或**防御骰区**（真实之剑·甲）→ 两区都要查。
  */
 function hideLegendFlownDie(root: HTMLElement, id: string): void {
   legendGoneIds.add(id);
   const el = root.querySelector<HTMLElement>(
-    `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"]`,
+    `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"], ` +
+      `.panel--challenge .area[data-kind="defense"] .die[data-id="${id}"]`,
   );
   if (el) el.remove();
 }
@@ -1786,6 +1787,8 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     return parts;
   }
   if (pd && pd.kind === 'challengePick') {
+    // Z04「D1：开局选骰」——提示语原样展示（不再是"挑战模式 · 代决："格式）
+    if (pd.tag === 'assign') return [{ text: pd.prompt }];
     // 代决提示：把开头的「技能名」拆出来、用昔传玩家色；其余保持素色
     const m = /^「([^」]+)」/.exec(pd.prompt);
     if (m) {
@@ -2159,15 +2162,19 @@ function viewOwnerOf(state: GameState): PlayerId {
 function hintBox(ctx: Ctx): HTMLElement {
   const hint = el('div', 'hint');
   const left = el('div', 'hint-left');
+  // Z04「D1：开局选骰」＝替昔传做决定 → "轮到 X 操作"写「昔日传奇」而非决策者(A)，且不算"强制执行"
+  const isAssign =
+    ctx.state.pending?.kind === 'challengePick' && (ctx.state.pending as { tag?: string }).tag === 'assign';
   const actor = actorOf(ctx.state);
+  const who0 = isAssign ? 'B' : actor;
   const turn = el('span', 'hint-turn');
   turn.appendChild(document.createTextNode('轮到 '));
-  const who = el('span', `hint-player player-${actor}`);
-  who.textContent = playerName(ctx, actor);
+  const who = el('span', `hint-player player-${who0}`);
+  who.textContent = playerName(ctx, who0 as typeof actor);
   turn.appendChild(who);
   turn.appendChild(document.createTextNode(' 操作'));
   // 待决策属于非当前玩家（跨回合强制触发，如 018 强制必杀 / 017 帷幕）→ 明确标注
-  if (ctx.state.pending && ctx.state.pending.player !== ctx.state.activePlayer) {
+  if (!isAssign && ctx.state.pending && ctx.state.pending.player !== ctx.state.activePlayer) {
     const forced = el('span', 'hint-forced');
     forced.textContent = '（强制执行）';
     turn.appendChild(forced);
@@ -6422,8 +6429,11 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 这样挑战者点抵挡/不抵挡触发重绘时，它也不会"复活"；而"开飞当下"由定时器调用同一入口去掉，不会停留。
   if (state.mode === 'challenge') {
     for (const id of [...legendGoneIds]) hideLegendFlownDie(root, id);
-    // 自清理：只保留"此刻还在攻击骰区里"的 id（结算移除后自动掉出，不旧账复发）
-    const alive = new Set(state.players.B.areas.attack.map((d) => d.id));
+    // 自清理：只保留"此刻还在攻击骰区或防御骰区里"的 id（结算移除后自动掉出，不旧账复发）
+    //  · 攻击区＝枭首/裁雨流/无上剑术/战车；防御区＝真实之剑（甲，源骰留在防御区）
+    const alive = new Set(
+      [...state.players.B.areas.attack, ...state.players.B.areas.defense].map((d) => d.id),
+    );
     for (const id of [...legendGoneIds]) if (!alive.has(id)) legendGoneIds.delete(id);
   } else {
     legendGoneIds.clear();

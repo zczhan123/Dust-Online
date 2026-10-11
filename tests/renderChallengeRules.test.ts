@@ -156,6 +156,35 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     }
   });
 
+  it('真实之剑（甲）：源骰在**防御骰区**、飞出去时也要隐去（开飞当场消失、重绘不复活）', () => {
+    vi.useFakeTimers();
+    try {
+      const state = createChallengeGame({ seed: 1, cardId: 'Z04', challenger: ['001', '002', '003'] });
+      // 造"真实之剑一次攻击等待响应"的局面：**防御骰区**一颗真骰 + 以它为 sourceDieId 的待抵挡
+      state.players.B.areas.attack = [];
+      state.players.B.areas.defense = [{ id: 'bd9', value: 6, kind: 'defense' }];
+      state.challenge!.activeSkill = 1; // z04-1 真实之剑
+      state.pendingAttack = {
+        attacker: 'B',
+        value: 6,
+        unblockable: false,
+        physical: false,
+        baseValue: 6,
+        sourceDieId: 'bd9',
+        dieStyle: 'solid',
+      };
+      const { root, hooks } = mount(state);
+      const sel = '.panel--challenge .area[data-kind="defense"] .die[data-id="bd9"]';
+      expect(root.querySelector(sel)).not.toBeNull(); // ① 渲染当下还在（等到"开飞"才排除）
+      vi.advanceTimersByTime(5000); // ② 推进到"开飞那一刻"
+      expect(root.querySelector(sel)).toBeNull(); // 当场就没了（治"停留"）
+      renderGame(state, root, hooks); // ③ 再重绘（＝挑战者点抵挡/不抵挡那一帧）
+      expect(root.querySelector(sel)).toBeNull(); // 仍然没有（治"复活"）
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root, hooks } = mount(state);
@@ -318,5 +347,26 @@ describe('挑战模式 · 被攻击提示（遁入暗影 / 加伤 / 第 K/N 次�
     const hint = (root.querySelector('.hint') as HTMLElement).textContent ?? '';
     expect(hint).toContain('正在结算');
     expect(hint).toContain('遁入暗影');
+  });
+});
+
+describe('挑战模式 · Z04 D1（开局选骰）提示栏', () => {
+  it('D1 代决：提示栏写「轮到 昔日传奇 操作」+ 原样提示语（不是"玩家A"、无"强制执行"）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z04', challenger: ['001', '002', '003'] });
+    state.pending = {
+      kind: 'challengePick',
+      player: 'A',
+      tag: 'assign',
+      prompt: '检测到「梦醒时分」「顿悟」的驱动骰分配有 1 种以上选择，请代决。',
+      options: [
+        { id: 'd2', label: '梦醒时分吃 4×2点' },
+        { id: 'd5', label: '梦醒时分吃 4×5点' },
+      ],
+    };
+    const { root } = mount(state);
+    const hint = root.querySelector('.hint') as HTMLElement;
+    expect(hint.querySelector('.hint-player')!.textContent).toBe('昔日传奇');
+    expect(hint.textContent).toContain('检测到「梦醒时分」「顿悟」的驱动骰分配有 1 种以上选择，请代决。');
+    expect(hint.textContent).not.toContain('强制执行');
   });
 });

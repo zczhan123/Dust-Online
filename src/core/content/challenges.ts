@@ -100,7 +100,19 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z03-5', name: '拔城', marker: '∞', slots: null, effect: '如果本回合「孤塔之王」既没有发动「震荡斩击」，也没有发动「战争横扫」：弃置挑战者的全部能力骰，并进行 2 次 5 点的攻击。' },
     ],
   },
-  { id: 'Z04', legacy: '地狱的魔女', artifacts: ['010', '011', '012'] },
+  {
+    id: 'Z04', legacy: '地狱的魔女', artifacts: ['010', '011', '012'],
+    life: 40, defenseRule: '只会抵挡伤害 ≥ 5 的攻击', defenseMin: 5, rollDice: 10,
+    // 防御骰上限：无（不填 defenseCap → 不截断）
+    skills: [
+      { id: 'z04-0', name: '回合开始', slots: null, effect: '投掷 10 个驱动骰。' },
+      { id: 'z04-1', name: '真实之剑', marker: '∞', slots: null, effect: '如果「地狱的魔女」的防御骰数量超过 10 个，将其全部视为攻击骰发起攻击。' },
+      { id: 'z04-2', name: '梦醒时分', marker: '怜悯*', slots: [{ kind: 'same', count: 4 }], effect: '将挑战者的计数和充能全部重设为 0，将「地狱的魔女」的生命回复至 40 点。' },
+      { id: 'z04-3', name: '顿悟', marker: '怜悯*', slots: [{ kind: 'straight', count: 4 }], effect: '将「地狱的魔女」的所有区域中的能力骰数量翻倍，随机投掷新获得的能力骰。' },
+      { id: 'z04-4', name: '无上剑术', marker: '∞', slots: null, effect: '将剩余驱动骰中所有最高点数的驱动骰移动至攻击骰区。如果攻击骰的数量超过了挑战者的防御骰数量，则使用所有攻击骰发起攻击。' },
+      { id: 'z04-5', name: '灵能屏障', marker: '∞', slots: null, effect: '将剩余驱动骰中数量最多的点数的驱动骰移动至防御骰区。' },
+    ],
+  },
   { id: 'Z05', legacy: '轰鸣审判官', artifacts: ['013', '014', '015'] },
   { id: 'Z06', legacy: '漆黑死神', artifacts: ['016', '017', '018'] },
   { id: 'Z07', legacy: '荒野行者', artifacts: ['019', '020', '021'] },

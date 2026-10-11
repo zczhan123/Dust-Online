@@ -206,6 +206,8 @@ export type Pending =
       player: PlayerId;
       prompt: string;
       options: { id: string; label: string }[];
+      /** Z04「D1：开局选骰」＝'assign'（选完存 `challenge.assign`，而非按技能的 `decisions`） */
+      tag?: string;
     }
   /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
   | { kind: 'chargeResolve'; player: PlayerId; artifactId: string }
@@ -441,6 +443,11 @@ export interface GameState {
     caiyuliuHits?: number;
     /** Z03「拔城」：**本传奇回合内**已"发动"过的技能 id（每回合清；用于"既没发动 X 也没发动 Y"判定） */
     firedThisTurn?: string[];
+    /**
+     * Z04「D1：开局选骰」：**本回合**由挑战者在"投完驱动骰、逐条结算之前"一次性选定的分配
+     * （`skillId` → 该条技能要消耗的驱动骰 id 列表）。由 `runLegendTurn` 开局询问、`continueLegendTurn` 消耗。
+     */
+    assign?: Record<string, string[]>;
     /**
      * **延后一步的效果**（按卡面顺序：例「暗夜凶神」＝先攻击 → 攻击结算后 → 再弃骰 → 再计数 +1）。
      * `step` 从 0 递增；由 `continueLegendTurn` 在攻击结算完回到传奇回合时执行。

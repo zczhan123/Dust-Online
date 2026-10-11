@@ -525,11 +525,18 @@ export function settleAttack(
   if (o.applyDamage) noteFirstDamageFromOpponent(g, defenderId, o.damageDealt, pa.attacker);
   // T17「诱敌」：受到对方伤害后，可挂"移动最多 3 颗骰"的可选待决策
   if (o.applyDamage) noteYoudiAfterDamage(g, defenderId, o.damageDealt, pa.attacker);
-  // 挑战模式「枭首」：多段队列用"攻击骰区里的真骰"发起攻击 → **这一击结算完**才把那颗骰从区里移除。
+  // 挑战模式：多段队列用"某颗真骰"发起攻击 → **这一击结算完**才把那颗骰从区里移除。
+  //   · 枭首/裁雨流/无上剑术/战车：源骰在**攻击骰区**；
+  //   · 真实之剑（甲，2026-10-11）：源骰**留在防御骰区**（不搬进攻击骰区）→ 找不到就回退到防御骰区。
   //（只在本模式做，避免误伤 001/C01 裁雨流那种"攻击骰结算后落区"的常规流程。）
   if (g.mode === 'challenge' && pa.sourceDieId) {
-    const area = g.players[pa.attacker].areas.attack;
-    const idx = area.findIndex((d) => d.id === pa.sourceDieId);
+    const atkArea = g.players[pa.attacker].areas.attack;
+    let area = atkArea;
+    let idx = area.findIndex((d) => d.id === pa.sourceDieId);
+    if (idx < 0) {
+      area = g.players[pa.attacker].areas.defense; // 真实之剑：源骰在防御骰区
+      idx = area.findIndex((d) => d.id === pa.sourceDieId);
+    }
     if (idx >= 0) {
       // Z01「裁雨流」：**前 3 次造成伤害**的攻击骰 → 移入防御骰区（而非弃掉）；其余照常移走
       const hits = g.challenge?.caiyuliuHits ?? 0;

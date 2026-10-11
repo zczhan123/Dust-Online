@@ -82,7 +82,7 @@ describe('挑战模式 · Z03 效果', () => {
     expect(g.virtualQueue ?? []).toHaveLength(1); // 1 发出 + 1 待
   });
 
-  it('战车：① 5 点攻击 + ② 用全部攻击骰逐个攻击 + ③ 结算后**随机加 4 颗**防御骰（每颗 2 真伤、不封顶）', () => {
+  it('战车：① 5 点攻击 + ② 用全部攻击骰逐个攻击 + ③ 结算后**补充防御骰至 4**（每补 1 颗 2 真伤）', () => {
     const g = make();
     setA(g, {});
     g.players.B.areas.attack = [die('b1', 2, 'attack'), die('b2', 4, 'attack')];
@@ -90,27 +90,39 @@ describe('挑战模式 · Z03 效果', () => {
     applyChallengeSkill(g, Z03, SK('z03-4'), []);
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 5 }); // ①
     expect(g.challenge!.deferred).toMatchObject({ skillId: 'z03-4' }); // ③ 待攻击结算后
-    let guard = 0;
-    while ((g.pendingAttack || (g.virtualQueue ?? []).length) && guard++ < 20) {
-      if (g.pendingAttack) applyAction(g, { t: 'block' });
-    }
+    const drain = (): void => {
+      let guard = 0;
+      while ((g.pendingAttack || (g.virtualQueue ?? []).length) && guard++ < 20) {
+        if (g.pendingAttack) applyAction(g, { t: 'block' });
+      }
+    };
+    drain();
     const life0 = g.players.B.life;
     resolveLegendDeferred(g, Z03); // ③
-    expect(g.players.B.areas.defense).toHaveLength(4);
-    expect(g.players.B.life).toBe(life0 - 8); // 加 4 颗 → 4×2 真伤
+    expect(g.players.B.areas.defense).toHaveLength(4); // 0 → 补到 4
+    expect(g.players.B.life).toBe(life0 - 8); // 补 4 颗 → 4×2 真伤
     expect(g.challenge!.deferred).toBeUndefined();
 
-    // 再发动一次：已有 4 颗 → **再加 4 颗 = 8 颗**（不封顶）、再 −8 生命
+    // 再发动一次：已有 4 颗 → **不再补充、也不掉血**
     g.players.B.areas.attack = [];
     applyChallengeSkill(g, Z03, SK('z03-4'), []);
-    let g2 = 0;
-    while ((g.pendingAttack || (g.virtualQueue ?? []).length) && g2++ < 20) {
-      if (g.pendingAttack) applyAction(g, { t: 'block' });
-    }
+    drain();
     const life1 = g.players.B.life;
     resolveLegendDeferred(g, Z03);
-    expect(g.players.B.areas.defense).toHaveLength(8); // 4 → 8（防御骰区无上限）
-    expect(g.players.B.life).toBe(life1 - 8);
+    expect(g.players.B.areas.defense).toHaveLength(4); // 仍是 4（补至 4，不是再加 4）
+    expect(g.players.B.life).toBe(life1); // 补 0 颗 → 0 真伤
+  });
+
+  it('战车：防御骰只有 2 个 → 补到 4（补 2 颗、4 真伤）', () => {
+    const g = make();
+    setA(g, {});
+    g.players.B.areas.attack = [];
+    g.players.B.areas.defense = [die('bd0', 3, 'defense'), die('bd1', 5, 'defense')];
+    const life0 = g.players.B.life;
+    g.challenge!.deferred = { skillId: 'z03-4', step: 0 }; // 直接驱动 ③ 分支（跳过攻击结算）
+    resolveLegendDeferred(g, Z03);
+    expect(g.players.B.areas.defense).toHaveLength(4);
+    expect(g.players.B.life).toBe(life0 - 4);
   });
 
   it('拔城：本回合未发动震荡/横扫 → 弃全部挑战者能力骰 + 2 次 5 点攻击', () => {

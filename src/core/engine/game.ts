@@ -270,6 +270,106 @@ function busiestAreaOfChallenger(g: GameState): DiceKind {
   return KINDS_ORDER.reduce((best, k) => (p.areas[k].length > p.areas[best].length ? k : best), KINDS_ORDER[0]);
 }
 
+// ————————————————— Z04「D1：开局选骰」—————————————————
+// 梦醒时分〔4 同点〕与顿悟〔4 顺点〕共用同一批驱动骰 → "哪几颗给谁"会决定后续顿悟能否发动、
+// 以及必检「无上剑术」会打进攻击区什么点数。故在传奇回合**投完骰、逐条结算前**由挑战者一次选好。
+
+/** 「顿悟」可用的顺点窗口起始点（4 连、不回绕：1234/2345/3456）。 */
+function straightStarts(driven: Die[], count: number): number[] {
+  const vals = new Set(driven.map((d) => d.value));
+  const out: number[] = [];
+  for (let s = 1; s + count - 1 <= 6; s++) {
+    let ok = true;
+    for (let v = s; v < s + count; v++) if (!vals.has(v)) { ok = false; break; }
+    if (ok) out.push(s);
+  }
+  return out;
+}
+
+/** 「梦醒时分」可用的同点点值：某点数在驱动骰里 ≥ count 颗（升序）。 */
+function sameValueGroups(driven: Die[], count: number): number[] {
+  const cnt = new Map<number, number>();
+  for (const d of driven) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+  return [...cnt.entries()].filter(([, n]) => n >= count).map(([v]) => v).sort((a, b) => a - b);
+}
+
+const takeIdsOf = (driven: Die[], v: number, count: number): string[] =>
+  driven.filter((d) => d.value === v).slice(0, count).map((d) => d.id);
+
+/**
+ * D1 的一种选择（**梦醒时分是必发**，只有"吃哪个点数"可选；顿悟则看剩余能否凑顺点）：
+ * - `kind:'dream'`（情形1）：梦醒可吃的点数 ≥2 种 → 让玩家选**吃哪个点值**；顿悟必然被挤断。
+ * - `kind:'straight'`（情形2）：梦醒只有 ≤1 种 → 看**顿悟**有没有 ≥2 个顺点窗口，选**用哪个窗口**。
+ * （两种情形**互斥**：梦醒有得选时，10 颗骰最多撑 4 种点数 → 顺点必用满 → 吃哪组都断。）
+ */
+export interface AssignPlan {
+  kind: 'dream' | 'straight';
+  dreamV: number | null;
+  straightS: number | null;
+  dreamIds: string[];
+  straightIds: string[];
+}
+
+/** 枚举本回合 D1 的**候选选择**（情形 1＝梦醒点值；情形 2＝顿悟窗口）。 */
+function assignPlans(g: GameState): AssignPlan[] {
+  const driven = g.challenge!.driven;
+  const dreams = sameValueGroups(driven, 4);
+  if (dreams.length >= 2) {
+    // 情形 1：梦醒有得选 → 问"吃哪个点值"（顿悟必断，不列为选项）
+    return dreams.map((v) => ({
+      kind: 'dream' as const,
+      dreamV: v,
+      straightS: null,
+      dreamIds: takeIdsOf(driven, v, 4),
+      straightIds: [],
+    }));
+  }
+  // 情形 2：梦醒至多 1 种（或没有）→ 看顿悟在"梦醒吃剩的骰"里有没有 ≥2 个顺点窗口
+  const dreamV = dreams[0] ?? null;
+  const dreamIds = dreamV === null ? [] : takeIdsOf(driven, dreamV, 4);
+  const remain = driven.filter((d) => !dreamIds.includes(d.id));
+  const windows = straightStarts(remain, 4);
+  if (windows.length < 2) return [];
+  return windows.map((s) => ({
+    kind: 'straight' as const,
+    dreamV,
+    straightS: s,
+    dreamIds,
+    straightIds: [s, s + 1, s + 2, s + 3].flatMap((v) => takeIdsOf(remain, v, 1)),
+  }));
+}
+
+const assignOptId = (p: AssignPlan): string => (p.kind === 'dream' ? `d${p.dreamV}` : `s${p.straightS}`);
+const assignOptLabel = (p: AssignPlan): string =>
+  p.kind === 'dream'
+    ? `梦醒时分吃 4×${p.dreamV}点`
+    : `顿悟用 ${p.straightS}${(p.straightS ?? 0) + 1}${(p.straightS ?? 0) + 2}${(p.straightS ?? 0) + 3}`;
+
+/** 需要问 D1 吗？情形 1（梦醒 ≥2 种点值）或情形 2（顿悟 ≥2 个窗口）时返回候选；否则 null。（导出供测试） */
+export function legendAssignNeeded(g: GameState): AssignPlan[] | null {
+  // 目前仅"有这两条技能"的卡（Z04）走 D1；其它卡不弹
+  const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+  const has = (id: string): boolean => (card?.skills ?? []).some((s) => s.id === id);
+  if (!has('z04-2') || !has('z04-3')) return null;
+  const plans = assignPlans(g);
+  return plans.length >= 2 ? plans : null;
+}
+
+/** 自动：**有利＝取大、不利＝取小**（情形 1 比梦醒点值 v；情形 2 比顺点窗口起点 s）。（导出供测试） */
+export function legendAssignAuto(plans: AssignPlan[], mode: 'favor' | 'against'): AssignPlan {
+  const val = (p: AssignPlan): number => (p.kind === 'dream' ? (p.dreamV ?? 0) : (p.straightS ?? 0));
+  const sorted = [...plans].sort((a, b) => val(a) - val(b));
+  return mode === 'favor' ? sorted[sorted.length - 1] : sorted[0];
+}
+
+const assignBySkill = (p: AssignPlan): Record<string, string[]> => ({ 'z04-2': p.dreamIds, 'z04-3': p.straightIds });
+
+/** 由 D1 选项 id 反查回分配方案（需在"骰子未被消耗前"调用）。 */
+function assignFromOptId(g: GameState, id: string): Record<string, string[]> | undefined {
+  const p = assignPlans(g).find((x) => assignOptId(x) === id);
+  return p ? assignBySkill(p) : undefined;
+}
+
 /**
  * 挑战模式：这条技能**本次是否会真的产生效果**（＝"发动检查"）。
  * `∞`（无槽）只表示"**每回合都要做一次发动检查**（无骰子条件）"，**不等于必定生效**——
@@ -294,6 +394,11 @@ function legendSkillWillFire(g: GameState, skill: ChallengeSkill): boolean {
       const fired = g.challenge!.firedThisTurn ?? [];
       return !fired.includes('z03-2') && !fired.includes('z03-3');
     }
+    case 'z04-1': // 真实之剑：防御骰超过 10 个才"视为攻击骰发起攻击"，否则空操作
+      return g.players.B.areas.defense.length > 10;
+    case 'z04-4': // 无上剑术：得有"剩余驱动骰"才移得动
+    case 'z04-5': // 灵能屏障：同上
+      return g.challenge!.driven.length > 0;
     default:
       return true;
   }
@@ -332,7 +437,8 @@ function challengeDecisions(
     }
     case 'z01-5':
     case 'z02-4':
-      // 裁雨流 / 枭首：「攻击顺序」**不在此处问**——必须等"驱动骰已移入攻击骰区"之后再问
+    case 'z04-4':
+      // 裁雨流 / 枭首 / 无上剑术：「攻击顺序」**不在此处问**——必须等"骰子已移入攻击骰区"之后再问
       //（顺序代决挪到 `resolveLegendDeferred`）。这里返回 []，让 `applyChallengeSkill` 先做"移动到攻击骰区"。
       return [];
     case 'z02-2':
@@ -381,6 +487,20 @@ function challengeDecisions(
         ? [
             {
               prompt: '「战车」：用全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+              prefer: 'desc',
+            },
+          ]
+        : [];
+    case 'z04-1':
+      // 真实之剑：把全部防御骰当攻击骰逐个攻击 → 定顺序（>1 颗才问）
+      return B.areas.defense.length > 1
+        ? [
+            {
+              prompt: '「真实之剑」：用全部攻击骰逐个攻击，按什么顺序？',
               options: [
                 { id: 'asc', label: '由小到大' },
                 { id: 'desc', label: '由大到小' },
@@ -679,6 +799,76 @@ export function applyChallengeSkill(
       }
       return { spawn, outIds };
     }
+    case 'z04-1': {
+      // 真实之剑（甲口径，2026-10-11 用户定）：
+      //   · 防御骰 > 10 → **这些防御骰"视为攻击骰"**，逐颗**从防御骰区**飞出攻击；
+      //   · **不搬进攻击骰区**（`kind` 不变）→ 界面不会播"防御区→攻击区"的移动；
+      //   · 攻击骰区**原有的骰子既不移动、也不参与本次攻击**（卡面"将其全部视为攻击骰"＝只打这批）。
+      if (B.areas.defense.length <= 10) return { spawn, outIds };
+      const src = [...B.areas.defense]; // 本次攻击源＝这批判防御骰（原地不动）
+      // §19⑨ 多段攻击源：真实之剑
+      g.virtualQueue = src.map((d) => ({
+        attacker: 'B' as PlayerId,
+        value: d.value,
+        label: skill.name,
+        owner: 'B' as PlayerId,
+        dieId: d.id,
+        dieStyle: 'solid' as const,
+      }));
+      const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+      else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+      // 防御骰区**排列也按同序重排** → "最左边那颗先飞出去"，观感不错位（与枭首/裁雨流同款）
+      const rank = new Map(g.virtualQueue.map((q, i) => [q.dieId, i]));
+      B.areas.defense.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z04-2': {
+      // 梦醒时分：挑战者的**计数与充能全部重设为 0**；"魔女"生命**回复至 40**
+      for (const a of A.artifacts) {
+        a.count = 0;
+        a.chargeLayer = 0;
+      }
+      g.players.B.life = 40;
+      logLine(g, `「${card.legacy}」：${skill.name} — 挑战者计数/充能归零，「${card.legacy}」生命回复至 40`);
+      return { spawn, outIds };
+    }
+    case 'z04-3': {
+      // 顿悟：将"魔女"**所有区域中的能力骰数量翻倍**（新增的随机投点、落回原区域）
+      for (const k of KINDS_ORDER) {
+        const n = B.areas[k].length;
+        withRng(g, (rng) => {
+          for (let i = 0; i < n; i++) gain(k, rng.rollDie());
+        });
+      }
+      return { spawn, outIds };
+    }
+    case 'z04-4': {
+      // 无上剑术：把**剩余驱动骰中最高点数**的骰移入攻击骰区。
+      //   "是否攻击（攻击骰数 > 挑战者防御骰数）+ 攻击顺序代决 + 逐个攻击"一律**延后到** `resolveLegendDeferred`
+      //   —— 顺序必须在"驱动骰已移入攻击骰区"之后才问（见 AGENTS §16「代决时点＝先移骰动画、再问」）。
+      const dr = g.challenge!.driven;
+      const maxV = dr.reduce((m, d) => Math.max(m, d.value), 0);
+      for (const d of dr.filter((x) => x.value === maxV)) gain('attack', d.value);
+      g.challenge!.driven = dr.filter((x) => x.value !== maxV);
+      g.challenge!.deferred = { skillId: skill.id, step: 0 };
+      return { spawn, outIds };
+    }
+    case 'z04-5': {
+      // 灵能屏障：把**剩余驱动骰中数量最多的点数**的骰移入防御骰区（并列取点数小者，确定性）
+      const dr = g.challenge!.driven;
+      const cnt = new Map<number, number>();
+      for (const d of dr) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+      let bestV = 0;
+      let bestN = -1;
+      for (const [v, n] of [...cnt.entries()].sort((a, b) => a[0] - b[0])) {
+        if (n > bestN) { bestN = n; bestV = v; }
+      }
+      for (const d of dr.filter((x) => x.value === bestV)) gain('defense', d.value);
+      g.challenge!.driven = dr.filter((x) => x.value !== bestV);
+      return { spawn, outIds };
+    }
     default:
       return { spawn, outIds };
   }
@@ -712,6 +902,24 @@ function runLegendTurn(g: GameState): void {
   g.challenge.slot = [];
   g.challenge.activeSkill = 0; // 高亮「回合开始」
   g.challenge.resumeAt = 1; // 下一条从技能 1 开始
+  // Z04「D1：开局选骰」——投完骰、逐条结算前，若"分配对战局有较大影响"则由挑战者一次选好
+  g.challenge.assign = undefined;
+  const assignPlanner = legendAssignNeeded(g);
+  if (assignPlanner) {
+    const mode = g.challenge.settleMode;
+    if (mode && mode !== 'manual') {
+      g.challenge.assign = assignBySkill(legendAssignAuto(assignPlanner, mode));
+    } else {
+      g.pending = {
+        kind: 'challengePick',
+        player: 'A',
+        tag: 'assign',
+        prompt:
+          '检测到「梦醒时分」「顿悟」的驱动骰分配有 1 种以上选择，请代决。（会影响后续「无上剑术」打进攻击区的点数）',
+        options: assignPlanner.map((p) => ({ id: assignOptId(p), label: assignOptLabel(p) })),
+      };
+    }
+  }
 }
 
 /**
@@ -761,11 +969,11 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     g.challenge.deferred = undefined;
     return;
   }
-  if (skill.id === 'z01-5' || skill.id === 'z02-4') {
-    // 裁雨流 / 枭首：驱动骰**已移入攻击骰区**（`applyChallengeSkill` 做的）→ 此刻才问"攻击顺序"、再逐个攻击。
+  if (skill.id === 'z01-5' || skill.id === 'z02-4' || skill.id === 'z04-4') {
+    // 裁雨流 / 枭首 / 无上剑术：骰子**已移入攻击骰区**（`applyChallengeSkill` 做的）→ 此刻才问"攻击顺序"、再逐个攻击。
     const atk = g.players.B.areas.attack;
-    // 枭首：只有"攻击骰数 > 挑战者防御骰数"才真的攻击（否则本技能只移入、不打，也不问顺序）
-    if (skill.id === 'z02-4' && atk.length <= A.areas.defense.length) {
+    // 枭首 / 无上剑术：只有"攻击骰数 > 挑战者防御骰数"才真的攻击（否则本技能只移入、不打，也不问顺序）
+    if ((skill.id === 'z02-4' || skill.id === 'z04-4') && atk.length <= A.areas.defense.length) {
       g.challenge.deferred = undefined;
       return;
     }
@@ -797,7 +1005,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     const order = (dec[skill.id] ?? [])[0];
     delete dec[skill.id];
     // 骰子**留在攻击骰区**：队列条目带 dieId/dieStyle，轮到它时才从区里飞出并消耗（界面演"逐颗飞出攻击"）
-    // §19⑨ 多段攻击源：裁雨流 / 枭首
+    // §19⑨ 多段攻击源：裁雨流 / 枭首 / 无上剑术
     g.virtualQueue = atk.map((x) => ({
       attacker: 'B' as PlayerId,
       value: x.value,
@@ -836,14 +1044,14 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     return;
   }
   if (skill.id === 'z03-4') {
-    // 战车 ③（攻击结算后）：**随机加 4 颗防御骰**（与当前数量无关；Z03 防御骰区**无上限**、不截断）
-    //   → 每颗 → 孤塔之王受 **2 点真实伤害**（即每次固定 +4 防 / −8 生命）。
-    //   判读依据（2026-10-10 用户）：卡面"防御骰上限：无"只有"防御骰能超过 4"才有意义 → 不是"补至 4"而是"加 4"。
-    const DEF_ADD = 4;
+    // 战车 ③（攻击结算后）：**补充随机点数的防御骰，直至防御骰的数量为 4**（卡面原文；作者裁定 2026-10-11）
+    //   —— 防御骰区**已有 4 颗（或更多）则不再补充**；补 1 颗 → 孤塔之王受 **2 点真实伤害**（补 0 → 0 伤）。
+    const TARGET_DEF = 4;
+    const toAdd = Math.max(0, TARGET_DEF - g.players.B.areas.defense.length);
     const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
     let added = 0;
     withRng(g, (rng) => {
-      for (let i = 0; i < DEF_ADD; i++) {
+      for (let i = 0; i < toAdd; i++) {
         const v = rng.rollDie();
         const die = createDie(newDieId('chg-B-'), v, 'defense');
         if (!addLegendDefense(g, die)) break; // Z03 无上限，理论必成
@@ -853,7 +1061,9 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     });
     if (added > 0) {
       dealTrueDamage(g, 'B', added * 2, 'B');
-      logLine(g, `「${card.legacy}」：${skill.name} — 补充 ${added} 个防御骰，受到 ${added * 2} 点真实伤害`);
+      logLine(g, `「${card.legacy}」：${skill.name} — 补充 ${added} 个防御骰（补至 4），受到 ${added * 2} 点真实伤害`);
+    } else {
+      logLine(g, `「${card.legacy}」：${skill.name} — 防御骰已有 ${g.players.B.areas.defense.length} 个（≥ 4），不再补充`);
     }
     g.challenge.deferred = undefined;
     fxPush({
@@ -998,12 +1208,18 @@ function continueLegendTurn(g: GameState, once = false): void {
         const useIdx = chosenIdx ?? groups.map((_, idx) => idx);
         consumed = useIdx.flatMap((idx) => groups[idx]?.dice ?? []);
       } else {
-        const m = matchSlots(skill.slots, g.challenge.driven);
-        if (!m) {
-          logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
-          continue;
+        // Z04「D1：开局选骰」——本条的骰由挑战者开局已选定（且与后续技能互不重叠）
+        const assigned = g.challenge!.assign?.[skill.id];
+        if (assigned && assigned.length > 0) {
+          consumed = g.challenge.driven.filter((d) => assigned.includes(d.id));
+        } else {
+          const m = matchSlots(skill.slots, g.challenge.driven);
+          if (!m) {
+            logLine(g, `「${legacy}」：${skill.name} — 驱动骰不足，跳过`);
+            continue;
+          }
+          consumed = g.challenge.driven.filter((d) => m.includes(d.id));
         }
-        consumed = g.challenge.driven.filter((d) => m.includes(d.id));
       }
     }
     // 代决（模式 1）：本条需要的选择还没收集齐 → **先把骰子扣下、发第一步动效**，再挂代决
@@ -4081,6 +4297,12 @@ function applyActionCore(g: GameState, action: Action): GameState {
       const opt = pd.options.find((o) => o.id === action.id);
       if (!opt) throw new Error(`非法代决选项：${action.id}`);
       g.pending = null;
+      if (pd.tag === 'assign') {
+        // Z04「D1：开局选骰」→ 存进 `g.challenge.assign`（不按技能记 `decisions`）
+        g.challenge!.assign = assignFromOptId(g, action.id);
+        logLine(g, `（代决）${pd.prompt} → ${opt.label}`);
+        break;
+      }
       const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
       // 选择归到"**正在结算的那条技能**"：不能用 resumeAt —— "延后一步"的代决（例：暗夜凶神弃骰）
       // 是在攻击结算后问的，那时 resumeAt 已经指向下一条了。
