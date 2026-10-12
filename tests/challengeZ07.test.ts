@@ -341,3 +341,30 @@ describe('挑战模式 · Z07 效果', () => {
     expect(g.challenge!.count).toBe(1); // 结算照旧
   });
 });
+
+describe('挑战模式 · Z07 不屈咆哮 · 选组自动（按"蛮王之牙发送数"）', () => {
+  // 规律：吃掉"偶数颗"的点数 → 该点数少 1 组 2 同点；"奇数颗" → 组数不变。
+  // 故"有利＝挑偶数颗最多的顺点"（蛮王发送最少），"不利"反之。驱动骰 [1,1,2,2,3,4,5,6]：
+  //   123 → 吃 1(偶)2(偶)3(奇) → 减 2 组；234 → 减 1；345/456 → 全奇、减 0。
+  const drive = (mode: 'favor' | 'against'): GameState => {
+    const g = make(mode);
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.challenge!.count = 0;
+    g.challenge!.turn = 1;
+    g.challenge!.resumeAt = 2; // z07-2 不屈咆哮
+    g.challenge!.driven = [die('a', 1), die('b', 1), die('c', 2), die('d', 2), die('e', 3), die('f', 4), die('g', 5), die('h', 6)];
+    setA(g, {});
+    applyAction(g, { t: 'challengeStep' });
+    return g;
+  };
+  it('有利＝挑"偶数颗"点数最多的顺点（蛮王发送最少）→ 选 123，剩 [1,2,4,5,6]（蛮王凑 0 组）', () => {
+    const g = drive('favor');
+    expect(vals(g.challenge!.driven).sort((x, y) => x - y)).toEqual([1, 2, 4, 5, 6]);
+  });
+  it('不利＝挑"奇数颗"最多的顺点（蛮王发送最多）→ 选 345，剩 [1,1,2,2,6]（蛮王凑 2 组）', () => {
+    const g = drive('against');
+    expect(vals(g.challenge!.driven).sort((x, y) => x - y)).toEqual([1, 1, 2, 2, 6]);
+  });
+});

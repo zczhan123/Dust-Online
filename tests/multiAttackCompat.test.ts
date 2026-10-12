@@ -66,7 +66,7 @@ describe('§19⑨ 多段攻击三件套 · 门禁（自动盘点源码）', () =
     const missing = hits.filter((h) => !ANCHOR_RE.test(h.prev));
     expect(missing.map((h) => `${h.file}:${h.line}`)).toEqual([]); // 新来源没加锚注释 → 这里红
     const allAnchors = hits.map((h) => ANCHOR_RE.exec(h.prev)![1]).join('|');
-    for (const name of ['013', 'A08', 'A01', '裁雨流', '枭首', '战争横扫', '战车', '拔城', '真实之剑', '无上剑术', '数罪并罚', '电刑', '虚无形态', '勾魂镰', '圆舞', '兽魂', '蛮王之牙', '尘起']) {
+    for (const name of ['013', 'A08', 'A01', '裁雨流', '枭首', '战争横扫', '战车', '拔城', '真实之剑', '无上剑术', '数罪并罚', '电刑', '虚无形态', '勾魂镰', '圆舞', '兽魂', '蛮王之牙', '尘起', '处刑通牒']) {
       expect(allAnchors).toContain(name);
     }
   });
@@ -140,5 +140,14 @@ describe('§19⑨ 多段攻击三件套 · 联动（中途待决策解决后自�
     applyAction(g, getLegalActions(g)[0]);
     expect(g.pending).toBeNull();
     expect(g.pendingAttack?.value ?? g.pendingAttack?.baseValue).toBe(6);
+  });
+
+  it('Z08 处刑通牒（virtualQueue，挑战模式）：中途弹出待决策 → 解决后自动开始下一段', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z08', challenger: ['001', '002', '003'] });
+    g.virtualQueue = [{ attacker: 'B', value: 4, label: '处刑通牒', owner: 'B' }];
+    g.pending = { kind: 'leibao', player: 'A' };
+    applyAction(g, getLegalActions(g)[0]);
+    expect(g.pending).toBeNull();
+    expect(g.pendingAttack?.value ?? g.pendingAttack?.baseValue).toBe(4);
   });
 });

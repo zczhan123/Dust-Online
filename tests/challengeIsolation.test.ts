@@ -132,7 +132,7 @@ describe('挑战模式 · 隔离守护（不得外溢到标准模式）', () => 
   });
 
   describe('C. 战报称呼', () => {
-    it('标准局仍称呼「玩家B」；挑战局 B →「昔日传奇」', () => {
+    it('标准局仍称呼「玩家B」；挑战局 B → **卡名**「永暗之刃」（战报记具体英雄；界面口径仍是昔日传奇）', () => {
       const std = STD();
       logLine(std, '玩家B 回合开始');
       expect(std.log[std.log.length - 1]?.text).toBe('玩家B 回合开始');
@@ -140,8 +140,12 @@ describe('挑战模式 · 隔离守护（不得外溢到标准模式）', () => 
       const chal = CHAL();
       logLine(chal, '玩家B 回合开始');
       const shown = chal.log[chal.log.length - 1]?.text;
-      expect(shown).toBe(`${LEGEND_DISPLAY_NAME} 回合开始`);
+      expect(shown).toBe('「永暗之刃」 回合开始');
       expect(shown).not.toContain('玩家B');
+      expect(shown).not.toContain(LEGEND_DISPLAY_NAME); // 战报不再用「昔日传奇」
+      // 叙述里的「昔日传奇」也换成卡名（录像口径）
+      logLine(chal, '（单人挑战：跳过「昔日传奇」的那份）');
+      expect(chal.log[chal.log.length - 1]?.text).toBe('（单人挑战：跳过「永暗之刃」的那份）');
     });
   });
 

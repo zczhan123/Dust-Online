@@ -640,6 +640,14 @@ button.pay-die {
 .log-line {
   white-space: pre-wrap;
 }
+/* 战报上色：身份词 / 技能名按归属上色（A 蓝 / B 红）；深色战报底 → 用**更亮**的同色系保证可读 */
+.log-actor,
+.log-skill { font-weight: 700; }
+.log-actor.player-A,
+.log-skill.player-A { color: #7db2ff; }
+.log-actor.player-B,
+.log-skill.player-B { color: #ff8f8f; }
+.log-prefix { color: inherit; opacity: .72; }
 .sidebar .log {
   flex: 1;
   max-height: none;
@@ -805,7 +813,7 @@ button.pay-die {
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
 }
 .gameover-title { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
-.gameover-winner { font-size: 26px; font-weight: 800; color: #b23a3a; margin-bottom: 8px; }
+.gameover-winner { font-size: 26px; font-weight: 800; margin-bottom: 8px; }
 .gameover-reason { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 .gameover-restart { font-size: 16px; }
 

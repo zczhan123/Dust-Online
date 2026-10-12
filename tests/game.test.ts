@@ -124,7 +124,7 @@ describe('game actions and turn flow', () => {
     applyAction(g, { t: 'advance' }); // B: dustRise -> main
     applyAction(g, { t: 'advance' }); // B 回合结束 -> A 的第二个回合 (T3)
     expect(g.turnIndex).toBe(3);
-    const starts = g.log.filter((l) => l.text.endsWith('的回合开始'));
+    const starts = g.log.filter((l) => l.text.endsWith('的回合——'));
     expect(starts.map((l) => [l.turn, l.phase])).toEqual([
       [1, 'dustRise'], // 首回合（跳过补充/重掷，从尘起开始）
       [2, 'dustRise'], // 对方的首个回合

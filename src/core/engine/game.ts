@@ -417,6 +417,8 @@ function legendSkillWillFire(g: GameState, skill: ChallengeSkill): boolean {
     }
     case 'z07-5': // 尘起：还有驱动骰可移入防御区，或攻击骰区有骰可攻击 → 才发动
       return g.challenge!.driven.length > 0 || g.players.B.areas.attack.length > 0;
+    case 'z08-1': // 填弹：得有驱动骰才移得动
+      return g.challenge!.driven.length > 0;
     default:
       return true;
   }
@@ -489,7 +491,216 @@ function pickComboIds(g: GameState, pool: Die[], n: number, prefer: 'larger' | '
   return sorted[0].map((i) => pool[i].id);
 }
 
-/** 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
+// ————————————————— Z08「黑枪」链式代决后瞻 —————————————————
+// 「凶弹业舞」〔4 顺点〕→「共振」〔2 颗 ∈{2,5}〕→「处刑通牒」〔2 颗同点〕依次消耗同一批驱动骰：
+//   · 凶弹业舞选哪段顺点 → 影响共振能否发动（还可能因搬走攻/防骰改变"能力骰数"而翻转共振分支）；
+//   · 共振选哪两颗 → 影响处刑通牒能否发动（并因得骰使黑枪攻击骰 +2 影响处刑通牒的 +5/+1 判定）；
+//   · 处刑通牒选哪一对 → 影响蛇蝎之泪（3/4 点）能搬几颗进防御骰区。
+// 故自动（有利/不利）**不能只看本步点数**，必须逐候选**向后模拟**：
+//   ① 后续技能"可发动"数：有利＝越少越好 / 不利＝越多越好；
+//   ② 再比蛇蝎之泪"实际进防御骰区"颗数（受上限截断）：有利＝越少越好 / 不利＝越多越好；
+//   ③ 同分再比点值（有利＝点值小、不利＝点值大）保证确定性。
+
+interface Z08Sim {
+  driven: number[];
+  aAtk: number;
+  aDef: number;
+  aMed: number;
+  bAtk: number;
+  bDef: number;
+}
+
+function z08SimFromGame(g: GameState): Z08Sim {
+  const A = g.players.A;
+  const B = g.players.B;
+  return {
+    driven: (g.challenge?.driven ?? []).map((d) => d.value),
+    aAtk: A.areas.attack.length,
+    aDef: A.areas.defense.length,
+    aMed: A.areas.meditation.length,
+    bAtk: B.areas.attack.length,
+    bDef: B.areas.defense.length,
+  };
+}
+
+/** 从多重集 `arr` 里移除一份 `rem`（按值逐个扣，重复值也正确处理）。 */
+function minusMulti(arr: number[], rem: number[]): number[] {
+  const r = [...rem];
+  return arr.filter((v) => {
+    const i = r.indexOf(v);
+    if (i >= 0) {
+      r.splice(i, 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+interface Z08Cand {
+  key: string;
+  label: string;
+  /** 确定性兜底排序值（本轮消耗的点值之和） */
+  sort: number;
+  removed: number[];
+  next: Z08Sim;
+  /** 仅「蛇蝎之泪」：本次实际进防御骰区的颗数 */
+  snakeDef?: number;
+}
+
+/** Z08 第 k 条技能（k∈2..5）在状态 `st` 下的全部候选（无候选＝该技能发动不了）。 */
+function z08SimCands(k: number, st: Z08Sim, cap: number): Z08Cand[] {
+  const dr = st.driven;
+  const out: Z08Cand[] = [];
+  const sum = (a: number[]): number => a.reduce((s, x) => s + x, 0);
+  if (k === 2) {
+    // 凶弹业舞：4 连顺点窗口（1234 / 2345 / 3456）
+    for (let start = 1; start + 3 <= 6; start++) {
+      const vals = [start, start + 1, start + 2, start + 3];
+      if (!vals.every((v) => dr.includes(v))) continue;
+      const moved = Math.min(st.aAtk, Math.max(0, cap - st.bDef));
+      out.push({
+        key: vals.join(''),
+        label: `${vals.join('')}顺点`,
+        sort: sum(vals),
+        removed: vals,
+        next: {
+          driven: minusMulti(dr, vals),
+          aAtk: 0,
+          aDef: 0,
+          aMed: st.aMed,
+          bAtk: st.bAtk + st.aDef,
+          bDef: st.bDef + moved,
+        },
+      });
+    }
+  } else if (k === 3) {
+    // 共振：取 2 颗每颗 ∈{2,5}（22/25/55 等）
+    const pool = dr.filter((v) => v === 2 || v === 5);
+    const seen = new Set<string>();
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i + 1; j < pool.length; j++) {
+        const vals = [pool[i], pool[j]];
+        const key = [...vals].sort((a, b) => a - b).join(',');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const aTot = st.aAtk + st.aDef + st.aMed;
+        const next: Z08Sim = aTot >= 4
+          ? { ...st, driven: minusMulti(dr, vals), aAtk: st.aAtk + 2, bAtk: st.bAtk + 2 }
+          : { ...st, driven: minusMulti(dr, vals), aDef: Math.max(0, st.aDef - 2), bDef: Math.max(0, st.bDef - 2) };
+        out.push({ key, label: `${vals.join('、')}点`, sort: sum(vals), removed: vals, next });
+      }
+    }
+  } else if (k === 4) {
+    // 处刑通牒：取 2 颗同点
+    const cnt = new Map<number, number>();
+    for (const v of dr) cnt.set(v, (cnt.get(v) ?? 0) + 1);
+    for (const [v, n] of [...cnt.entries()].sort((a, b) => a[0] - b[0])) {
+      if (n < 2) continue;
+      const vals = [v, v];
+      out.push({ key: String(v), label: `${v}点组`, sort: v, removed: vals, next: { ...st, driven: minusMulti(dr, vals) } });
+    }
+  } else if (k === 5) {
+    // 蛇蝎之泪：任意颗 3/4 点（无限）
+    const vals = dr.filter((v) => v === 3 || v === 4);
+    if (vals.length === 0) return [];
+    const snakeDef = Math.min(vals.length, Math.max(0, cap - st.bDef));
+    out.push({ key: 'snake', label: '蛇蝎之泪', sort: sum(vals), removed: vals, next: { ...st, driven: minusMulti(dr, vals) }, snakeDef });
+  }
+  return out;
+}
+
+/** 从第 k 条技能（Z08 的 2..5）起向后模拟，返回**最优**结果（按 mode）：`fired`＝可发动技能数、`snakeDef`＝蛇蝎之泪进防区颗数。 */
+function z08TailOpt(k: number, st: Z08Sim, mode: 'favor' | 'against', cap: number): { fired: number; snakeDef: number } {
+  if (k > 5) return { fired: 0, snakeDef: 0 };
+  const cands = z08SimCands(k, st, cap);
+  if (cands.length === 0) return z08TailOpt(k + 1, st, mode, cap);
+  const better = (a: { fired: number; snakeDef: number }, b: { fired: number; snakeDef: number }): boolean =>
+    mode === 'against'
+      ? a.fired > b.fired || (a.fired === b.fired && a.snakeDef > b.snakeDef)
+      : a.fired < b.fired || (a.fired === b.fired && a.snakeDef < b.snakeDef);
+  let best: { fired: number; snakeDef: number } | null = null;
+  for (const c of cands) {
+    const rest = k < 5 ? z08TailOpt(k + 1, c.next, mode, cap) : { fired: 0, snakeDef: c.snakeDef ?? 0 };
+    const r = { fired: 1 + rest.fired, snakeDef: rest.snakeDef };
+    if (best === null || better(r, best)) best = r;
+  }
+  return best!;
+}
+
+/** Z08「凶弹业舞 / 共振 / 处刑通牒」的**链式后瞻**自动选组：返回应选的候选 key。 */
+function z08ChainPickKey(g: GameState, skill: ChallengeSkill, mode: 'favor' | 'against'): string | undefined {
+  const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+  const cap = card?.defenseCap ?? Number.POSITIVE_INFINITY;
+  const k = Number(skill.id.split('-')[1]);
+  const cands = z08SimCands(k, z08SimFromGame(g), cap);
+  if (cands.length === 0) return undefined;
+  const better = (a: { fired: number; snakeDef: number; sort: number }, b: { fired: number; snakeDef: number; sort: number }): boolean => {
+    if (mode === 'against') {
+      if (a.fired !== b.fired) return a.fired > b.fired;
+    } else if (a.fired !== b.fired) {
+      return a.fired < b.fired;
+    }
+    if (a.snakeDef !== b.snakeDef) return mode === 'against' ? a.snakeDef > b.snakeDef : a.snakeDef < b.snakeDef;
+    return mode === 'against' ? a.sort > b.sort : a.sort < b.sort;
+  };
+  let best: Z08Cand | null = null;
+  let bestScore: { fired: number; snakeDef: number; sort: number } | null = null;
+  for (const c of cands) {
+    const rest = k < 5 ? z08TailOpt(k + 1, c.next, mode, cap) : { fired: 0, snakeDef: c.snakeDef ?? 0 };
+    const score = { fired: rest.fired, snakeDef: rest.snakeDef, sort: c.sort };
+    if (bestScore === null || better(score, bestScore)) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return best?.key;
+}
+
+/** Z08 候选 key → 实际要消耗的驱动骰 id（取 `driven` 里前若干颗同值者）。 */
+function z08IdsOfKey(driven: Die[], cands: Z08Cand[], key: string): string[] {
+  const c = cands.find((x) => x.key === key);
+  if (!c) return [];
+  const used = new Set<string>();
+  const ids: string[] = [];
+  for (const v of c.removed) {
+    const d = driven.find((x) => x.value === v && !used.has(x.id));
+    if (d) {
+      ids.push(d.id);
+      used.add(d.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Z07「不屈咆哮」**选组**自动专用（手动＝挑战者自选弹面板）：
+ * 不屈咆哮吃掉一段 3 顺点（3 个互不相同的点数），会改变"剩余驱动骰里能凑几组 2 同点"＝
+ * **蛮王之牙的发送次数**。规律：**吃掉"偶数颗"的点数 → 该点数少 1 组；"奇数颗" → 组数不变**
+ * （2→1、4→3… 减 1；3→2、5→4… 不变）。故蛮王发送数 = 选择前总组数 −(所吃顺点里"偶数颗"点数个数)。
+ * - **有利**（少发动蛮王）＝挑"偶数颗"点数最多的顺点；**不利**＝挑"奇数颗"最多的；并列再比点值（有利＝点数大）。
+ */
+function z07QubuAutoPick(g: GameState, cands: { key: string; sort: number }[], mode: 'favor' | 'against'): string | undefined {
+  if (cands.length === 0) return undefined;
+  const cnt = new Map<number, number>();
+  for (const d of g.challenge!.driven) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+  // 吃掉 [start, start+1, start+2] 后，剩余"2 同点成对"的总组数
+  const groupsAfter = (start: number): number => {
+    const win = new Set([start, start + 1, start + 2]);
+    let groups = 0;
+    for (const [v, n] of cnt.entries()) groups += Math.floor((n - (win.has(v) ? 1 : 0)) / 2);
+    return groups;
+  };
+  const items = cands.map((c) => ({ key: c.key, start: c.sort, groups: groupsAfter(c.sort) }));
+  items.sort((a, b) =>
+    mode === 'against'
+      ? b.groups - a.groups || a.start - b.start // 不利＝蛮王越多越好；并列取点数小
+      : a.groups - b.groups || b.start - a.start, // 有利＝蛮王越少越好；并列取点数大
+  );
+  return items[0].key;
+}
+
+/**
+ * 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
  *  `atDeferred`＝这句话是在"延后一步"阶段问的（例：暗夜凶神的"弃哪颗防御骰"应在 8 点攻击结算**之后**问）。 */
 function challengeDecisions(
   g: GameState,
@@ -603,6 +814,20 @@ function challengeDecisions(
         ? [
             {
               prompt: '「真实之剑」：用全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+              prefer: 'desc',
+            },
+          ]
+        : [];
+    case 'z08-4':
+      // 处刑通牒：用攻击骰区全部骰逐个攻击 → 定顺序（>1 颗才问；骰子已在攻击骰区，故可在前置问）
+      return B.areas.attack.length > 1
+        ? [
+            {
+              prompt: '「处刑通牒」：用全部攻击骰逐个攻击，按什么顺序？',
               options: [
                 { id: 'asc', label: '由小到大' },
                 { id: 'desc', label: '由大到小' },
@@ -1188,6 +1413,84 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     case 'z07-x':
       return { spawn, outIds }; // 围攻＝独立钩子（挑战者 6 点攻击骰造成伤害前）
+    case 'z08-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z08-1': {
+      // 填弹：取点数最高的 1 个驱动骰移入攻击骰区（并列取第一个＝确定性）
+      const dr = g.challenge!.driven;
+      if (dr.length === 0) return { spawn, outIds };
+      const maxV = dr.reduce((m, x) => Math.max(m, x.value), 0);
+      const idx = dr.findIndex((x) => x.value === maxV);
+      const die = dr[idx];
+      g.challenge!.driven = dr.filter((_, i) => i !== idx);
+      gain('attack', die.value);
+      logLine(g, `「${legacy}」：${skill.name} — 点数最高的驱动骰 ${die.value} 移入攻击骰区`);
+      return { spawn, outIds };
+    }
+    case 'z08-2': {
+      // 凶弹业舞：① 挑战者**所有防御骰** → 黑枪攻击骰区（新建 B 攻骰 + 消耗 A 防骰）；
+      //   ② 挑战者**所有攻击骰** → 黑枪防御骰区（受上限 4）→ **延后一步**（先播①、放不下时②走代决）。
+      const aDef = [...A.areas.defense];
+      for (const d of aDef) gain('attack', d.value);
+      if (aDef.length > 0) consumeDice(g, A, 'defense', aDef.map((d) => d.id));
+      const aAtk = A.areas.attack.map((d) => ({ id: d.id, value: d.value }));
+      g.challenge!.deferred = { skillId: skill.id, step: 0, dice: aAtk };
+      logLine(g, `「${legacy}」：${skill.name} — 挑战者 ${aDef.length} 个防御骰 → 攻击骰区`);
+      return { spawn, outIds };
+    }
+    case 'z08-3': {
+      // 共振：挑战者能力骰 ≥4 → 双方各得 2 随机攻击骰；<4 → 双方各弃 2 防御骰（代决"弃哪几颗"延后一步）
+      const aTot = A.areas.attack.length + A.areas.defense.length + A.areas.meditation.length;
+      if (aTot >= 4) {
+        withRng(g, (rng) => {
+          gainRandomDice(g, 'A', 'attack', 2, rng);
+          gain('attack', rng.rollDie());
+          gain('attack', rng.rollDie());
+        });
+        logLine(g, `「${legacy}」：${skill.name} — 挑战者能力骰 ${aTot}≥4：双方各获得 2 个随机攻击骰`);
+      } else {
+        g.challenge!.deferred = { skillId: skill.id, step: 0 };
+        logLine(g, `「${legacy}」：${skill.name} — 挑战者能力骰 ${aTot}<4：双方各弃置 2 个防御骰`);
+      }
+      return { spawn, outIds };
+    }
+    case 'z08-4': {
+      // 处刑通牒：攻击骰数 > 挑战者防御骰数 → 本回合攻击伤害 +5；否则 +1 且不可抵挡；再"用所有攻击骰发起攻击"
+      const atk = B.areas.attack;
+      const over = atk.length > A.areas.defense.length;
+      B.buffs.push({ attr: 'attackDamage', add: over ? 5 : 1, duration: 'thisTurn', source: '处刑通牒' });
+      logLine(
+        g,
+        `「${legacy}」：${skill.name} — 攻击骰 ${atk.length} ${over ? '>' : '≤'} 挑战者防御骰 ${A.areas.defense.length}：本回合攻击伤害 ${over ? '+5' : '+1 且不可抵挡'}`,
+      );
+      if (atk.length === 0) return { spawn, outIds };
+      const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      // §19⑨ 多段攻击源：处刑通牒
+      g.virtualQueue = atk.map((x) => ({
+        attacker: 'B' as PlayerId,
+        value: x.value,
+        label: skill.name,
+        owner: 'B' as PlayerId,
+        dieId: x.id,
+        dieStyle: 'solid' as const,
+        ...(over ? {} : { unblockable: true }),
+      }));
+      if (order === 'asc') g.virtualQueue.sort((a, b) => a.value - b.value);
+      else if (order === 'desc') g.virtualQueue.sort((a, b) => b.value - a.value);
+      // 区里的排列同序 → "最左先飞"
+      const rank = new Map(g.virtualQueue.map((x, i) => [x.dieId, i]));
+      atk.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z08-5':
+      // 蛇蝎之泪：本技能驱动骰（3/4 点）全部 → 防御骰区（受上限 4；放不下走代决）→ 延后一步
+      g.challenge!.deferred = {
+        skillId: skill.id,
+        step: 0,
+        dice: consumed.map((d) => ({ id: d.id, value: d.value })),
+      };
+      return { spawn, outIds };
     default:
       return { spawn, outIds };
   }
@@ -1673,6 +1976,105 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     if (d.step >= groups.length) g.challenge.deferred = undefined;
     return;
   }
+  if (skill.id === 'z08-2') {
+    // 凶弹业舞 ②：挑战者**所有攻击骰** → 黑枪防御骰区（受上限 4；放不下时挑战者代决"哪几颗进"）。
+    const dice = d.dice ?? [];
+    if (dice.length === 0) {
+      g.challenge.deferred = undefined;
+      return;
+    }
+    const spawn = placeDefenseFrom(g, card, skill, dice);
+    if (spawn === null) return; // 停在代决（challengePick）
+    // 挑战者的这些攻击骰**全部离开**其攻击骰区（放不进防御区的部分＝弃置）
+    const ids = dice.map((x) => x.id).filter((id) => g.players.A.areas.attack.some((dd) => dd.id === id));
+    if (ids.length > 0) consumeDice(g, g.players.A, 'attack', ids);
+    logLine(g, `「${card.legacy}」：${skill.name} — 挑战者攻击骰移入防御骰区（${spawn.length} 颗）`);
+    delete (g.challenge.decisions ?? {})[skill.id];
+    g.challenge.deferred = undefined;
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: false,
+      announce: false,
+    });
+    return;
+  }
+  if (skill.id === 'z08-3') {
+    // 共振·弃置分支：双方各弃 2 个防御骰（挑战者代决"弃哪几颗"；step 0＝黑枪侧、step 1＝挑战者侧）。
+    const dec = (g.challenge.decisions ??= {});
+    const doDiscard = (who: PlayerId, prefer: 'larger' | 'smaller'): boolean => {
+      const pool = g.players[who].areas.defense;
+      if (pool.length === 0) return true;
+      if (pool.length <= 2) {
+        consumeDice(g, g.players[who], 'defense', pool.map((x) => x.id));
+        return true;
+      }
+      const key = `${skill.id}:${who}`;
+      const chosen = (dec[key] ?? [])[0];
+      if (chosen) {
+        consumeDice(g, g.players[who], 'defense', chosen.split(','));
+        return true;
+      }
+      const opts = combinations(pool.length, 2).map((c) => ({
+        id: c.map((i) => pool[i].id).join(','),
+        label: c.map((i) => `防${pool[i].value}`).join('、'),
+      }));
+      const mode = g.challenge!.settleMode;
+      if (mode && mode !== 'manual') {
+        const id = autoPick({ options: opts, prefer }, mode)!;
+        dec[key] = [id];
+        consumeDice(g, g.players[who], 'defense', id.split(','));
+        return true;
+      }
+      g.challenge!.activeSkill = (card.skills ?? []).indexOf(skill);
+      g.pending = {
+        kind: 'challengePick',
+        player: 'A',
+        prompt: `「${skill.name}」：弃置${who === 'B' ? '「黑枪」' : '自己'}哪 2 个防御骰？`,
+        options: opts,
+        key,
+        pick: { pool: pool.map((x) => ({ id: x.id, value: x.value, kind: 'defense' as const })), n: 2, owner: who },
+      };
+      return false;
+    };
+    if (d.step === 0) {
+      if (!doDiscard('B', 'larger')) return; // 有利＝弃黑枪的"大"防御骰（削它防御）
+      d.step = 1;
+    }
+    if (d.step === 1) {
+      if (!doDiscard('A', 'smaller')) return; // 有利＝弃自己的"小"防御骰（保自己大牌）
+      delete dec[`${skill.id}:B`];
+      delete dec[`${skill.id}:A`];
+      g.challenge.deferred = undefined;
+      logLine(g, `「${card.legacy}」：${skill.name} — 双方各弃置 2 个防御骰`);
+    }
+    return;
+  }
+  if (skill.id === 'z08-5') {
+    // 蛇蝎之泪：本技能驱动骰（3/4 点）全部 → 防御骰区（受上限 4；放不下时挑战者代决"哪几颗进"）
+    const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
+    if (spawn === null) return; // 停在代决（challengePick）
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗）`);
+    delete (g.challenge.decisions ?? {})[skill.id];
+    g.challenge.deferred = undefined;
+    fxPush({
+      kind: 'legendSkill',
+      player: 'B',
+      skillKey: skill.id,
+      skillName: skill.name,
+      consumed: [],
+      spawn,
+      outIds: [],
+      attack: false,
+      announce: false,
+    });
+    return;
+  }
   g.challenge.deferred = undefined;
 }
 
@@ -1783,11 +2185,27 @@ function continueLegendTurn(g: GameState, once = false): void {
         }
         const ids = new Set(matched.flatMap((gr) => gr.ids));
         consumed = g.challenge.driven.filter((d) => ids.has(d.id));
-      } else if (skill.slotChoice && skill.slots.length === 1 && (skill.slots[0].kind === 'same' || skill.slots[0].kind === 'straight')) {
-        // Z06 虚无形态/勾魂镰/圆舞（同点）+ Z07 不屈咆哮（顺点）：有 **≥2 个不同**的候选组 → 挑战者代决"用哪一组"
+      } else if (
+        skill.slotChoice &&
+        skill.slots.length === 1 &&
+        (skill.id === 'z08-2' ||
+          skill.id === 'z08-3' ||
+          skill.id === 'z08-4' ||
+          skill.slots[0].kind === 'same' ||
+          skill.slots[0].kind === 'straight')
+      ) {
+        // Z06 虚无形态/勾魂镰/圆舞（同点）+ Z07 不屈咆哮（顺点）+ Z08 凶弹业舞/共振/处刑通牒：
+        //   有 **≥2 个不同**的候选组 → 挑战者代决"用哪一组"（Z08 走链式后瞻、Z07 按"蛮王发送数"自动）。
         const s = skill.slots[0];
+        const isZ08 = skill.id === 'z08-2' || skill.id === 'z08-3' || skill.id === 'z08-4';
         const cands: { key: string; label: string; ids: string[]; sort: number }[] = [];
-        if (s.kind === 'same') {
+        if (isZ08) {
+          const capZ = card.defenseCap ?? Number.POSITIVE_INFINITY;
+          const simCands = z08SimCands(Number(skill.id.split('-')[1]), z08SimFromGame(g), capZ);
+          for (const c of simCands) {
+            cands.push({ key: c.key, label: c.label, ids: z08IdsOfKey(g.challenge.driven, simCands, c.key), sort: c.sort });
+          }
+        } else if (s.kind === 'same') {
           for (const gr of allSameGroups(s, g.challenge.driven)) {
             cands.push({ key: String(gr.value), label: `${gr.value}点组`, ids: gr.dice.map((d) => d.id), sort: gr.value });
           }
@@ -1818,9 +2236,17 @@ function continueLegendTurn(g: GameState, once = false): void {
           const opts = cands.map((c) => ({ id: c.key, label: c.label }));
           const mode = g.challenge.settleMode;
           if (mode && mode !== 'manual') {
-            // 自动：**有利＝点数大、不利＝点数小**
-            const sorted = [...cands].sort((a, b) => (mode === 'against' ? a.sort - b.sort : b.sort - a.sort));
-            decS[slotKey] = [sorted[0].key];
+            // Z08：链式后瞻（后续发动数 → 蛇蝎之泪防骰数 → 点值）；Z07「不屈咆哮」：按"蛮王发送数"；
+            // 其余：**有利＝点数大、不利＝点数小**
+            const key2 =
+              (isZ08 ? z08ChainPickKey(g, skill, mode) : undefined) ??
+              (skill.id === 'z07-2' ? z07QubuAutoPick(g, cands, mode) : undefined);
+            if (key2 !== undefined) {
+              decS[slotKey] = [key2];
+            } else {
+              const sorted = [...cands].sort((a, b) => (mode === 'against' ? a.sort - b.sort : b.sort - a.sort));
+              decS[slotKey] = [sorted[0].key];
+            }
           } else {
             g.challenge.activeSkill = i;
             g.challenge.resumeAt = i;
@@ -1974,7 +2400,8 @@ export function beginTurn(g: GameState): void {
   g.phase = g.firstRound[p] && !t11 ? 'dustRise' : 'reroll';
   // T11「迷烟」：首回合本应跳过重掷，是它**多给了一段"重掷阶段"** → 弹「迷烟」
   if (g.firstRound[p] && t11) fxTacticFired(g, p);
-  logLine(g, `${pname(p)} 的回合开始`);
+  // 回合分隔横幅：全模式统一成 `——X 的回合——`（与传奇回合「——「黑枪」的回合——」同款）
+  logLine(g, `——${pname(p)} 的回合——`);
   g.pendingAttack = null;
   g.pending = null;
   g.unblockableThisTurn = false;

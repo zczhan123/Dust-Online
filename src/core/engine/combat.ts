@@ -918,7 +918,7 @@ export function pumpAttackQueue(g: GameState): void {
     const next = vq.shift()!;
     if (vq.length === 0) g.virtualQueue = null;
     logLine(g, `${pname(next.attacker)} 「${next.label}」：以 ${next.value} 点发起攻击（依次结算）`);
-    virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner });
+    virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner }, { unblockable: next.unblockable });
     // 挑战模式「枭首」：本条攻击用的是**攻击骰区里的那颗真骰**。
     // ⚠️ 这里**不删**它——骰子留在区里（"用掉"发生在**这次攻击结算后**，见 settleAttack）：
     //   于是"新骰飞进来"与"旧骰还并排在区里"能同帧存在，界面再按"先进后出"演；

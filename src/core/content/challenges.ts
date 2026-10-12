@@ -204,7 +204,30 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z07-x', name: '围攻', unordered: true, slots: null, effect: '当挑战者将要通过 6 点的攻击骰造成伤害，且「荒野行者」有计数时，取消该伤害，「荒野行者」的计数 -1。' },
     ],
   },
-  { id: 'Z08', legacy: '黑枪', artifacts: ['022', '023', '024'] },
+  {
+    id: 'Z08', legacy: '黑枪', artifacts: ['022', '023', '024'],
+    life: 50, defenseCap: 4, defenseRule: '只会抵挡伤害 ≥ 3 的攻击', defenseMin: 3, rollDice: 8,
+    skills: [
+      { id: 'z08-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },
+      { id: 'z08-1', name: '填弹', marker: '∞', slots: null, effect: '将点数最高的 1 个驱动骰移动至「黑枪」的攻击骰区。' },
+      {
+        id: 'z08-2', name: '凶弹业舞', slotChoice: true, slots: [{ kind: 'straight', count: 4 }],
+        effect: '将挑战者的所有防御骰移动至「黑枪」的攻击骰区。将挑战者的所有攻击骰移动至「黑枪」的防御骰区。',
+      },
+      {
+        id: 'z08-3', name: '共振', slotChoice: true, slots: [{ kind: 'pips', count: 2, faces: [2, 5] }],
+        effect: '如果挑战者的能力骰数量大于或等于 4：「黑枪」和挑战者各自获得 2 个随机点数的攻击骰。否则：「黑枪」和挑战者各自弃置 2 个防御骰。',
+      },
+      {
+        id: 'z08-4', name: '处刑通牒', slotChoice: true, slots: [{ kind: 'same', count: 2 }],
+        effect: '如果攻击骰的数量超过了挑战者的防御骰数量，则本回合中「黑枪」的攻击伤害 +5。否则，本回合中「黑枪」的攻击伤害 +1 且不可抵挡。使用所有攻击骰发起攻击。',
+      },
+      {
+        id: 'z08-5', name: '蛇蝎之泪', slots: [{ kind: 'pips', count: 0, faces: [3, 4], unlimited: true }],
+        effect: '将本技能上的驱动骰全部移动至防御骰区。',
+      },
+    ],
+  },
   { id: 'Z09', legacy: '天殇的战鬼', artifacts: ['025', '026', '027'] },
   { id: 'Z10', legacy: '破晓之剑', artifacts: ['028', '029', '030'] },
   { id: 'Z11', legacy: '受缚邪灵', artifacts: ['031', '032', '033'] },

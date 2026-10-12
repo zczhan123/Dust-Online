@@ -280,13 +280,14 @@ function el(tag: string, className: string): HTMLElement {
   return e;
 }
 
-function button(label: string, action: Action, hooks: RenderHooks, cls = ''): HTMLButtonElement {
+function button(label: string, action: Action, hooks: RenderHooks, cls = '', direct = false): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = `btn ${cls}`.trim();
   b.dataset.act = action.t;
   b.textContent = label;
-  b.addEventListener('click', () => hooks.propose(action, label));
+  // direct＝不弹确认条，点一下直接派发（如"无骰可挡"时的「不抵挡」）
+  b.addEventListener('click', () => (direct ? hooks.onAction(action) : hooks.propose(action, label)));
   return b;
 }
 
@@ -2208,7 +2209,13 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     case 'main':
       return [{ text: '主要阶段：可启动技能、发动攻击（顺序不限）；完成后「结束回合」。' }];
     case 'gameOver':
-      return [{ text: `游戏结束，胜者：${state.winner ?? '—'}。` }];
+      return state.winner
+        ? [
+            { text: '游戏结束，胜者：' },
+            { text: playerName(ctx, state.winner), color: state.winner },
+            { text: '。' },
+          ]
+        : [{ text: '游戏结束，平局。' }];
     default:
       return [];
   }
@@ -3534,11 +3541,16 @@ function operationList(ctx: Ctx): HTMLElement {
     plain.push(a);
   }
   // 骰片行（攻击/抵挡/取消真伤/减半/改点）→ 与技能、尘起、纯文字动作并列
+  // 「不抵挡」在**无骰可挡**时一键直发（不弹确认条）；有骰可挡时仍走确认条
+  const blockHasDice = ctx.legal.some(
+    (x) => x.t === 'block' && (x.costSlots?.[0]?.dieIds?.length ?? 0) > 0,
+  );
   for (const g of groups.values()) box.appendChild(actionChipRow(ctx, g.parts, g.items));
   for (const a of plain) {
     const label = actionLabel(ctx, a);
     if (label === null) continue;
-    box.appendChild(button(label, a, ctx.hooks));
+    const direct = a.t === 'block' && !blockHasDice;
+    box.appendChild(button(label, a, ctx.hooks, '', direct));
   }
   if (box.childElementCount === 0) {
     const empty = el('div', 'actionlist-empty');
@@ -3986,14 +3998,101 @@ function confirmSelection(ctx: Ctx): void {
   hooks.requestRender();
 }
 
-function logLines(box: HTMLElement, entries: GameState['log']): void {
+/**
+ * 战报上色（**仅界面层**，引擎 `entry.text` 不变 → 现有 `l.text` 断言不受影响）。
+ * 把"玩家名 / 技能名"渲染成按归属上色的 span：
+ *  ① 身份词：`玩家A`(蓝) / `玩家B`(红) / 挑战模式 `「<当前卡名>」`(红) / `昔日传奇`(红)；
+ *  ② `「…」`里的名字 → 按"离它**最近的前一个身份词**"上色（无前身份 → 取本行第一个身份词）；
+ *  ③ 挑战模式"传奇回合行"（以 `「<卡名>」` 开头）里的**裸技能名**（匹配该卡技能名表）→ 红。
+ * **同名技能不串色**：颜色只由"这句话在讲谁"决定，不建"名字→归属"全局表。
+ * （残留局限：一行里同时提双方、且技能属"后提到"一方且中间无身份词过渡时可能偏色——罕见，接受。）
+ */
+function appendLogColored(
+  line: HTMLElement,
+  text: string,
+  cardLegacy: string | null,
+  cardSkillNames: string[],
+): void {
+  const actors: { start: number; end: number; color: PlayerId }[] = [];
+  const skills: { start: number; end: number }[] = [];
+  const scan = (re: RegExp, on: (m: RegExpExecArray) => void): void => {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      on(m);
+      if (m.index === re.lastIndex) re.lastIndex += 1; // 防零宽死循环
+    }
+  };
+  scan(/玩家A/g, (m) => actors.push({ start: m.index, end: m.index + 3, color: 'A' }));
+  scan(/玩家B/g, (m) => actors.push({ start: m.index, end: m.index + 3, color: 'B' }));
+  scan(/昔日传奇/g, (m) => actors.push({ start: m.index, end: m.index + 4, color: 'B' }));
+  if (cardLegacy) {
+    const tag = `「${cardLegacy}」`;
+    scan(new RegExp(tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), (m) =>
+      actors.push({ start: m.index, end: m.index + tag.length, color: 'B' }),
+    );
+  }
+  scan(/「[^」]*」/g, (m) => {
+    const inner = m[0].slice(1, -1);
+    if (cardLegacy && inner === cardLegacy) return; // 已作身份词，不重复
+    skills.push({ start: m.index, end: m.index + m[0].length });
+  });
+  // 传奇回合行里的"裸技能名"（数据匹配；仅此类行 → 挑战者行永不触发 → 同名不串）
+  if (cardLegacy && text.startsWith(`「${cardLegacy}」`)) {
+    for (const nm of cardSkillNames) {
+      if (!nm) continue;
+      let i = text.indexOf(nm);
+      while (i >= 0) {
+        const end = i + nm.length;
+        const overlaps =
+          actors.some((a) => i < a.end && end > a.start) || skills.some((s) => i < s.end && end > s.start);
+        if (!overlaps) skills.push({ start: i, end });
+        i = text.indexOf(nm, i + nm.length);
+      }
+    }
+  }
+  const colorOf = (start: number): PlayerId | null => {
+    let best: { start: number; color: PlayerId } | null = null;
+    for (const a of actors) if (a.start < start && (!best || a.start > best.start)) best = a;
+    return (best ?? actors[0])?.color ?? null;
+  };
+  const marks = [
+    ...actors.map((a) => ({ start: a.start, end: a.end, cls: `log-actor player-${a.color}` })),
+    ...skills
+      .map((s) => ({ s, c: colorOf(s.start) }))
+      .filter((x) => x.c !== null)
+      .map((x) => ({ start: x.s.start, end: x.s.end, cls: `log-skill player-${x.c}` })),
+  ].sort((a, b) => a.start - b.start);
+
+  let pos = 0;
+  for (const mk of marks) {
+    if (mk.start < pos) continue; // 交叠 → 取先者
+    if (mk.start > pos) line.appendChild(document.createTextNode(text.slice(pos, mk.start)));
+    const span = el('span', mk.cls);
+    span.textContent = text.slice(mk.start, mk.end);
+    line.appendChild(span);
+    pos = mk.end;
+  }
+  if (pos < text.length) line.appendChild(document.createTextNode(text.slice(pos)));
+}
+
+function logLines(box: HTMLElement, entries: GameState['log'], ctx: Ctx): void {
   if (entries.length === 0) {
     box.textContent = '（暂无记录）';
     return;
   }
+  const card =
+    ctx.state.mode === 'challenge' && ctx.state.challenge
+      ? CHALLENGES.find((c) => c.id === ctx.state.challenge!.cardId)
+      : undefined;
+  const cardLegacy = card?.legacy ?? null;
+  const cardSkillNames = (card?.skills ?? []).map((s) => s.name);
   for (const entry of entries) {
     const line = el('div', 'log-line');
-    line.textContent = `T${entry.turn}·${PHASE_LABEL[entry.phase]}：${entry.text}`;
+    const prefix = el('span', 'log-prefix');
+    prefix.textContent = `T${entry.turn}·${PHASE_LABEL[entry.phase]}：`;
+    line.appendChild(prefix);
+    appendLogColored(line, entry.text, cardLegacy, cardSkillNames);
     box.appendChild(line);
   }
 }
@@ -4010,7 +4109,7 @@ function logPanel(ctx: Ctx, zoomable = false): HTMLElement {
       ctx.hooks.requestRender();
     });
   }
-  logLines(box, ctx.state.log.slice(-30).reverse());
+  logLines(box, ctx.state.log.slice(-30).reverse(), ctx);
   return box;
 }
 
@@ -4034,7 +4133,7 @@ function logPopModal(ctx: Ctx): HTMLElement {
   head.appendChild(close);
   modal.appendChild(head);
   const body = el('div', 'log log--pop');
-  logLines(body, [...ctx.state.log].reverse());
+  logLines(body, [...ctx.state.log].reverse(), ctx);
   modal.appendChild(body);
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
@@ -4687,11 +4786,14 @@ function gameOverModal(ctx: Ctx): HTMLElement {
   modal.appendChild(title);
 
   const winner = el('div', 'gameover-winner');
-  winner.textContent = state.winner
-    ? ctx.hooks.online
-      ? `玩家${state.winner}（${playerName(ctx, state.winner)}）获胜！`
-      : `玩家${state.winner} 获胜！`
-    : '平局';
+  if (state.winner) {
+    // 胜者名**按玩家色**（A 蓝 / B 红）；显示名走统一口径（标准＝玩家A/B；挑战＝昔日传奇；联机＝昵称）
+    const span = el('span', `player-${state.winner}`);
+    span.textContent = `${playerName(ctx, state.winner)} 获胜！`;
+    winner.appendChild(span);
+  } else {
+    winner.textContent = '平局';
+  }
   modal.appendChild(winner);
 
   const reason = el('div', 'gameover-reason');

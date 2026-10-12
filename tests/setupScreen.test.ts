@@ -663,11 +663,13 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
   });
 
-  it('传 Z08（黑枪，**未转写**）→ 显示"待转写"', () => {
+  it('传 Z08（黑枪）：已转写 → 显示生命 50 / 防御骰上限 4（不是"待转写"）', () => {
     renderChallengeSetup(root, () => {});
     abOf('xiva', 'legend').click();
     expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“黑枪”');
-    expect(q(root, '.pick-legend-info')!.textContent).toContain('待转写');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 4');
+    expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
   });
 
   it('传 Z03（孤塔之王）：已转写且无上限 → 显示「防御骰上限 无」（不是"待转写"）', () => {

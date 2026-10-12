@@ -533,6 +533,8 @@ export interface GameState {
     dieStyle?: 'solid';
     /** 因"多组"触发的攻击：组序号/组数（+组内第几段），供提示栏显示（见 `LegendGroup`）。 */
     legendGroup?: LegendGroup;
+    /** 本条攻击**不可抵挡**（Z08「处刑通牒」的 +1 分支：本回合其攻击不可抵挡）。 */
+    unblockable?: boolean;
   }[] | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;

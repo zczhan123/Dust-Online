@@ -37,8 +37,8 @@ describe('initial reroll (setup step 3)', () => {
     const g = createGame({ seed: 1, firstPlayer: 'B' });
     applyAction(g, { t: 'advance' }); // B skip
     applyAction(g, { t: 'advance' }); // A skip -> B's first turn
-    const entry = g.log.find((l) => l.text.endsWith('的回合开始'));
-    expect(entry).toEqual({ turn: 1, phase: 'dustRise', text: '玩家B 的回合开始' });
+    const entry = g.log.find((l) => l.text.endsWith('的回合——'));
+    expect(entry).toEqual({ turn: 1, phase: 'dustRise', text: '——玩家B 的回合——' });
   });
 
   it('re-places rerolled dice by distribution', () => {
