@@ -177,6 +177,11 @@ describe('挑战模式 · Z03 代决（自选＝挑战者弹面板 / 有利·不
     if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
     // 选项为"攻击区里取 4 颗"的组合（C(6,4)=15）
     expect(g.pending.options).toHaveLength(15);
+    expect(g.pending.pick?.pool.every((x) => x.kind === 'attack')).toBe(true); // 骰片显示「攻N」
+    // 乱序确认（＝界面骰片点击顺序）→ 不再报"非法代决选项"
+    const scrambled = g.pending.options[0].id.split(',').reverse().join(',');
+    expect(scrambled).not.toBe(g.pending.options[0].id);
+    expect(() => applyAction(g, { t: 'challengePick', id: scrambled })).not.toThrow();
   });
 
   it('战争横扫·自选：某类型 > 1 颗 → 弹面板选该类型弃哪颗', () => {

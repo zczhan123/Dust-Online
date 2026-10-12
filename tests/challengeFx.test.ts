@@ -30,6 +30,13 @@ const CARD = CHALLENGES.find((c) => c.id === 'Z02')!;
 const SK = (id: string) => CARD.skills!.find((s) => s.id === id)!;
 const die = (id: string, value: number, kind: DiceKind): Die => ({ id, value, kind });
 
+/** `src/ui/render.ts` 源码原文（`?raw`）：界面门禁用。 */
+const RENDER_RAW = import.meta.glob('../src/ui/render.ts', { query: '?raw', import: 'default', eager: true }) as Record<
+  string,
+  string
+>;
+const renderSrc = (): string => Object.values(RENDER_RAW)[0] ?? '';
+
 describe('挑战模式 · 传奇回合 fx 事件', () => {
   it('回合开始：报 legendRoll（本回合投出的全部驱动骰，id 与角子一致）', () => {
     const g = CHAL();
@@ -224,5 +231,56 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
       else applyAction(g, acts.find((a) => a.t === 'advance') ?? acts[0]);
       expect(fxTake().some(isLegendFx)).toBe(false);
     }
+  });
+
+  it('Z07 蛮王之牙「再次发动」：真实 challengeStep 流程里 **每组都报一次 announce**（≥2 次弹名）', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.challenge!.turn = 1;
+    g.challenge!.resumeAt = 4; // z07-4 蛮王之牙
+    // 驱动骰 2 组同点（4/4 + 5/5）→ 会「再次发动」一次
+    g.challenge!.driven = [
+      die('r1', 4, 'meditation'),
+      die('r2', 4, 'meditation'),
+      die('r3', 5, 'meditation'),
+      die('r4', 5, 'meditation'),
+    ];
+    // 挑战者 4 防御骰 → 本轮会弹"弃哪 3 颗"代决
+    g.players.A.areas.defense = [1, 2, 3, 4].map((v, i) => die(`ad${i}`, v, 'defense'));
+    g.players.B.areas.defense = [];
+    fxTake();
+    const announces: string[] = [];
+    const drain = (): void => {
+      for (const e of fxTake()) {
+        if (e.kind === 'legendSkill' && e.skillKey === 'z07-4' && e.announce) announces.push(e.skillName);
+      }
+    };
+    let guard = 0;
+    while (g.activePlayer === 'B' && guard++ < 40) {
+      if (g.pendingAttack) {
+        applyAction(g, { t: 'block' });
+        drain();
+        continue;
+      }
+      if (g.pending?.kind === 'challengePick') {
+        applyAction(g, { t: 'challengePick', id: g.pending.options[0].id });
+        drain();
+        continue;
+      }
+      applyAction(g, { t: 'challengeStep' });
+      drain();
+    }
+    // [发动帧]（首组）＋ [deferred 再次发动帧]（第 2 组）＝ 至少 2 次
+    expect(announces.length).toBeGreaterThanOrEqual(2);
+    expect(announces.every((n) => n === '蛮王之牙')).toBe(true);
+  });
+
+  it('界面门禁：传奇过场必须**遍历全部** legendSkill（不能用 `find` 只取第一条）', () => {
+    const src = renderSrc();
+    expect(src.length).toBeGreaterThan(0); // 确认读到了源码
+    expect(src).toMatch(/legendSkillEvs = fxEvents\.filter\(/); // 收集"全部"
+    expect(src).not.toMatch(/legendSkillEv = fxEvents\.find\(/); // 禁止旧写法（只取第一条 → 第 2 次发动不弹名）
   });
 });

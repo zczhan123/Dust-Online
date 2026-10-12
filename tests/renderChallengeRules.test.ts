@@ -201,6 +201,18 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(rowOf(root)?.querySelector('.csk-on-pill')?.textContent).toBe('生效中');
   });
 
+  it('Z06 无光领域：**不显示「生效中」药丸**（它有自己的触发弹名时机，无需常亮）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z06', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('.challenge-skill'));
+    const row = rows.find((r) => r.querySelector('.csk-name')?.textContent === '无光领域') ?? null;
+    expect(row).toBeTruthy();
+    expect(row!.classList.contains('is-on')).toBe(false);
+    expect(row!.querySelector('.csk-on-pill')).toBeNull();
+    // 指示物徽标照旧（那是另一件事）
+    expect(root.querySelector('.challenge-token')?.textContent ?? '').toContain('无光领域指示物');
+  });
+
   it('提示栏：加成来源按"发起攻击方"上色（昔传发起＝B 红）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z05', challenger: ['001', '002', '003'] });
     state.pendingAttack = {
@@ -296,6 +308,106 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(hint).toContain('（造成伤害后「冥界行走·白」回复该攻击点数一半的生命（向上取整））');
     const sk = Array.from(root.querySelectorAll<HTMLElement>('.hint-skill')).find((s) => s.textContent === '冥界行走·白');
     expect(sk?.classList.contains('player-B')).toBe(true);
+  });
+
+  it('挑战面板计数＝与神器 004 同款药丸（`badge badge-count`）；Z07 显示 `N/∞`；围攻单独一行', () => {
+    // Z02：计数 3 上限 → 药丸（不再是无圆角/无内边距的裸橙块）
+    const z2 = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    z2.challenge!.count = 1;
+    const c2 = mount(z2).root.querySelector<HTMLElement>('.panel--challenge .badge-count');
+    expect(c2?.classList.contains('badge')).toBe(true);
+    expect(c2?.textContent).toBe('计数 1/3');
+
+    // Z07：后端不封顶 → 显示 ∞
+    const state = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'] });
+    state.challenge!.count = 2;
+    const { root } = mount(state);
+    const c7 = root.querySelector<HTMLElement>('.panel--challenge .badge-count');
+    expect(c7?.classList.contains('badge')).toBe(true);
+    expect(c7?.textContent).toBe('计数 2/∞');
+    const drow = root.querySelector<HTMLElement>('.challenge-skill--death');
+    expect(drow?.querySelector('.csk-no')?.textContent).toBe('x');
+    expect(drow?.textContent).toContain('围攻');
+  });
+
+  it('挑战代决·骰片面板：`pick` 类代决渲染骰片、**选满 n 才可确认**（点骰片即选）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'] });
+    state.players.A.areas.defense = [
+      { id: 'd1', value: 1, kind: 'defense' },
+      { id: 'd2', value: 1, kind: 'defense' },
+      { id: 'd3', value: 1, kind: 'defense' },
+      { id: 'd4', value: 1, kind: 'defense' },
+    ];
+    state.pending = {
+      kind: 'challengePick',
+      player: 'A',
+      prompt: '「蛮王之牙」：弃置挑战者 3 个防御骰',
+      options: [{ id: 'd1,d2,d3', label: '防1、防1、防1' }],
+      pick: {
+        pool: [
+          { id: 'd1', value: 1, kind: 'defense' },
+          { id: 'd2', value: 1, kind: 'defense' },
+          { id: 'd3', value: 1, kind: 'defense' },
+          { id: 'd4', value: 1, kind: 'defense' },
+        ],
+        n: 3,
+      },
+    };
+    const { root } = mount(state);
+    const panel = root.querySelector('.actionzone .selector');
+    expect(panel).toBeTruthy();
+    expect(panel!.querySelectorAll('.pay-dice .pay-die').length).toBe(4);
+    // 骰片文案＝「防N」（不是裸数字）
+    expect(Array.from(panel!.querySelectorAll('.pay-dice .pay-die')).map((n) => n.textContent)).toEqual(['防1', '防1', '防1', '防1']);
+    // 骰片颜色＝**骰子归属**（此处骰子是挑战者的 → 蓝 `die-A`）
+    expect(Array.from(panel!.querySelectorAll('.pay-dice .pay-die')).every((n) => n.classList.contains('die-A'))).toBe(true);
+    const ok0 = panel!.querySelector<HTMLButtonElement>('[data-act="challengePickConfirm"]')!;
+    expect(ok0.disabled).toBe(true); // 未选满
+
+    // 骰区（挑战者防御骰）也**可点**（双入口）
+    expect(root.querySelector('.area[data-kind="defense"] .die[data-id="d1"]')?.classList.contains('clickable')).toBe(true);
+
+    // 点 3 颗骰片 → 可确认
+    const chips = Array.from(panel!.querySelectorAll<HTMLElement>('.pay-dice .pay-die'));
+    chips[0].click();
+    chips[1].click();
+    chips[2].click();
+    const panel2 = root.querySelector('.actionzone .selector')!;
+    expect(panel2.querySelectorAll('.pay-dice .pay-die.selected').length).toBe(3);
+    const ok2 = panel2.querySelector<HTMLButtonElement>('[data-act="challengePickConfirm"]')!;
+    expect(ok2.disabled).toBe(false);
+  });
+
+  it('挑战代决·骰片颜色按**骰子归属**：`pick.owner="B"` → 骰片红（传奇自己的骰）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'] });
+    // 传奇驱动骰（＝要被移动的骰）
+    state.challenge!.driven = [
+      { id: 'r1', value: 3, kind: 'meditation' },
+      { id: 'r2', value: 3, kind: 'meditation' },
+      { id: 'r3', value: 5, kind: 'meditation' },
+    ];
+    state.pending = {
+      kind: 'challengePick',
+      player: 'A', // 代决者是挑战者
+      prompt: '「尘起」：防御骰区还能放 3 颗，请选择移入哪几颗',
+      options: [{ id: 'r1,r2,r3', label: '3点、3点、5点' }],
+      pick: {
+        pool: [
+          { id: 'r1', value: 3, kind: 'defense' },
+          { id: 'r2', value: 3, kind: 'defense' },
+          { id: 'r3', value: 5, kind: 'defense' },
+        ],
+        n: 3,
+        owner: 'B', // ★ 骰子是传奇自己的
+      },
+    };
+    const { root } = mount(state);
+    const chips = Array.from(root.querySelectorAll<HTMLElement>('.actionzone .selector .pay-dice .pay-die'));
+    expect(chips.length).toBe(3);
+    expect(chips.every((c) => c.classList.contains('die-B'))).toBe(true); // 红（按归属）
+    expect(chips.some((c) => c.classList.contains('die-A'))).toBe(false); // 不是"代决者 A"的蓝
+    // 双入口也按归属：传奇「临时驱动骰区域」里的骰子同样可点
+    expect(root.querySelector('.challenge-staging .die[data-id="r1"]')?.classList.contains('clickable')).toBe(true);
   });
 
   it('传奇过场：投掷帧 / challengeStep 帧重绘都不抛错（jsdom 下动画整体跳过）', () => {

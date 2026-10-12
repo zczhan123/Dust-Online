@@ -9,6 +9,38 @@ function sortedDice(dice: Die[]): Die[] {
   return [...dice].sort((a, b) => a.value - b.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/**
+ * 传奇卡技能"**发动 / 触发**"的过场事件（界面据此**弹技能名**）——**唯一入口**，别在别处手写 `fxPush`。
+ *
+ * 名称从 `CHALLENGES` 取（**不硬编码**，缺数据才回退 skillId）。两类触发都用它：
+ *  · 顺序结算的发动帧（`continueLegendTurn` 直接推，见那里的注释）；
+ *  · **独立钩子**触发的技能（`unordered` / `passive`），如 Z06-x「死即新生」、**Z07-x「围攻」**。
+ *    —— ⚠️ 漏发这条 = 画面**不弹技能名**（真实事故 2026-10-11：围攻取消伤害却无声）。
+ *  `consumed`＝进槽的驱动骰、`spawn`＝本步新产生的骰（都缺省＝空）。
+ */
+export function fxLegendSkill(
+  g: GameState,
+  skillId: string,
+  extra: {
+    consumed?: { id: string; value: number }[];
+    spawn?: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[];
+  } = {},
+): void {
+  const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
+  const sk = (card?.skills ?? []).find((s) => s.id === skillId);
+  fxPush({
+    kind: 'legendSkill',
+    player: 'B',
+    skillKey: skillId,
+    skillName: sk?.name ?? skillId,
+    consumed: extra.consumed ?? [],
+    spawn: extra.spawn ?? [],
+    outIds: [],
+    attack: false,
+    announce: true,
+  });
+}
+
 /** arr 中取 n 个的组合（保序、确定性、上限 limit 防爆）。 */
 function combos<T>(arr: T[], n: number, limit = 400): T[][] {
   const out: T[][] = [];
@@ -152,7 +184,7 @@ export function legendDeathRevive(g: GameState): boolean {
   if (g.mode !== 'challenge' || !g.challenge || g.challenge.deathUsed) return false;
   if (g.players.B.life > 0) return false;
   const card = CHALLENGES.find((c) => c.id === g.challenge!.cardId);
-  if (!card?.skills?.some((s) => s.id === 'z06-x')) return false;
+  if (!card || !legendHasSkill(g, 'z06-x')) return false;
   g.challenge.deathUsed = true;
   g.challenge.deathJustTriggered = true;
   g.players.B.life = 13;
@@ -163,17 +195,7 @@ export function legendDeathRevive(g: GameState): boolean {
     spawn.push({ id: die.id, value: v, area: 'attack' });
   }
   logLine(g, `「${card.legacy}」：死即新生 — 生命重设为 13，获得 1~6 点攻击骰各 1 个`);
-  fxPush({
-    kind: 'legendSkill',
-    player: 'B',
-    skillKey: 'z06-x',
-    skillName: '死即新生',
-    consumed: [],
-    spawn,
-    outIds: [],
-    attack: false,
-    announce: true,
-  });
+  fxLegendSkill(g, 'z06-x', { spawn });
   return true;
 }
 
@@ -194,6 +216,24 @@ export function addLegendDefense(g: GameState, die: Die): boolean {
 
 /** 「昔日传奇」固定坐 B 席（挑战者坐 A 席）——削弱判定要用到。 */
 export const LEGEND_PLAYER: PlayerId = 'B';
+
+/**
+ * 当前「昔日传奇」卡是否含某条**独立钩子技能**（`z06-x` 死即新生 / `z07-x` 围攻 / `z01-5` 裁雨流 …）。
+ *
+ * ⚠️ **Z 卡的独立钩子必须用它做门禁**——只判 `mode === 'challenge'` ＋ 某个**共享状态**（如 `count`）会**跨卡误触发**。
+ * 真实事故 2026-10-12：打 Z02「永暗之刃」时，因它**也有计数**（锋芒/暗夜凶神），挑战者用 6 点攻击命中就误触发了 **Z07 的「围攻」**
+ * （取消伤害 + 扣了永暗之刃的计数）。正确范式＝**查当前卡的 `skills` 是否含该 id**（死即新生早就这么写）。
+ */
+export function legendHasSkill(g: GameState, skillId: string): boolean {
+  if (g.mode !== 'challenge' || !g.challenge) return false;
+  const card = CHALLENGES.find((c) => c.id === g.challenge!.cardId);
+  return !!card?.skills?.some((s) => s.id === skillId);
+}
+
+/** 当前传奇卡的中文名（`legacy`）——战报里别写死某张卡的名字（写死会在跨卡误触发时指错卡）。 */
+export function legendLegacyName(g: GameState): string {
+  return CHALLENGES.find((c) => c.id === g.challenge?.cardId)?.legacy ?? '';
+}
 
 /**
  * 该神器技能在**这一方手里**是否**整条失效**（挑战模式的"特殊规则"；名单唯一来源 `CHALLENGE_RULE_NOTES`）。

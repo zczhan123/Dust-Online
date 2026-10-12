@@ -174,8 +174,10 @@ function loadJingangDice(
         : `「金刚」需选择 ${count} 个点数（1–6，可重复）`,
     );
   }
-  // id 带玩家前缀：避免双方各持同型神器（如都拿 034/A03）时存放骰 id 跨玩家撞串
-  artifact.heldDice = pips.map((v) => ({ id: `${player}-${artifact.id}-j${v}-${g.turnIndex}`, value: v }));
+  // id 带玩家前缀：避免双方各持同型神器（如都拿 034/A03）时存放骰 id 跨玩家撞串；
+  // ⚠️ **还要带下标 `i`**：A03 的装载允许"两颗同点"——只按点数拼 id 会产生**重复 id**，
+  //    导致"用掉 1 颗"或"菩提移除 1 颗"时按 id 过滤把**两颗一起删**（真实事故 2026-10-11 查得）。
+  artifact.heldDice = pips.map((v, i) => ({ id: `${player}-${artifact.id}-j${i}-${v}-${g.turnIndex}`, value: v }));
   logLine(
     g,
     `${pname(player)} 「${artifact.name}」激活：移除原有存放骰，放入 ${count} 个${

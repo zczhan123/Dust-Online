@@ -73,6 +73,18 @@ describe('A06「勾魂」（左激活·持续）', () => {
     expect(g.players.B.life).toBe(g.players.B.lifeMax - 5);
   });
 
+  it('勾魂：攻击点数被 L06「无光领域」+1 改判 → 存**改后点数**（5 点骰 → 存 6）', () => {
+    const g = gA06();
+    arm(g, 'A', 'A06', 'left');
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a5', value: 5, kind: 'attack' }];
+    g.players.A.wuguang = 'up'; // L06：攻击点数 +1
+    doAttack(g, 'A', [{ dieIds: ['a5'] }]);
+    resolveBlock(g);
+    expect(art(g, 'A', 'A06').heldDice?.map((d) => d.value)).toEqual([6]); // ★ 改后点数（不是骰面 5）
+  });
+
   it('发出 `gouhun` 动效事件（攻击骰飞向神器标题栏、变灰）', () => {
     const g = gA06();
     arm(g, 'A', 'A06', 'left');

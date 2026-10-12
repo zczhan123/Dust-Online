@@ -654,10 +654,19 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
   });
 
-  it('传 Z07（荒野行者，**未转写**）→ 显示"待转写"', () => {
+  it('传 Z07（荒野行者）：已转写 → 显示生命 50 / 防御骰上限 3（不是"待转写"）', () => {
     renderChallengeSetup(root, () => {});
     abOf('nisa', 'legend').click();
     expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“荒野行者”');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 3');
+    expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
+  });
+
+  it('传 Z08（黑枪，**未转写**）→ 显示"待转写"', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('xiva', 'legend').click();
+    expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“黑枪”');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('待转写');
   });
 

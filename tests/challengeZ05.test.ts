@@ -73,6 +73,12 @@ describe('挑战模式 · Z05 效果', () => {
     beginTurn(g);
     expect(g.challenge!.driven).toHaveLength(10);
     expect(g.challenge!.damagedDuringChallengerTurn).toBe(false); // 用掉即清
+    // 战报：额外那 2 颗**带点数**；总数行写**实际颗数**（8+2=10，不是 8）
+    const texts = g.log.map((l) => l.text);
+    const extraVals = g.challenge!.driven.slice(-2).map((d) => d.value).sort((a, b) => a - b);
+    expect(texts.some((t) => t.includes(`额外投掷 2 个驱动骰（${extraVals.join('/')}）`))).toBe(true);
+    expect(texts.some((t) => /投掷 10 个驱动骰（/.test(t))).toBe(true);
+    expect(texts.some((t) => /投掷 8 个驱动骰（/.test(t))).toBe(false);
   });
 
   it('绝境天神：当前生命每比初始低 10 点 → 攻击伤害 +（仅传奇自己的攻击）', () => {
@@ -189,5 +195,21 @@ describe('挑战模式 · Z05 效果', () => {
     resolveLegendDeferred(g, Z05);
     expect(g.pending?.kind).toBe('challengePick');
     expect(g.players.B.areas.defense).toHaveLength(3); // 尚未移入
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    expect(g.pending.pick?.owner).toBe('B'); // ★ 骰子是传奇自己的 → 骰片按 B 上色（不是代决者 A）
+  });
+
+  it('净化·上限：确认"哪颗进"（选项 id ＝**骰子 id**）→ 移入所选（回归：不再非法选项）', () => {
+    const g = make();
+    g.players.B.areas.defense = [die('bd0', 1, 'defense'), die('bd1', 1, 'defense'), die('bd2', 1, 'defense')];
+    g.challenge!.deferred = { skillId: 'z05-5', step: 0, dice: [{ id: 'x1', value: 2 }, { id: 'x2', value: 5 }] };
+    resolveLegendDeferred(g, Z05);
+    if (g.pending?.kind !== 'challengePick') throw new Error('expect challengePick');
+    expect(g.pending.options.map((o) => o.id)).toEqual(['x1', 'x2']); // 选项 id ＝骰子 id（非下标）
+    expect(g.pending.pick?.pool.map((x) => x.id)).toEqual(['x1', 'x2']);
+    expect(g.pending.pick?.owner).toBe('B');
+    expect(() => applyAction(g, { t: 'challengePick', id: 'x2' })).not.toThrow();
+    resolveLegendDeferred(g, Z05);
+    expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([1, 1, 1, 5]); // 移入 5
   });
 });

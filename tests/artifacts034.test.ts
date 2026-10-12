@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, applyAction, skipInitialReroll, getLegalActions } from '../src/core/engine/game';
+import { pumpAttackQueue } from '../src/core/engine/combat';
 import { fxTake } from '../src/core/engine/fx';
 import type { GameState, PlayerId } from '../src/core/model/types';
 
@@ -203,6 +204,84 @@ describe('034 金刚·不动菩提（触发：取消对方使用防御/攻击骰
     expect(g.players.A.life).toBe(lifeA);
     expect(g.pendingAttack).toBeNull();
     expect(a.heldDice?.length ?? 0).toBe(0);
+  });
+
+  it('菩提·攻击侧：攻击点数被 028「视为6」改判 → **按改后点数匹配**（3 点骰 → 需 6 点存货）', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034'); // A 是菩提持有者（防守方）
+    a.activeMarkerSide = 'right';
+    a.heldDice = [
+      { id: 'hv3', value: 3 },
+      { id: 'hv6', value: 6 },
+    ];
+    g.activePlayer = 'B'; // B 发起攻击
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.B.areas.attack = [{ id: 'b1', value: 3, kind: 'attack' }];
+    // B 持 028「白昼之火」：本回合其攻击点数视为 6（骰面仍是 3）
+    g.tianfa['B'] = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['b1'] }] });
+    expect(g.pending?.kind).toBe('putiPick');
+    if (g.pending?.kind !== 'putiPick') throw new Error('expect putiPick');
+    expect(g.pending.value).toBe(6); // ★ 改后点数（不是骰面 3）
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(a.heldDice?.map((h) => h.value)).toEqual([3]); // 移除的是 **6 点**那颗
+  });
+
+  it('菩提·攻击侧：受 L06「无光领域」+1 改判 → **按改后点数匹配**（5 点骰 → 需 6 点存货）', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034');
+    a.activeMarkerSide = 'right';
+    a.heldDice = [
+      { id: 'hv5', value: 5 },
+      { id: 'hv6', value: 6 },
+    ];
+    g.activePlayer = 'B';
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.B.areas.attack = [{ id: 'b1', value: 5, kind: 'attack' }];
+    g.players.B.wuguang = 'up'; // L06：攻击点数 +1
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['b1'] }] });
+    expect(g.pending?.kind).toBe('putiPick');
+    if (g.pending?.kind !== 'putiPick') throw new Error('expect putiPick');
+    expect(g.pending.value).toBe(6);
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(a.heldDice?.map((h) => h.value)).toEqual([5]);
+  });
+
+  it('菩提·攻击侧：**队列里带真骰的虚拟攻击**也算"使用攻击骰" → 可取消（覆盖挑战「枭首 / 裁雨流 / 真实之剑 / 无上剑术」）', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034');
+    a.activeMarkerSide = 'right';
+    a.heldDice = [{ id: 'hv', value: 3 }];
+    clear(g, 'A');
+    clear(g, 'B');
+    // B 发起"带真骰"的队列攻击（同挑战：dieId + dieStyle solid）
+    g.virtualQueue = [{ attacker: 'B', value: 3, label: '枭首', owner: 'B', dieId: 'rd1', dieStyle: 'solid' }];
+    pumpAttackQueue(g);
+    expect(g.pending?.kind).toBe('putiPick');
+    if (g.pending?.kind !== 'putiPick') throw new Error('expect putiPick');
+    expect(g.pending.value).toBe(3);
+    expect(g.pending.mode).toBe('attack');
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(g.pendingAttack).toBeNull(); // 攻击被取消
+  });
+
+  it('菩提·攻击侧：**无攻击骰的虚拟攻击不触发**（卡面要求"使用攻击骰"）', () => {
+    const g = g034();
+    toMain(g);
+    const a = art(g, 'A', '034');
+    a.activeMarkerSide = 'right';
+    a.heldDice = [{ id: 'hv', value: 3 }];
+    clear(g, 'A');
+    clear(g, 'B');
+    g.virtualQueue = [{ attacker: 'B', value: 3, label: '虚无形态', owner: 'B' }]; // 无 dieId
+    pumpAttackQueue(g);
+    expect(g.pending).toBeNull(); // 不弹
+    expect(g.pendingAttack).not.toBeNull(); // 攻击照常等响应
   });
 });
 

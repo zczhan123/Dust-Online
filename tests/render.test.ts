@@ -1296,6 +1296,17 @@ describe('renderGame (read-only snapshot)', () => {
     // 虚拟攻击（无攻击骰）
     setPA({ sourceDieId: undefined, sourceValue: undefined, physical: false });
     expect(hint()).toBe('本次 3 伤害（技能攻击，无攻击骰）；请选择');
+
+    // 028 天罚：点数被改判 → 提示栏也要写明"被「白昼之火」改为 6 点"
+    state.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    setPA({ sourceValue: 2, rawPoint: 2, baseValue: 6, value: 6, sourceDieId: undefined, physical: false, blockKind: 'meditation' });
+    expect(hint()).toContain('被 2 点攻击骰（被「白昼之火」改为 6 点）攻击，本次 6 伤害');
+
+    // L06「无光领域」±1 改判
+    state.tianfa.A = null;
+    state.players.A.wuguang = 'up';
+    setPA({ sourceValue: 5, rawPoint: 5, baseValue: 6, value: 6, sourceDieId: undefined, physical: false });
+    expect(hint()).toContain('被 5 点攻击骰（被「无光领域」改为 6 点）攻击，本次 6 伤害');
   });
 
   it('mirrors the enemy artifact order only when 镜像神器摆放 is on', () => {

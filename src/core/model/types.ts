@@ -151,6 +151,8 @@ export interface PendingAttack {
   sourceValue?: number;
   /** 攻击的有效点数（物理=骰点；技能发起的攻击=该技能指定的点数）。供 017 持续判定，不受伤害加成影响 */
   baseValue?: number;
+  /** **改判前**的点数（原始骰点 / 技能指定点数；含置换的合成 5）——与 `baseValue` 不等时说明被 028「视为6」/ L06 ±1 改过，供提示/战报写明"X 点骰子被「技能」改为 Y 点"。 */
+  rawPoint?: number;
   /** 本次伤害是否已被「减半」（同种削减不叠加：屏障 / 021 满计数 / 023 畏惧 只减半一次） */
   halved?: boolean;
   /** 本次攻击实际应用的伤害加成值（含 022 处刑通牒这类单次修正），供提示栏显示 */
@@ -218,6 +220,15 @@ export type Pending =
       options: { id: string; label: string }[];
       /** Z04「D1：开局选骰」＝'assign'（选完存 `challenge.assign`，而非按技能的 `decisions`） */
       tag?: string;
+      /** 选择存进 `challenge.decisions` 的键；缺省＝当前结算技能的 id。
+       *  同一条技能有多个代决时（Z07 蛮王之牙/不屈咆哮：选组 + 弃骰）用它区分，避免互相覆盖。 */
+      key?: string;
+      /** **骰片选择**（"从池子里选 n 颗"类代决）：界面用 `pool` 渲染骰片、选满 `n` 颗拼成逗号 id 提交。
+       *  缺省＝按 `options` 渲染选项列表。`pool[].kind` 供骰片显示「防N/攻N/冥N」。
+       *  ⚠️ `pool[].id` 必须与 `options[].id` 里的**组成片段一致**（这样"点击顺序"任意、按集合即可对上选项）。
+       *  `owner` ＝ **这些骰子归谁**（缺省＝`pending.player`，即"谁在代决"）——**骰片按它上色**（A 蓝 / B 红）。
+       *  ⚠️ 挑战者代决"移动**传奇自己**的骰"（遁入/龙腾/净化/尘起）时必须传 `'B'`，否则骰片会错画成蓝的。 */
+      pick?: { pool: { id: string; value: number; kind: DiceKind }[]; n: number; owner?: PlayerId };
     }
   /** 第三列「充能」技能需要玩家选择（024 狂舞）时，装填后强制结算 */
   | { kind: 'chargeResolve'; player: PlayerId; artifactId: string }

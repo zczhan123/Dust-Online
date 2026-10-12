@@ -23,7 +23,7 @@ import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarS
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
-import { artifactWithSkill, attackDamageBonus } from '../core/engine/combat';
+import { artifactWithSkill, attackDamageBonus, attackPointNote } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
@@ -165,6 +165,9 @@ export interface UiState {
     kind: 'attack' | 'block';
     dieIds: string[];
   };
+  /** 挑战代决·骰片选择（`challengePick.pick`）：已选骰 id；`Sig` 变化（换了代决）就重置 */
+  challengePickSel?: string[];
+  challengePickSig?: string;
   /** 锋芒（触发）：选择消耗的 1 颗攻击骰 + 1 颗冥想骰 */
   fengmangPick: null | {
     attackDieId?: string;
@@ -1231,6 +1234,12 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
         if (ap.isSelected(d.id)) die.classList.add('selected');
         die.addEventListener('click', () => ap.toggle(d));
       }
+    } else if (challengeDieInChipPool(ctx, d, player)) {
+      // 挑战代决·骰片选择：骰区对应骰子与面板骰片**双入口**（共享同一选中状态）
+      die.classList.add('clickable');
+      die.title = '点击选择该骰';
+      if (ctx.hooks.ui.challengePickSel?.includes(d.id)) die.classList.add('selected');
+      die.addEventListener('click', () => toggleChallengePickDie(ctx, d.id));
     } else if (ctx.slotsStepOpen) {
       // 第一列技能分格面板：可选集合取决于未填的格 → 骰区不可点，仅用面板
     } else if (ctx.dustFlowOpen) {
@@ -1424,8 +1433,10 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     head.appendChild(sub);
   }
   if (card?.countCap != null) {
-    const cnt = el('span', 'badge-count');
-    cnt.textContent = `计数 ${state.challenge?.count ?? 0}/${card.countCap}`;
+    // 与神器 004 / 标准传奇面板**同款药丸**（`.badge badge-count`）；计数后端不封顶（`Infinity`）时显示 `∞`
+    const cnt = el('span', 'badge badge-count');
+    const capText = Number.isFinite(card.countCap) ? String(card.countCap) : '∞';
+    cnt.textContent = `计数 ${state.challenge?.count ?? 0}/${capText}`;
     head.appendChild(cnt);
   }
   panel.appendChild(head);
@@ -1510,6 +1521,13 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     chip.dataset.id = d.id;
     chip.dataset.value = String(d.value);
     chip.textContent = String(d.value);
+    // 挑战代决"骰片选择"（如尘起：owner=B）→ 驱动骰**双入口**可点（与面板骰片共享选中态、等效）
+    if (challengeDieInChipPool(ctx, d, player)) {
+      chip.classList.add('clickable');
+      chip.title = '点击选择该骰';
+      if (ctx.hooks.ui.challengePickSel?.includes(d.id)) chip.classList.add('selected');
+      chip.addEventListener('click', () => toggleChallengePickDie(ctx, d.id));
+    }
     sdice.appendChild(chip);
   }
   staging.appendChild(sdice);
@@ -2038,22 +2056,25 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     const pa = state.pendingAttack;
     const bonus = pa.bonusValue !== undefined ? { value: pa.bonusValue, label: pa.bonusLabel } : attackDamageBonus(state, pa.attacker);
     const parts: HintPart[] = [];
+    // 点数被改判（028「视为6」/ L06 ±1）→ 提示栏也要写明，别只说"被 3 点攻击骰攻击"却按 6 算
+    const pointNote = attackPointNote(state, pa);
     if (pa.sourceValue !== undefined) {
-      parts.push({ text: `被 ${pa.sourceValue} 点攻击骰攻击，本次 ${pa.value} 伤害` });
+      parts.push({ text: `被 ${pa.sourceValue} 点攻击骰${pointNote ? `（${pointNote}）` : ''}攻击，本次 ${pa.value} 伤害` });
     } else if (pa.sourceSkill) {
       // 技能发起的攻击：写明"由该技能引起"，并区分「持有者自己发起 / 他人因该效果发起」
       // 技能名**按所属方取色**（昔传=B 红；将来涉及挑战者则是 A 蓝）——不按名字，避免重名串色
       parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
       parts.push({ text: pa.sourceSkillOwner === pa.attacker ? '「' : ' 因对方「' });
       parts.push({ text: pa.sourceSkill, color: pa.sourceSkillOwner });
+      const noDie = `无攻击骰${pointNote ? `，${pointNote}` : ''}`;
       parts.push({
         text:
           pa.sourceSkillOwner === pa.attacker
-            ? `」发起攻击，本次 ${pa.value} 伤害（无攻击骰）`
-            : `」效果而发起攻击，本次 ${pa.value} 伤害（无攻击骰）`,
+            ? `」发起攻击，本次 ${pa.value} 伤害（${noDie}）`
+            : `」效果而发起攻击，本次 ${pa.value} 伤害（${noDie}）`,
       });
     } else {
-      parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰）` });
+      parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰${pointNote ? `，${pointNote}` : ''}）` });
     }
     if (bonus.value > 0) {
       parts.push({ text: '（' });
@@ -2361,6 +2382,9 @@ function actionZone(ctx: Ctx): HTMLElement {
     zone.appendChild(note);
     const left = legendPickHoldUntil - performance.now();
     window.setTimeout(() => ctx.hooks.requestRender(), Math.max(40, left + 20));
+  } else if (challengePickHasChips(ctx)) {
+    // 挑战代决"从池子里选 n 颗" → 骰片面板（选满才可确认）
+    zone.appendChild(challengeChipsPanel(ctx));
   } else {
     const confirm = confirmRow(ctx);
     if (confirm) {
@@ -2383,6 +2407,89 @@ function challengePickHeld(ctx: Ctx): boolean {
     typeof performance !== 'undefined' &&
     performance.now() < legendPickHoldUntil
   );
+}
+
+/** 挑战代决带 `pick`（"从池子里选 n 颗"）→ 用**骰片面板**（不再是固定组合按钮）。 */
+function challengePickHasChips(ctx: Ctx): boolean {
+  const pd = ctx.state.pending;
+  return pd?.kind === 'challengePick' && !!pd.pick;
+}
+
+/** 切换"骰片选择"里的某一颗（**面板骰片**与**骰区骰子**双入口共用）。 */
+function toggleChallengePickDie(ctx: Ctx, id: string): void {
+  const pd = ctx.state.pending;
+  if (pd?.kind !== 'challengePick' || !pd.pick) return;
+  const ui = ctx.hooks.ui;
+  const sel = ui.challengePickSel ?? (ui.challengePickSel = []);
+  const i = sel.indexOf(id);
+  if (i >= 0) sel.splice(i, 1);
+  else if (sel.length < pd.pick.n) sel.push(id);
+  ctx.hooks.requestRender();
+}
+
+/** 该骰是否属于当前"挑战代决·骰片选择"的池子（用于骰区双入口）。按 **`pick.owner`**（骰子归属）判，不是"代决者"。 */
+function challengeDieInChipPool(ctx: Ctx, d: { id: string }, player: { id: PlayerId }): boolean {
+  const pd = ctx.state.pending;
+  if (pd?.kind !== 'challengePick' || !pd.pick) return false;
+  const owner = pd.pick.owner ?? pd.player;
+  return owner === player.id && pd.pick.pool.some((x) => x.id === d.id);
+}
+
+/** 挑战·代决"骰片选择"面板：骰片可点；**选满 n 颗才能确认**（确认时 id 拼成逗号串派发 `challengePick`）。 */
+function challengeChipsPanel(ctx: Ctx): HTMLElement {
+  const pd = ctx.state.pending as {
+    kind: 'challengePick';
+    player: PlayerId;
+    prompt: string;
+    options: { id: string; label: string }[];
+    pick: { pool: { id: string; value: number; kind: DiceKind }[]; n: number; owner?: PlayerId };
+  };
+  const pick = pd.pick;
+  const ui = ctx.hooks.ui;
+  // 换了代决（提示语 / 池子 变）→ 重置已选
+  const sig = `${pd.prompt}|${pick.pool.map((x) => x.id).join(',')}`;
+  if (ui.challengePickSig !== sig) {
+    ui.challengePickSig = sig;
+    ui.challengePickSel = [];
+  }
+  const sel = ui.challengePickSel ?? (ui.challengePickSel = []);
+  const panel = el('div', 'selector selector--head-row');
+  const head = el('div', 'selector-head');
+  const title = el('div', 'selector-title');
+  title.textContent = pd.prompt;
+  head.appendChild(title);
+  const info = el('div', 'selector-info');
+  info.textContent = `已选 ${sel.length}（需 ${pick.n} 颗）`;
+  head.appendChild(info);
+  panel.appendChild(head);
+  const box = el('div', 'pay-dice');
+  for (const d of pick.pool) {
+    // 骰片颜色＝**骰子归谁**（`pick.owner`），不是"谁在代决"——传奇自己的骰（遁入/龙腾/净化/尘起）应为 B 红
+    const chip = el('span', `pay-die die-${pick.owner ?? pd.player}`);
+    chip.dataset.id = d.id;
+    chip.dataset.value = String(d.value);
+    chip.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
+    if (sel.includes(d.id)) chip.classList.add('selected');
+    chip.classList.add('clickable');
+    chip.title = '点击选择该骰';
+    chip.addEventListener('click', () => toggleChallengePickDie(ctx, d.id));
+    box.appendChild(chip);
+  }
+  panel.appendChild(box);
+  const row = el('div', 'selector-actions');
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'btn btn-confirm';
+  ok.dataset.act = 'challengePickConfirm';
+  ok.textContent = '确认';
+  ok.disabled = sel.length !== pick.n;
+  ok.addEventListener('click', () => {
+    ctx.hooks.onAction({ t: 'challengePick', id: sel.join(',') });
+    ui.challengePickSel = [];
+  });
+  row.appendChild(ok);
+  panel.appendChild(row);
+  return panel;
 }
 
 function confirmRow(ctx: Ctx): HTMLElement | null {
@@ -5886,7 +5993,10 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   const fxEvents = fxTake();
   // 挑战模式·传奇回合：本帧的"过场命令"（引擎只报事实，界面据此编排；标准模式永不出现）
   // 注：投掷（`legendRoll`）不需要界面插手——临时区骰子属于 `.die[data-id]`，通用「获得骰」已会播。
-  const legendSkillEv = fxEvents.find(
+  // ⚠️ 用 `filter`（**全部** legendSkill），**不能**用 `find`：同一帧可能有多条——
+  //    例：Z07「蛮王之牙」逐组"再次发动"时，[发动帧] 与 [deferred 收尾帧] 若被并进同一帧，
+  //    `find` 只取第一条 → 第 2 次发动**不弹技能名**（真实事故 2026-10-11）。
+  const legendSkillEvs = fxEvents.filter(
     (e): e is Extract<FxEvent, { kind: 'legendSkill' }> => e.kind === 'legendSkill',
   );
   for (const e of fxEvents) {
@@ -6330,7 +6440,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   // 挑战模式：本步被扣下的驱动骰由 `playLegendConsume`（临时区→中间→驱动骰槽→消失）接管 →
   // 排除出普通"消失"动画，否则同一颗骰会被两套动画驱动。
-  if (legendSkillEv) for (const c of legendSkillEv.consumed) excludeIds.push(c.id);
+  for (const ev of legendSkillEvs) for (const c of ev.consumed) excludeIds.push(c.id);
   // 挑战模式「枭首」：这一帧"上一段攻击刚结算" → 它用的是攻击骰区里的真骰，此时才被引擎移除；
   // 那颗骰的"飞出去"动画早由攻击池负责 → 这里排除，别再补一次通用"飞中间淡出"（否则一飞两次）。
   if (state.mode === 'challenge' && prevResolved && prevPA?.sourceDieId) excludeIds.push(prevPA.sourceDieId);
@@ -6380,18 +6490,21 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   //  （曾额外加一条 `playLegendRoll` → 同一动作播两遍）。
   //  驱动骰槽是**纯过场**：状态里不留骰（引擎只记 `pendingConsumed`）→ 界面全用影子演，落点后自然消失。
   let legendDur = 0;
-  let legendConsumeDur = 0;
+  let legendConsumeEnd = 0; // 最后一次「驱骰进槽」的结束时刻（供攻击延迟）
+  let legendLastSpawn = false; // 最后一条 legendSkill 是否"有新骰飞入"
   /** 挑战模式：本帧传奇**新得到**的骰子 → 它们不交给通用「获得骰」（`playLegendSpawn` 独占负责） */
   const legendAddIds = new Set<string>();
-  if (legendSkillEv) {
+  for (const ev of legendSkillEvs) {
+    const at = legendDur; // **串行**：同一帧多条 legendSkill 时，后一条从前一条播完处开始
+    let end = at;
     // 技能名只在**"发动帧"**弹（由引擎 `announce` 决定）：∞/无槽技能（龙游万象 / 雨落狂流）也弹；
     // 续跑帧、遁入暗影的后续移骰步不弹（避免重复）。**不要**用 `consumed.length > 0` 当替身。
-    if (legendSkillEv.announce) {
-      legendDur = Math.max(legendDur, playUltimate(root, legendSkillEv.skillName, 0, '', MOTION.legendUltimateHold));
+    if (ev.announce) {
+      end = Math.max(end, playUltimate(root, ev.skillName, at, '', MOTION.legendUltimateHold));
     }
     // 驱动骰进槽过场：只在有消耗时演（∞/无槽技能没有）
-    if (legendSkillEv.consumed.length > 0) {
-      const items: LegendConsumeItem[] = legendSkillEv.consumed
+    if (ev.consumed.length > 0) {
+      const items: LegendConsumeItem[] = ev.consumed
         .map((c) => {
           const pd = prevDice.get(c.id);
           return pd ? { rect: pd.rect, value: c.value } : null;
@@ -6399,34 +6512,38 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         .filter((x): x is LegendConsumeItem => !!x);
       // 落点＝**槽区域**（不是里面那个空的 `.dice`——空容器高度为 0，会算到快速操作栏去）
       const slotAreaEl = root.querySelector<HTMLElement>('.panel--challenge .area--driven');
-      legendConsumeDur = playLegendConsume(root, items, slotAreaEl, 0);
-      legendDur = Math.max(legendDur, legendConsumeDur);
+      const d = playLegendConsume(root, items, slotAreaEl, at);
+      end = Math.max(end, d);
+      legendConsumeEnd = Math.max(legendConsumeEnd, d);
     }
     // 第二步：本步"新产生"的骰 → 中间冒出、飞入对应骰区。
     //   **动画隔离**：这几颗**只由 `playLegendSpawn` 负责**（从通用「获得骰」里排除），落点＝区里行尾并排，
     //   确定、唯一 → 不会再和通用"获得/让位"抢同一颗骰子（挤格/跳格就是这么来的）。
-    if (legendSkillEv.spawn.length > 0 && state.mode === 'challenge') {
-      for (const s of legendSkillEv.spawn) legendAddIds.add(s.id);
-      legendDur = Math.max(
-        legendDur,
+    const hasSpawn = ev.spawn.length > 0 && state.mode === 'challenge';
+    if (hasSpawn) {
+      for (const s of ev.spawn) legendAddIds.add(s.id);
+      end = Math.max(
+        end,
         playLegendSpawn(
           root,
-          legendSkillEv.spawn.map((s) => ({ value: s.value, area: s.area })),
-          0,
-          legendSkillEv.spawn.map((s) => s.id),
+          ev.spawn.map((s) => ({ value: s.value, area: s.area })),
+          at,
+          ev.spawn.map((s) => s.id),
         ),
       );
     }
-    // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"（等 技能名 + 进槽 + 本步移骰 都播完）
-    if (state.pending?.kind === 'challengePick') {
-      legendPickHoldUntil = performance.now() + legendDur + 30;
-    }
+    legendLastSpawn = hasSpawn;
+    legendDur = Math.max(legendDur, end);
+  }
+  // 【先动画，再选择】这一帧要弹代决面板 → 记下"到什么时候才允许显示"（等 技能名 + 进槽 + 本步移骰 都播完）
+  if (legendSkillEvs.length > 0 && state.pending?.kind === 'challengePick') {
+    legendPickHoldUntil = performance.now() + legendDur + 30;
   }
   // 传奇这一步"触发攻击"时：攻击动画后移到「驱骰进槽」＋（本步有新骰则再等）「新骰飞入」之后。
   // ⚠️ 不再叠加"技能名横幅"的整段停留（此前 `legendDur + addsDuration()` 会被横幅(1.96s)撑满、
   //    且"本步无新骰"时仍白等 0.99s → 灰骰迟迟不出，就是"卡顿"）。
-  const legendAttackDelay = legendSkillEv?.attack
-    ? legendConsumeDur + (legendSkillEv.spawn.length > 0 ? addsDuration() : 0)
+  const legendAttackDelay = legendSkillEvs.some((e) => e.attack)
+    ? legendConsumeEnd + (legendLastSpawn ? addsDuration() : 0)
     : 0;
 
   // L04 重开：本帧是整盘重置 → 走"全部旧骰 → 中间合成一个 → 新骰从中间冒出"的专用动画

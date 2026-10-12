@@ -6,7 +6,14 @@ import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
 import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
-import { addLegendDefense, legendAttackBonus, legendDeathRevive } from './challenge';
+import {
+  addLegendDefense,
+  fxLegendSkill,
+  legendAttackBonus,
+  legendDeathRevive,
+  legendHasSkill,
+  legendLegacyName,
+} from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
@@ -44,6 +51,23 @@ function applyWuguang(p: PlayerState, point: number): number {
   if (p.wuguang === 'up') return Math.min(6, point + 1);
   if (p.wuguang === 'down') return Math.max(1, point - 1);
   return point;
+}
+
+/**
+ * 「攻击点数被改判」的说明文案（供**提示栏 + 战报**写明"X 点骰子被「技能」改为 Y 点"）。
+ * 来源：028「白昼之火/陨落」（视为 6）、L06「无光领域」（±1）；无改判返回 `null`。
+ * ⚠️ 全模式生效（标准/轮选/构筑/挑战/联机 + 英雄面板）。
+ */
+export function attackPointNote(g: GameState, pa: PendingAttack): string | null {
+  const raw = pa.rawPoint;
+  const eff = pa.baseValue;
+  if (raw == null || eff == null || raw === eff) return null;
+  const srcs: string[] = [];
+  if (g.tianfa[pa.attacker]) srcs.push(pa.blockKind === 'attack' ? '陨落' : '白昼之火');
+  if (g.players[pa.attacker].wuguang) srcs.push('无光领域');
+  return srcs.length > 0
+    ? `被${srcs.map((n) => `「${n}」`).join('、')}改为 ${eff} 点`
+    : `由 ${raw} 点改为 ${eff} 点`;
 }
 
 export function attackDamageBonus(
@@ -351,6 +375,7 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
     baseValue: attackPoint,
+    rawPoint: effDie.value,
     bonusValue: bonus,
     bonusLabel,
     ...(tianfa ? { blockKind: tianfa.blockKind } : {}),
@@ -360,32 +385,19 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   g.attacksThisTurn[player] += 1;
   const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${pa.value} 点）` : '';
-  logLine(g, `${pname(player)} 使用 ${attackPoint} 点攻击骰攻击 ${pname(defender)}${buffText}`);
+  // 战报要写明"点数被改判"（028「视为6」/ L06 ±1）——否则"使用 6 点攻击骰"会和骰面矛盾
+  const pointNote = attackPointNote(g, pa);
+  logLine(
+    g,
+    pointNote
+      ? `${pname(player)} 使用 ${effDie.value} 点攻击骰（${pointNote}）攻击 ${pname(defender)}${buffText}`
+      : `${pname(player)} 使用 ${attackPoint} 点攻击骰攻击 ${pname(defender)}${buffText}`,
+  );
   if (loneLastAttackDie) {
     logLine(g, `${pname(player)} 「无尽追猎」：攻击骰区仅剩这 1 颗攻击骰 → 本次攻击不可抵挡`);
   }
   // 034 金刚·不动菩提（触发）：防守方可用「神器上同点数存放骰」取消该攻击 → 先询问
-  const puti = artifactWithSkill(g.players[defender], 'jingang.puti.trigger');
-  if (
-    puti &&
-    hasActiveSkill(g.players[defender], 'jingang.puti.trigger') &&
-    g.pending === null &&
-    g.pendingQueue.length === 0 &&
-    (puti.heldDice ?? []).some((h) => h.value === effDie.value)
-  ) {
-    // 攻击骰先停到中间（供 034 与攻击骰"并排"）；011 的追问推迟到"不发动 034"之后（保持 034 优先）
-    parkAttack(g, pa);
-    queuePending(g, {
-      kind: 'putiPick',
-      player: defender,
-      owner: player,
-      value: effDie.value,
-      mode: 'attack',
-      attack: pa,
-    });
-    pumpPending(g);
-    return;
-  }
+  if (maybePutiAttack(g, pa)) return;
   commitAttack(g, pa);
 }
 
@@ -413,6 +425,43 @@ export function commitAttack(g: GameState, pa: PendingAttack): void {
   maybeBarrier(g, pa);
 }
 
+/**
+ * 034/A03「不动菩提」·触发·**攻击侧**：对方**使用 1 个攻击骰后** → 若防守方持菩提、且兜里有同点数的存放骰
+ * （"同点数"＝**改后有效攻击点数** `baseValue`，含 028「视为6」/ L06 ±1），挂 `putiPick` 让防守方决定是否取消。
+ * 返回 `true` ＝ 已挂起（调用方**立即停止**后续结算）。
+ *
+ * ⚠️ **凡"用了攻击骰"的攻击都必须过这里**：`doAttack`（实体攻击）＋ **队列虚拟攻击里带真骰的**
+ * （挑战模式「枭首 / 裁雨流 / 真实之剑 / 无上剑术」等，见 `pumpAttackQueue`）。
+ * **无攻击骰的虚拟攻击不触发**（卡面要求"使用攻击骰"，故以 `sourceDieId` 为门）。
+ */
+function maybePutiAttack(g: GameState, pa: PendingAttack): boolean {
+  if (!pa.sourceDieId) return false; // 没有实体攻击骰 → 不算"使用攻击骰"
+  const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const puti = artifactWithSkill(g.players[defender], 'jingang.puti.trigger');
+  const point = pa.baseValue ?? pa.value;
+  if (
+    !puti ||
+    !hasActiveSkill(g.players[defender], 'jingang.puti.trigger') ||
+    g.pending !== null ||
+    g.pendingQueue.length > 0 ||
+    !(puti.heldDice ?? []).some((h) => h.value === point)
+  ) {
+    return false;
+  }
+  // 攻击骰先停到中间（供 034 与攻击骰"并排"）；011 的追问推迟到"不发动 034"之后（保持 034 优先）
+  if (!g.pendingAttack) parkAttack(g, pa); // 队列攻击已由 `pumpAttackQueue` 停住 → 不重复停
+  queuePending(g, {
+    kind: 'putiPick',
+    player: defender,
+    owner: pa.attacker,
+    value: point,
+    mode: 'attack',
+    attack: pa,
+  });
+  pumpPending(g);
+  return true;
+}
+
 /** 技能发起的“虚拟”攻击（非实体攻击骰）。`source` = 来源技能名 + 效果拥有者（供提示栏显示） */
 export function virtualAttack(
   g: GameState,
@@ -427,13 +476,18 @@ export function virtualAttack(
     return;
   }
   const base = attackDamageBonus(g, player);
-  const point = applyWuguang(g.players[player], baseValue); // L06 无光领域：攻击点数 ±1
+  // 028 天罚：攻击点数「始终视为固定值」（FAQ 28.1.1）→ **技能发起的攻击同样适用**（每次攻击弹其技能名）
+  const tianfa = g.tianfa[player];
+  if (tianfa) fxSkillFired(g, player, tianfa.key);
+  const rawTianfa = tianfa && tianfa.value !== undefined ? tianfa.value : baseValue;
+  const point = applyWuguang(g.players[player], rawTianfa); // L06 无光领域：攻击点数 ±1
   g.pendingAttack = {
     attacker: player,
     value: point + base.value,
     unblockable: opts?.unblockable ?? g.unblockableThisTurn,
     physical: false,
     baseValue: point,
+    rawPoint: baseValue,
     bonusValue: base.value,
     bonusLabel: base.label,
     ...(source ? { sourceSkill: source.skill, sourceSkillOwner: source.owner } : {}),
@@ -513,6 +567,25 @@ export function settleAttack(
   pa: PendingAttack,
   o: { blocked: boolean; blockedForTriggers: boolean; damageDealt: number; applyDamage: boolean },
 ): void {
+  // Z07「围攻」：挑战者**的攻击点数为 6**造成伤害、且「荒野行者」有计数 → 取消该伤害、计数 −1（强制）
+  // ⚠️ 判定用**攻击的有效点数** `baseValue`（含 028「陨落」"视为6"等改判；**虚拟攻击也算**）——
+  //    `sourceValue` 是"那颗真骰的原始点数"，会漏判/误判（真实事故：陨落把 3 点骰改判成 6 → 围攻不触发）。
+  //    也**不看** `value`（伤害）：4 点攻击 +2 加成 = 6 点伤害 ≠ 6 点攻击。
+  // ⚠️ **必须按卡门禁**（`legendHasSkill(g,'z07-x')`）：`count` 是**共享字段**（Z02 锋芒/Z05/Z07 都有计数），
+  //    只判 `mode==='challenge'` + `count>0` 会在打**别的卡**时误触发（真实事故 2026-10-12：打 Z02「永暗之刃」时冒出围攻）。
+  if (
+    legendHasSkill(g, 'z07-x') &&
+    pa.attacker === 'A' &&
+    o.damageDealt > 0 &&
+    pa.baseValue === 6 &&
+    (g.challenge?.count ?? 0) > 0
+  ) {
+    g.challenge!.count -= 1;
+    logLine(g, `「${legendLegacyName(g)}」：围攻 — 取消 6 点攻击的 ${o.damageDealt} 点伤害，计数 −1`);
+    // 触发＝"发动帧" → 弹技能名（围攻是 `unordered` 钩子，不发这条界面就没有名字可弹）
+    fxLegendSkill(g, 'z07-x');
+    o = { ...o, applyDamage: false, damageDealt: 0 };
+  }
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   const defender = g.players[defenderId];
   if (o.applyDamage && (o.damageDealt > 0 || !o.blocked)) {
@@ -534,8 +607,9 @@ export function settleAttack(
   // 挑战模式：多段队列用"某颗真骰"发起攻击 → **这一击结算完**才把那颗骰从区里移除。
   //   · 枭首/裁雨流/无上剑术/战车：源骰在**攻击骰区**；
   //   · 真实之剑（甲，2026-10-11）：源骰**留在防御骰区**（不搬进攻击骰区）→ 找不到就回退到防御骰区。
-  //（只在本模式做，避免误伤 001/C01 裁雨流那种"攻击骰结算后落区"的常规流程。）
-  if (g.mode === 'challenge' && pa.sourceDieId) {
+  //（只处理**传奇（B）**自己的那批真骰攻击；挑战者的攻击骰在支付时就已消耗 → 这里本应空转。
+  //  也避免误伤 001/C01 裁雨流那种"攻击骰结算后落区"的常规流程。）
+  if (g.mode === 'challenge' && pa.attacker === 'B' && pa.sourceDieId) {
     const atkArea = g.players[pa.attacker].areas.attack;
     let area = atkArea;
     let idx = area.findIndex((d) => d.id === pa.sourceDieId);
@@ -545,8 +619,10 @@ export function settleAttack(
     }
     if (idx >= 0) {
       // Z01「裁雨流」：**前 3 次造成伤害**的攻击骰 → 移入防御骰区（而非弃掉）；其余照常移走
+      // ⚠️ 必须是 **Z01 的卡**（`legendHasSkill`）——挑战者若也用名为「裁雨流」的攻击，
+      //    **不得**污染 Z01 的"前 3 次"计数、更不得把骰搬进**传奇的**防御骰区。
       const hits = g.challenge?.caiyuliuHits ?? 0;
-      if (pa.sourceSkill === '裁雨流' && o.damageDealt > 0 && hits < 3) {
+      if (legendHasSkill(g, 'z01-5') && pa.sourceSkill === '裁雨流' && o.damageDealt > 0 && hits < 3) {
         const die = area.splice(idx, 1)[0];
         // 移入防御骰区（**受 `defenseCap` 约束**；已满 → 直接弃置＝移除后不加入）。边界：仍占"前 3 次"名额。
         const placed = addLegendDefense(g, die);
@@ -557,9 +633,13 @@ export function settleAttack(
       }
     }
   }
-  // Z06「冥界行走」（本回合）：传奇（B）的攻击**造成伤害** → 回复该攻击点数一半（向上取整）
+  // Z06「冥界行走」（本回合）：传奇（B）的攻击**造成伤害** → 回复该**攻击点数**一半（向上取整）
+  // ⚠️ 取 **`baseValue`（攻击的有效点数）**、**不含伤害加成**——与卡面"回复该**攻击点数**一半"一致，
+  //    也与标准版 017 / 025·触发 / L05 同口径（凡"按攻击点数"一律 `baseValue ?? value`）。
+  //    注：Z06 的**黑/白两面技能不共存**（勾魂镰黑面 / 冥界行走白面）→ 本卡内 `value` 与 `baseValue` 恒等；
+  //    取 `baseValue` 是**口径对齐**（防将来白面出加伤），**不是**在修一个可复现的 bug。
   if (g.mode === 'challenge' && pa.attacker === 'B' && g.challenge?.mingjieHeal && o.damageDealt > 0) {
-    const healAmt = Math.ceil(pa.value / 2);
+    const healAmt = Math.ceil((pa.baseValue ?? pa.value) / 2);
     heal(g, 'B', healAmt);
     logLine(g, `「漆黑死神」：冥界行走 — 攻击造成伤害，回复 ${healAmt} 点生命`);
   }
@@ -738,18 +818,20 @@ export function afterAttackResolved(
   // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
   if (res.damageDealt > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
   // A06 异相·「勾魂」（持续）：你用"点数不存在于本神器之上"的攻击骰造成伤害后，将该攻击骰置于本神器上（永久）
+  // ⚠️ "攻击点数"取**改后有效点数**（`baseValue`，含 L06 ±1）——与 034 菩提同口径（作者裁定 2026-10-11）。
+  const gouhunPoint = pa.baseValue ?? pa.value;
   if (res.damageDealt > 0 && pa.physical && pa.sourceValue !== undefined) {
     const gou = artifactWithSkill(atk, 'xuyu.alt.gouhun');
     const gsk = gou?.skills.find((s) => s.key === 'xuyu.alt.gouhun');
     if (gou && gsk && skillActive(gou, gsk)) {
       const held = gou.heldDice ?? (gou.heldDice = []);
-      if (!held.some((h) => h.value === pa.sourceValue)) {
-        const chipId = `${pa.attacker}-${gou.id}-held-${pa.sourceValue}`;
-        held.push({ id: chipId, value: pa.sourceValue as number });
-        logLine(g, `${pname(pa.attacker)} 「勾魂」：将本次攻击骰（${pa.sourceValue} 点）置于「${gou.name}」上`);
+      if (!held.some((h) => h.value === gouhunPoint)) {
+        const chipId = `${pa.attacker}-${gou.id}-held-${gouhunPoint}`;
+        held.push({ id: chipId, value: gouhunPoint });
+        logLine(g, `${pname(pa.attacker)} 「勾魂」：将本次攻击骰（${gouhunPoint} 点）置于「${gou.name}」上`);
         fxSkillFired(g, pa.attacker, 'xuyu.alt.gouhun');
         // 动效旁路：参考裁雨流——攻击骰从中间飞向该神器标题栏、变灰存放
-        fxPush({ kind: 'gouhun', player: pa.attacker, artifactId: gou.id, chipId, value: pa.sourceValue as number });
+        fxPush({ kind: 'gouhun', player: pa.attacker, artifactId: gou.id, chipId, value: gouhunPoint });
       }
     }
   }
@@ -852,6 +934,10 @@ export function pumpAttackQueue(g: GameState): void {
         if (next.legendGroup) pa.legendGroup = next.legendGroup; // 因"多组"触发的攻击 → 提示"第 K / N 组"
       }
     }
+    // 034/A03 菩提·触发（攻击侧）：**用了攻击骰**的攻击（挑战「枭首 / 裁雨流 / 真实之剑 / 无上剑术」等）
+    // → 防守方持 034/A03 时同样可取消（卡面＝"对方使用 1 个攻击骰后"）。此时已 `pendingAttack` 停住，不重复 park。
+    const curPa = g.pendingAttack as PendingAttack | null;
+    if (curPa && maybePutiAttack(g, curPa)) return;
   }
 }
 

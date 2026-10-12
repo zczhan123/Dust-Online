@@ -9,6 +9,7 @@ import {
   validateQuanzhiAssign,
 } from '../src/core/engine/game';
 import { SKILL_HANDLERS } from '../src/core/engine/skills';
+import { virtualAttack } from '../src/core/engine/combat';
 import { fxTake } from '../src/core/engine/fx';
 import { battleNotes } from '../src/core/engine/battleNotes';
 import { effectiveSpeed } from '../src/core/engine/derive';
@@ -52,6 +53,61 @@ describe('028 天罚（白昼之火 / 陨落）', () => {
     expect(g.tianfa.A).toEqual({ blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' });
     runSkill(g, 'A', '028', 'tianfa.yunluo');
     expect(g.tianfa.A).toEqual({ blockKind: 'attack', value: 6, damageCount: 0, key: 'tianfa.yunluo' });
+  });
+
+  it('白昼之火：**技能发起的（虚拟）攻击**点数同样视为 6（FAQ 28.1.1）；每次攻击弹技能名', () => {
+    const g = mateGame();
+    toMain(g);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    clear(g, 'A');
+    clear(g, 'B');
+    fxTake();
+    virtualAttack(g, 'A', 3); // 技能发起的 3 点攻击
+    expect(g.pendingAttack?.baseValue).toBe(6); // ★ 视为6
+    expect(g.pendingAttack?.rawPoint).toBe(3);
+    expect(g.pendingAttack?.value).toBe(6);
+    expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tianfa.bairi')).toBe(true);
+  });
+
+  it('028「视为6」**覆盖技能指定点数**：028 × 005「影袭」（"视为以 X 点攻击"）→ 攻击点数 = 6', () => {
+    // A 持 028(第一列)/005(第二列)/003(第三列) —— 可合法共存；影袭自己说"视为以 3 点攻击"
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '005', '003'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    toMain(g);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'x', value: 5, kind: 'attack' }];
+    runSkill(g, 'A', '005', 'yingle.yingxi', { dieId: 'x', x: 3 });
+    expect(g.pendingAttack?.baseValue).toBe(6); // ★ 028 覆盖（作者裁定 2026-10-12）
+    expect(g.pendingAttack?.rawPoint).toBe(3); // 原值仍记录（提示/战报写"被改判"）
+  });
+
+  it('028「视为6」**覆盖技能指定点数**：028 × A01「不败之王」→ 自己那段变 6，对方那两段仍 3', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '002', 'A01'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(g);
+    toMain(g);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    clear(g, 'A');
+    clear(g, 'B');
+    runSkill(g, 'A', 'A01', 'guwang.alt.charge');
+    expect(g.pendingAttack?.attacker).toBe('A');
+    expect(g.pendingAttack?.baseValue).toBe(6); // ★ 自己那段 5 → 6
+    applyAction(g, { t: 'block' }); // 结算这段 → 下一段是"对方对你 3 点"（对方没 028）
+    expect(g.pendingAttack?.attacker).toBe('B');
+    expect(g.pendingAttack?.baseValue).toBe(3); // ★ 对方那段不受 A 的 028 影响
+  });
+
+  it('战报写明"点数被改判"：使用 2 点攻击骰（被「白昼之火」改为 6 点）攻击', () => {
+    const g = mateGame();
+    toMain(g);
+    g.tianfa.A = { blockKind: 'meditation', value: 6, damageCount: 0, key: 'tianfa.bairi' };
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['a1'] }] });
+    const texts = g.log.map((l) => l.text);
+    expect(texts.some((t) => t.includes('使用 2 点攻击骰（被「白昼之火」改为 6 点）攻击'))).toBe(true);
   });
 
   it('白昼之火：攻击点数视为 6（与骰面无关），对方只能用冥想骰抵挡', () => {

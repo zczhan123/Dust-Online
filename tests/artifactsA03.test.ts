@@ -172,6 +172,22 @@ describe('A03 修罗的菩提·触发（复用 034 不动菩提触发）', () =>
     expect(g.players.B.life).toBe(lifeB - 4);
     expect(a.heldDice?.length ?? 0).toBe(0);
   });
+
+  it('**移除只删 1 颗**：A03 装载两颗同点（[3,3]）→ 触发一次后**只剩 1 颗**（回归：曾按值 filter 全删）', () => {
+    const g = gA03();
+    toMain(g);
+    activateA03(g, 'A', 'right', [3, 3]); // A03 菩提侧装载：2 个任意点数、**可相同**
+    const a = art(g, 'A', 'A03');
+    expect(a.heldDice?.map((h) => h.value)).toEqual([3, 3]);
+    g.activePlayer = 'B'; // B 发起攻击（3 点）
+    clear(g, 'A');
+    clear(g, 'B');
+    g.players.B.areas.attack = [{ id: 'b1', value: 3, kind: 'attack' }];
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['b1'] }] });
+    expect(g.pending?.kind).toBe('putiPick');
+    applyAction(g, { t: 'putiResolve', accept: true });
+    expect(a.heldDice?.map((h) => h.value)).toEqual([3]); // ★ 只掉 1 颗（若按值 filter 会全删）
+  });
 });
 
 describe('A03 与 034 同名持续 key 互不影响', () => {

@@ -121,6 +121,19 @@ describe('挑战模式 · Z06 效果', () => {
     expect(g.players.B.life).toBe(24);
   });
 
+  it('冥界行走：**按"攻击点数"取值**（口径用例：合成 pa，Z06 内实际不可达）', () => {
+    // 卡面＝"回复该**攻击点数**一半" → 取 `baseValue`（**不是**伤害 `value`）。
+    // 注：Z06 的**黑/白两面技能不共存**（勾魂镰黑面 / 冥界行走白面）→ 真实对局里 value ≡ baseValue；
+    //     本用例是**口径**用例（合成一个 value≠baseValue 的 pa，锁"取哪个字段"），不是复现某局。
+    const g = make();
+    setA(g, {});
+    g.players.B.life = 20;
+    applyChallengeSkill(g, Z06, SK('z06-4'), []);
+    g.pendingAttack = { attacker: 'B', value: 7, baseValue: 5, unblockable: false, physical: false };
+    applyAction(g, { t: 'block' });
+    expect(g.players.B.life).toBe(23); // ceil(5/2)=3（若误取伤害 value 会得 ceil(7/2)=4）
+  });
+
   it('勾魂镰·选组代决：驱动骰有多组同点（2 点组 + 5 点组）→ 弹面板自选', () => {
     const g = make();
     skipInitialReroll(g);
@@ -185,5 +198,31 @@ describe('挑战模式 · Z06 效果', () => {
     checkLifeEnd(g);
     expect(g.phase).toBe('gameOver');
     expect(g.winner).toBe('A');
+  });
+
+  it('虚无形态 × 死即新生：自伤 10 点致死 → **复活后继续** 5 次 5 点攻击（作者裁定 2026-10-11）', () => {
+    const g = make();
+    setA(g, {});
+    g.players.B.areas.attack = [];
+    g.players.B.life = 8; // 受 10 真伤必死
+    expect(g.challenge!.deathUsed).toBeFalsy();
+    applyChallengeSkill(g, Z06, SK('z06-2'), []);
+    expect(g.players.B.life).toBe(13); // 死即新生：生命重设 13
+    expect(g.challenge!.deathUsed).toBe(true);
+    expect(g.phase).not.toBe('gameOver');
+    expect(vals(g.players.B.areas.attack).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]); // 复活给的骰
+    // ★ 5 次 5 点攻击照常发起（不被"死亡"打断）
+    expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 5 });
+    expect(g.pendingAttack?.legendGroup).toEqual({ index: 1, total: 1, sub: 1, subTotal: 5 });
+    expect(g.virtualQueue).toHaveLength(4);
+    let n = 0;
+    let guard = 0;
+    while ((g.pendingAttack || (g.virtualQueue ?? []).length > 0) && guard++ < 30) {
+      if (g.pendingAttack) {
+        applyAction(g, { t: 'block' });
+        n++;
+      }
+    }
+    expect(n).toBe(5); // 5 段全部结算
   });
 });
