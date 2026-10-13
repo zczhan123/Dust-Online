@@ -213,6 +213,28 @@ describe('挑战模式 · 对手面板（D 方案）', () => {
     expect(root.querySelector('.challenge-token')?.textContent ?? '').toContain('无光领域指示物');
   });
 
+  it('Z09 威压：卡面级规则 → 该行常亮「生效中」', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['001', '002', '003'] });
+    const { root } = mount(state);
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('.challenge-skill'));
+    const row = rows.find((r) => r.querySelector('.csk-name')?.textContent === '威压') ?? null;
+    expect(row).toBeTruthy();
+    expect(row!.classList.contains('is-on')).toBe(true);
+    expect(row!.querySelector('.csk-on-pill')?.textContent).toBe('生效中');
+  });
+
+  it('Z09 威压：主要阶段提示栏「威压」按 **B** 上色（对面规则）', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['001', '002', '003'] });
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    const { root } = mount(state);
+    const notes = root.querySelector('.hint-notes');
+    expect(notes).toBeTruthy();
+    const skill = notes!.querySelector('.hint-skill.player-B');
+    expect(skill?.textContent).toBe('「威压」');
+    expect(notes!.textContent).toContain('每次攻击最多造成 4 点伤害');
+  });
+
   it('提示栏：加成来源按"发起攻击方"上色（昔传发起＝B 红）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z05', challenger: ['001', '002', '003'] });
     state.pendingAttack = {

@@ -260,6 +260,12 @@ describe('023 蛇蝎（畏惧 / 共振）', () => {
     applyAction(g, { t: 'gongzhenResolve', pick: 'gain' });
     expect(g.players.A.areas[kind].length).toBe(aBefore + 2);
     expect(g.players.B.areas[kind].length).toBe(bBefore + 2);
+    // 战报带点数（升序 `/` 格式）：双方各得的 2 颗的实际点数都出现
+    const gzText = g.log.map((l) => l.text).join('\n');
+    const aSeq = g.players.A.areas[kind].slice(-2).map((d) => d.value).sort((x, y) => x - y).join('/');
+    const bSeq = g.players.B.areas[kind].slice(-2).map((d) => d.value).sort((x, y) => x - y).join('/');
+    expect(gzText).toContain(`玩家A：${aSeq}`);
+    expect(gzText).toContain(`玩家B：${bSeq}`);
 
     // ② 双方各弃置 2 颗（发起者选择；不足则尽可能）
     const g2 = xivaGame();

@@ -66,7 +66,7 @@ describe('§19⑨ 多段攻击三件套 · 门禁（自动盘点源码）', () =
     const missing = hits.filter((h) => !ANCHOR_RE.test(h.prev));
     expect(missing.map((h) => `${h.file}:${h.line}`)).toEqual([]); // 新来源没加锚注释 → 这里红
     const allAnchors = hits.map((h) => ANCHOR_RE.exec(h.prev)![1]).join('|');
-    for (const name of ['013', 'A08', 'A01', '裁雨流', '枭首', '战争横扫', '战车', '拔城', '真实之剑', '无上剑术', '数罪并罚', '电刑', '虚无形态', '勾魂镰', '圆舞', '兽魂', '蛮王之牙', '尘起', '处刑通牒']) {
+    for (const name of ['013', 'A08', 'A01', '裁雨流', '枭首', '战争横扫', '战车', '拔城', '真实之剑', '无上剑术', '数罪并罚', '电刑', '虚无形态', '勾魂镰', '圆舞', '兽魂', '蛮王之牙', '尘起', '处刑通牒', '战鬼的残杀', '横贯']) {
       expect(allAnchors).toContain(name);
     }
   });

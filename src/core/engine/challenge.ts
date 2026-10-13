@@ -1,5 +1,5 @@
 import type { Die, GameState, PlayerId } from '../model/types';
-import { CHALLENGES, challengeInertSkills, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
+import { CHALLENGES, challengeInertSkills, challengeInertTactics, type ChallengeCard, type ChallengeSlot } from '../content/challenges';
 import { createDie, newDieId } from '../model/dice';
 import { fxPush } from './fx';
 import { logLine } from './log';
@@ -235,6 +235,14 @@ export function legendLegacyName(g: GameState): string {
   return CHALLENGES.find((c) => c.id === g.challenge?.cardId)?.legacy ?? '';
 }
 
+/** 「威压」类规则：**挑战者对传奇的每次攻击伤害上限**（当前卡的 `damageCapPerHit`）。
+ *  非挑战 / 该卡未设 → `null`（不封顶）。 */
+export function legendDamageCap(g: GameState): number | null {
+  if (g.mode !== 'challenge' || !g.challenge) return null;
+  const card = CHALLENGES.find((c) => c.id === g.challenge!.cardId);
+  return card?.damageCapPerHit ?? null;
+}
+
 /**
  * 该神器技能在**这一方手里**是否**整条失效**（挑战模式的"特殊规则"；名单唯一来源 `CHALLENGE_RULE_NOTES`）。
  *
@@ -252,4 +260,9 @@ export function isInertSkill(g: GameState, player: PlayerId, key: string): boole
   if (!challengeInertSkills().has(key)) return false;
   if (key === 'tianfa.bairi' || key === 'tianfa.alt.shenkong') return player !== LEGEND_PLAYER;
   return player === LEGEND_PLAYER;
+}
+
+/** 挑战模式下该**战斗牌（战术牌）key**的"效果"是否失效（**生命修正照吃**，见 `challenges.ts` 的 `challengeInertTactics`）。 */
+export function isInertTactic(g: GameState, key: string): boolean {
+  return g.mode === 'challenge' && challengeInertTactics().has(key);
 }

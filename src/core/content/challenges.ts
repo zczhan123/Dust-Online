@@ -83,6 +83,9 @@ export interface ChallengeCard {
   rollDiceBonusOnDamage?: number;
   /** 当前生命每比初始生命低 10 点 → 其攻击伤害 **+（本值）**（Z05「绝境天神」=1）。 */
   attackBonusPer10MissingLife?: number;
+  /** 「威压」类规则：**挑战者对传奇的每次攻击伤害上限**（Z09「天殇的战鬼」=4）。
+   *  造成伤害时若原始伤害 > 该值 → 封顶并弹「威压」名（`z09-x`）。缺省＝不封顶。 */
+  damageCapPerHit?: number;
   /** 是否使用**黑白指示物**（Z06「漆黑死神」）：战斗开始放黑面朝上、其回合结束翻面；技能按 `color` 决定是否发动。 */
   token?: boolean;
   /** 传奇「计数」上限（Z02「锋芒」X / 「暗夜凶神」+1 用）；无计数的卡不填。
@@ -228,7 +231,30 @@ export const CHALLENGES: ChallengeCard[] = [
       },
     ],
   },
-  { id: 'Z09', legacy: '天殇的战鬼', artifacts: ['025', '026', '027'] },
+  {
+    id: 'Z09', legacy: '天殇的战鬼', artifacts: ['025', '026', '027'],
+    life: 50, defenseMin: 2, defenseRule: '只会抵挡伤害 ≥ 2 的攻击', rollDice: 7,
+    damageCapPerHit: 4, // 威压：挑战者每次攻击对传奇最多造成 4 伤害
+    // 防御骰上限：无（不填 defenseCap → 不截断）
+    skills: [
+      { id: 'z09-0', name: '回合开始', slots: null, effect: '投掷 7 个驱动骰。' },
+      { id: 'z09-1', name: '陷阵', marker: '∞', slots: null, effect: '重新投掷 1 个由挑战者选择的任意驱动骰。' },
+      {
+        id: 'z09-2', name: '战鬼的残杀', marker: '怜悯*', slotChoice: true, slots: [{ kind: 'straight', count: 4 }],
+        effect: '将本技能上的驱动骰全部移动至攻击骰区，并使用所有能力骰进行攻击。',
+      },
+      { id: 'z09-3', name: '奇袭', slotChoice: true, slots: [{ kind: 'straight', count: 3 }], effect: '将本技能上的驱动骰全部移动至攻击骰区。' },
+      {
+        id: 'z09-4', name: '凛冽之音', slotChoice: true, slots: [{ kind: 'same', count: 2 }],
+        effect: '「天殇的战鬼」补充防御骰，直至防御骰区中存在所有的点数。',
+      },
+      {
+        id: 'z09-5', name: '横贯', slots: [{ kind: 'pips', count: 0, faces: [3, 5], unlimited: true }],
+        effect: '将本技能上的驱动骰全部移动至攻击骰区，并使用所有攻击骰进行攻击。挑战者每进行 1 次抵挡后，必须弃置自己的 1 个任意能力骰。',
+      },
+      { id: 'z09-x', name: '威压', unordered: true, slots: null, alwaysOn: true, effect: '挑战者的每次攻击最多对「天殇的战鬼」造成 4 点伤害。' },
+    ],
+  },
   { id: 'Z10', legacy: '破晓之剑', artifacts: ['028', '029', '030'] },
   { id: 'Z11', legacy: '受缚邪灵', artifacts: ['031', '032', '033'] },
   { id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'] },
@@ -327,4 +353,13 @@ export const CHALLENGE_RULE_NOTES: ChallengeRuleNote[] = [
 /** 本模式下**整条失效**的神器技能 key 集合——引擎只读这里（唯一来源）。 */
 export function challengeInertSkills(): Set<string> {
   return new Set(CHALLENGE_RULE_NOTES.flatMap((n) => n.inertSkills ?? []));
+}
+
+/**
+ * 挑战模式下**效果失效**的战斗牌（战术牌）key 集合——**生命修正不受影响，照吃**。
+ * 当前仅 **T02「先机」**（`xianji`）：它的"定先手"会与"挑战永远从**传奇(B)**回合开始"冲突 → 挑战下只废"定先手"。
+ * （用户裁定 2026-10-13：类似神器在挑战下的削弱，除生命外其余效果无效。）
+ */
+export function challengeInertTactics(): Set<string> {
+  return new Set(['xianji']);
 }

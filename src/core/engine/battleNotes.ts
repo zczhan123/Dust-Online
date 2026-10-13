@@ -3,6 +3,7 @@ import { hasActiveSkill, skillUseKey } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
 import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
+import { legendDamageCap } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 import { ARTIFACT_TEXT } from '../content/artifactText';
 
@@ -13,6 +14,8 @@ const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
 export interface BattleNote {
   label: string;
   text: string;
+  /** 技能名的**归属方**（供提示栏上色）；缺省＝当前行动方。如挑战传奇的「威压」应为 `'B'`（红）。 */
+  color?: PlayerId;
 }
 
 /**
@@ -30,6 +33,12 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   if (g.pending && g.pending.player !== player) return [];
   const p = g.players[player];
   const notes: BattleNote[] = [];
+
+  // 挑战模式·传奇「威压」（卡面级规则 `damageCapPerHit`）：提示挑战者"你打向传奇的攻击有伤害上限"
+  const dmgCap = legendDamageCap(g);
+  if (player === 'A' && dmgCap !== null) {
+    notes.push({ label: '威压', color: 'B', text: `生效中，每次攻击最多造成 ${dmgCap} 点伤害` });
+  }
 
   // A 攻击伤害加成（含带来源的本回合 Buff，例如「献祭」②）
   const bonus = attackDamageBonus(g, player);

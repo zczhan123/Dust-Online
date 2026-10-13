@@ -23,3 +23,11 @@ export function logLine(g: GameState, text: string, phase: Phase = g.phase): voi
 export function vals(dice: { value: number }[]): string {
   return dice.map((d) => `${d.value}点`).join('、');
 }
+
+/** 骰点列表（**升序 + `/` 分隔 + 不带"点"**，如 `1/2/2/4`）——**"获得/补充/移入骰子"的战报统一格式**。 */
+export function valsSorted(dice: { value: number }[]): string {
+  return dice
+    .map((d) => d.value)
+    .sort((a, b) => a - b)
+    .join('/');
+}

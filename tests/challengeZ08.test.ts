@@ -86,7 +86,7 @@ describe('挑战模式 · Z08 效果', () => {
     expect(g.pending.pick?.n).toBe(1);
   });
 
-  it('共振：挑战者能力骰 ≥4 → 双方各得 2 个随机攻击骰', () => {
+  it('共振：挑战者能力骰 ≥4 → 双方各得 2 个随机攻击骰（**战报带点数**）', () => {
     const g = make();
     setA(g, { meditation: [die('m1', 1), die('m2', 2), die('m3', 3), die('m4', 4)] });
     setB(g, {});
@@ -94,6 +94,12 @@ describe('挑战模式 · Z08 效果', () => {
     expect(g.players.A.areas.attack).toHaveLength(2); // A 得 2
     expect(g.players.B.areas.attack).toHaveLength(2); // 黑枪得 2
     expect(g.challenge!.deferred).toBeUndefined();
+    // 战报带点数（升序 `/` 格式）：双方各得的 2 颗实际点数都出现
+    const text = g.log.map((l) => l.text).join('\n');
+    const aSeq = g.players.A.areas.attack.map((d) => d.value).sort((x, y) => x - y).join('/');
+    const bSeq = g.players.B.areas.attack.map((d) => d.value).sort((x, y) => x - y).join('/');
+    expect(text).toContain(`「黑枪」：${bSeq}`);
+    expect(text).toContain(`挑战者：${aSeq}`);
   });
 
   it('共振：挑战者能力骰 <4 → 双方各弃 2 个防御骰（代决"弃哪几颗"）', () => {

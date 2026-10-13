@@ -1492,16 +1492,26 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
     table.appendChild(r);
   });
   right.appendChild(table);
-  // Z06「死即新生」：**不占顺序步** → 单独一行放在"临时驱动骰区域"**上方**（与「圆舞」那条分开）；序号位用 `x`。
-  //   触发时绿、用掉后灰（`deathJustTriggered` 只在触发那一帧）。
-  if (card?.skills?.some((s) => s.unordered)) {
-    const dsk = card.skills!.find((s) => s.unordered)!;
-    const drow = el('div', 'challenge-skill challenge-skill--death');
-    if (state.challenge?.deathUsed && !state.challenge?.deathJustTriggered) drow.classList.add('is-used');
-    if (state.challenge?.deathJustTriggered) drow.classList.add('is-triggered');
+  // 「不占顺序步」的技能（`unordered`，序号位 `x`）→ 单独一行（虚线框＝"独立行"样式），放在"临时驱动骰区域"上方。
+  //   · Z06「死即新生」：触发绿 / 用掉灰（`deathUsed`/`deathJustTriggered` 只在触发帧）；
+  //   · Z07「围攻」：独立钩子（无触发/用掉态）；
+  //   · Z09「威压」：卡面级规则 → `alwaysOn` 常亮（左绿条 + 药丸「生效中」）。
+  for (const dsk of card?.skills ?? []) {
+    if (!dsk.unordered) continue;
+    const alwaysOn = challengeSkillAlwaysOn(state, dsk);
+    const cls = ['challenge-skill', 'challenge-skill--death'];
+    if (state.challenge?.deathUsed && !state.challenge?.deathJustTriggered) cls.push('is-used');
+    if (state.challenge?.deathJustTriggered) cls.push('is-triggered');
+    if (alwaysOn) cls.push('is-on');
+    const drow = el('div', cls.join(' '));
     const dno = el('span', 'csk-no');
     dno.textContent = 'x';
     drow.appendChild(dno);
+    if (alwaysOn) {
+      const onPill = el('span', 'csk-on-pill');
+      onPill.textContent = '生效中';
+      drow.appendChild(onPill);
+    }
     const dnm = el('span', 'csk-name');
     dnm.textContent = dsk.name;
     drow.appendChild(dnm);
@@ -2308,7 +2318,7 @@ function hintBox(ctx: Ctx): HTMLElement {
     line.appendChild(document.createTextNode('攻击提示：'));
     notes.forEach((n, i) => {
       if (i > 0) line.appendChild(document.createTextNode('　｜　'));
-      const skill = el('span', `hint-skill player-${actor}`);
+      const skill = el('span', `hint-skill player-${n.color ?? actor}`);
       skill.textContent = `「${n.label}」`;
       line.appendChild(skill);
       line.appendChild(document.createTextNode(n.text));

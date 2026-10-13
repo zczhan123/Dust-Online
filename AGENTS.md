@@ -359,6 +359,10 @@
    - `minglei.leibao.continuous` / `youming.weimu`（013 雷暴·持续 / 017 帷幕）：**只废传奇(B)**——「昔日传奇」没有重掷阶段。
    - 标准模式：一律 false（旧路径零变化）。
    - 023 共振选"双方各获得"时**跳过给传奇的冥想骰**；020 兽魂的选择由挑战者定（Z02 无此卡）。
+   - **战术牌（战斗牌）在挑战模式**（护栏 `tests/challengeTactics.test.ts`）：
+     - **初始生命修正**：`createChallengeGame` 建局后**必须**调 `applyTacticLifeMods(g)` + `tacticStartDone=true`（标准流程在"战前收口"结算；挑战**不经 `tactics` 阶段** → 漏调则所有 `lifeMods` 全失效，如 T03 顽强 +6）。`who:'opp'` 的减生命作用到**传奇(B)**。
+     - **T02「先机」削弱**：`challengeInertTactics()`（`challenges.ts`，当前仅 `xianji`）+ `isInertTactic(g,key)`（`challenge.ts`）；`applyTacticStart` 命中则**跳过挂 pending**（**生命修正照吃**）——避免与"永远从传奇回合开始"冲突。标准模式不变。
+     - **T16「潜伏」影响传奇**：`attacksBanned = t16Active && firstRound[activePlayer]` 已是**通用门禁**（`doAttack`/`virtualAttack` 双口拦）→ 传奇首回合**实体骰留在攻击区、虚拟攻击不产生**（无 `pendingAttack` ⇒ 界面**不播攻击动画**）。**`pumpAttackQueue` 里被禁时须一次性清空队列**（否则残留 → `challengeStep` 要求队列空 → **卡死 + 白等**）。传奇回合**须递增 `turnsTaken`**（`runLegendTurn`），否则 T16"第二回合 +1"对传奇失效。
 8. **对手面板（D 方案，`render.ts` 的 `challengePanel()`）**：面板头＝`传说中的「X」` ＋药丸 `昔日传奇 · Z0N` ＋**点数分布**（取第二列神器，同玩家卡头写法）＋计数 `X/上限`；**卡图缩略**（`public/challenges/Z0NN.jpg`，**右键/长按＝「技能详情」浮窗 `challengeSkillsOverlay`**，**不再显示整张大图**）＋**技能列**（序号/名称/`∞`·`怜悯*`/槽摘要，**正在结算**一条高亮＝`challenge.activeSkill`；**持续生效中**（如 Z02「锋芒」计数>0）＝`.is-on` 左绿条＋药丸「生效中」，位于序号与名称之间）；生命条独占一行；三区＝防御骰区 / 攻击骰区 / **驱动骰槽**（＝原冥想骰区槽位，**仅本模式**改名）。图上不显示三神器。
 9. **固定视角**：本模式**不做 A/B 换位**——宿主 `main.ts` 在挑战局用 `setLocalViewPlayer('A')`（`viewOwnerOf` 唯一开关）⇒ `holdView` 恒假。
 10. **入口**：`setupScreen` 主页菜单「挑战模式」→ 已有的 4 列选择界面 → 「开始挑战」按钮带 `challengeCardId` → `main.ts` 的 `startLocal` 分支走 `createChallengeGame`。中段右槽在挑战模式多一个 **`挑战模式特殊规则`** 按钮（浮窗＝第 7 条清单）。
@@ -381,6 +385,8 @@
       - **战报（log）例外（2026-10-12 用户定）**：挑战模式 B 在**战报**里用**卡名**（如「黑枪」）——`logLine` 唯一替换点把 `玩家B`/`昔日传奇` 都换成 `「<当前卡名>」`（**录像要记具体英雄名**）；**界面**仍用「昔日传奇」——两者**有意区分**，勿"统一"。
     - **技能名标色**：提示栏技能名用 `.hint-skill player-X`，**按"所属方"取色**（昔传=B 红；挑战者=A 蓝）——**不按名字**，避免神器与昔传技能重名时串色。
     - **战报上色（2026-10-12）**：`render.ts` 的 `appendLogColored`（界面层，引擎 `text` 不变）：身份词（`玩家A` 蓝 / `玩家B` 红 / 挑战 `「<卡名>」` 红）+ `「…」`技能名按**"离它最近的前一个身份词"**上色；挑战"传奇回合行"（以 `「<卡名>」` 开头）里的**裸技能名**按 `CHALLENGES` 技能名数据匹配上色（仅此类行 → **同名技能不串**，如挑战者 022「填弹」染蓝、传奇 z08-1「填弹」染红）。深色战报底用**更亮同色系**（`.log-actor/.log-skill`）。**不建"名字→归属"全局表**。
+    - **战报「获得/补充骰子」一律带点数（2026-10-13 全量统一）**：凡"获得/补充/移入骰子"的 `logLine` **必须列出实际点数**——格式＝ **`../log.ts` 的 `valsSorted(dice)`＝升序 + `/` 分隔 + 不带"点"**（如 `1/2/2/4/4/5/6`）；而**"消耗/弃置"** 用 `vals(dice)`（`N点、N点`、**不排序**）。已覆盖：挑战传奇各技能（断斩一斩 / 龙腾万丈 / 葬敌的完杀 / 战车 / 顿悟 / 灵能屏障 / 凶弹业舞 / **共振** / 凛冽之音 / 各"移入防御骰区"）、023 共振、补充阶段（`phases.ts`）、标准 龙腾万丈/潜行/谦卑/献祭/冥界行走/漆黑绽放（含必杀）/寰宇飞升/恶意/斩神切/零时枭首/高塔铁幕/王家之拳/灵能屏障·启动/灵能脉冲·启动。**新卡义务**：新技能凡"给骰"必带点数（升序 `/`）并补 1 条断言。（`tests/diceLogPoints.test.ts`。）
+    - **挑战传奇"威压"要在主要阶段提示挑战者**：`battleNotes(g, 'A')` 里当 `legendDamageCap(g) !== null` → `{label:'威压', color:'B', text:'生效中，每次攻击最多造成 N 点伤害'}`。`BattleNote` 的 **`color?`** 供"按所属方上色"（缺省＝当前行动方；挑战传奇的规则应传 `'B'`）。
     - **「不抵挡」一键（2026-10-12）**：`operationList` 里，当**无任何"带骰的 block 选项"**时，「不抵挡」走 `hooks.onAction` **直发**（不弹确认条）；有骰可挡时仍走确认条。胜利弹窗 `gameOverModal` 与"游戏结束"提示栏按**胜者玩家色**上色（`.player-X`），显示名走 `playerName`（挑战＝昔日传奇）。
     - **回合分隔横幅（2026-10-12 统一）**：战报里**所有**回合都用 `——X 的回合——`（`beginTurn` 写 `——玩家A/B 的回合——`；传奇回合写 `——「<卡名>」的回合——`，二者同款）。**别再写 `X 的回合开始`**（旧格式已废弃）。
     - **过场动画落点**：昔传新骰落点走 `playLegendSpawn`——**优先取该真骰的实测矩形**（按 id 找 DOM 真骰；含枭首"按升/降序重排后"的最终排列）、真骰不在 DOM 才退回"按槽位计算"；且 `pool` 是**中心点**，左上角须减半个骰（26/2）。所有 Z 卡共用。
@@ -440,3 +446,10 @@
       3. **"用所有攻击骰逐个攻击且本回合不可抵挡"**：给 `virtualQueue` 条目加 **`unblockable?: boolean`**（`pumpAttackQueue` 透传给 `virtualAttack` 的 `opts.unblockable`）——**别用全局 `g.unblockableThisTurn`**（它跨回合/跨玩家，且 `beginTurn` 对挑战者回合才清）。Z08「处刑通牒」的 +1 分支用。
       4. **"双方各弃 N 颗"（两个选择者不同池）**：同一条技能的**多个代决分开存键**（Z08 共振用 `z08-3:B` / `z08-3:A`）+ 用 `deferred.step` 分拍（step 0＝传奇侧、step 1＝挑战者侧），**不要**塞进 `challengeDecisions` 的通用 wants 队列（通用队列按 `dec[skill.id]` 计数，多键会导致 `got` 永远为空 → 反复追问）。
       5. **"把挑战者的骰搬到传奇某区"**：进**攻击区**＝新建 B 攻骰 + `consumeDice` 挑战者源骰（走 `spawn`）；进**防御区**＝一律走 `placeDefenseFrom`（受 `defenseCap` 截断 + 放不下时代决）；挑战者的源骰**全部离开**（放不进的部分弃置）。
+    - **Z09「天殇的战鬼」核心机制（转写新卡可参考/复用）**：
+      1. **「威压」＝卡字段级规则**（非顺序技能）：卡字段 **`damageCapPerHit`**（Z09=4）+ 一条 `unordered` 技能（`z09-x`，供面板行 + 弹名）。钩子在 **`settleAttack` 顶部**（`legendDamageCap(g)` + `pa.attacker==='A'` + `o.damageDealt > cap` → 封顶 + `fxLegendSkill('z09-x')`）。**只对"挑战者→传奇"封顶**；仅"本应超过上限"才弹名（≤ 上限不弹）。**新卡要"给传奇减伤"照此走卡字段，别按 `skill.id` 硬编码**。
+      2. **"用攻击区 + 防御区全部骰逐个攻击"**：走 `virtualQueue`（`dieId`/`dieStyle:'solid'`），**防御区骰原地留区、逐颗飞出**——即 **Z04「真实之剑」甲口径**（`settleAttack` 移除源骰时先找攻击区、找不到回退防御区）。**两类区域的骰合成一个队列**（顺序代决**不分区域**、纯按点数排）。
+      3. **"挑战者每抵挡 1 次后必弃自己 1 骰"（横贯）**：`challenge.hengguan` 标记（发动时置位、传奇回合开始清）；钩子在 **`settleAttack` 末尾**（`pa.attacker==='B'` + `o.blocked` + 标记）→ 排队 `challengePick{tag:'hengguan', pick:{pool:A 全部能力骰,n:1}}` + `fxLegendSkill`；**`case 'challengePick'` 里按 id `consumeDice`**（"弃置"＝技能效果，非支付）。`pumpAttackQueue` 会先 `pumpPending` → 挂起后续攻击段。
+      4. **"由挑战者选择"≠代决（`alwaysManual`）**：若卡面写"由**挑战者**选择"（如陷阵"挑战者选 1 颗驱动骰重掷"），这是**挑战者自己的决定、不是替传奇代决** → want 标 **`alwaysManual: true`**，通用 wants 循环在 favor/against 下**仍弹面板**（`if (mode && mode !== 'manual' && !wants[got.length]?.alwaysManual)`）。`∞` 技能带这种选择时走 `challengeDecisions` 返回普通 `options`（无 `pick`）；效果在 `applyChallengeSkill` 里 `withRng` 重掷（**驱动骰不是能力骰 → 不走 `doReroll`**）。
+      5. **卡面级"常驻规则"标「生效中」**：给该 `unordered` 技能填 **`alwaysOn: true`**（如 Z09「威压」）→ 面板该行 `is-on` + 药丸「生效中」（渲染数据驱动，勿改渲染代码）。`unordered` 行渲染已支持**多条**且统一虚线框样式。
+      6. **链式后瞻自动的又一种目标**：Z09＝**① 后续发动越少 → ② 填入槽位点数越小 → ③ 留给某技能的骰越少**（`z09ChainPickKey`）。**当某技能的效果"不进后续 firing 判定"时（如凛冽之音只加防御），模拟可只跟踪 `driven`**，不必全量模拟区域。

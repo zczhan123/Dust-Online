@@ -1,4 +1,4 @@
-import type { Artifact, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
+import type { Artifact, DiceKind, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
 import { hasActiveSkill, skillActive, skillUseKey } from './skill-state';
 import { pumpPending, queuePending } from './pending';
 import { runChargeSkill } from './charge';
@@ -10,6 +10,7 @@ import {
   addLegendDefense,
   fxLegendSkill,
   legendAttackBonus,
+  legendDamageCap,
   legendDeathRevive,
   legendHasSkill,
   legendLegacyName,
@@ -586,6 +587,14 @@ export function settleAttack(
     fxLegendSkill(g, 'z07-x');
     o = { ...o, applyDamage: false, damageDealt: 0 };
   }
+  // Z09「威压」（卡面规则）：挑战者(A)的攻击对「天殇的战鬼」**最多造成 4 伤害**。
+  //   仅当**原始伤害 > 上限**时才封顶 + 弹「威压」名（≤ 上限 → 原样、不弹）。
+  const dmgCap = legendDamageCap(g);
+  if (dmgCap !== null && pa.attacker === 'A' && o.damageDealt > dmgCap) {
+    logLine(g, `「${legendLegacyName(g)}」：威压 — ${o.damageDealt} 点伤害压至 ${dmgCap} 点`);
+    fxLegendSkill(g, 'z09-x');
+    o = { ...o, damageDealt: dmgCap };
+  }
   const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
   const defender = g.players[defenderId];
   if (o.applyDamage && (o.damageDealt > 0 || !o.blocked)) {
@@ -652,6 +661,33 @@ export function settleAttack(
     const dv = dianxingValuesOf(defender);
     if (dv && meditationPoolCount(g, defenderId) >= 2) {
       queuePending(g, { kind: 'dianxing', player: defenderId, values: dv });
+    }
+  }
+  // Z09「横贯」：本技能期间，挑战者每抵挡一次 → 必弃自己 1 个任意能力骰（挑战者选、弹「横贯」名）
+  if (
+    g.mode === 'challenge' &&
+    pa.attacker === 'B' &&
+    o.blocked &&
+    g.challenge?.hengguan &&
+    g.pending === null &&
+    (g.phase as string) !== 'gameOver'
+  ) {
+    const A = g.players.A;
+    const pool: { id: string; value: number; kind: DiceKind }[] = [];
+    for (const kd of ['attack', 'defense', 'meditation'] as DiceKind[]) {
+      for (const d of A.areas[kd]) pool.push({ id: d.id, value: d.value, kind: kd });
+    }
+    if (pool.length > 0) {
+      const kindCn = (k: DiceKind): string => (k === 'attack' ? '攻' : k === 'defense' ? '防' : '冥');
+      queuePending(g, {
+        kind: 'challengePick',
+        player: 'A',
+        tag: 'hengguan',
+        prompt: '「横贯」：挑战者抵挡后，弃置自己 1 个任意能力骰',
+        options: pool.map((p) => ({ id: p.id, label: `${kindCn(p.kind)}${p.value}` })),
+        pick: { pool, n: 1 },
+      });
+      fxLegendSkill(g, 'z09-5');
     }
   }
   // 013 电刑：多段攻击队列 —— 当前决策清空后自动进行下一段
@@ -903,6 +939,13 @@ export function afterAttackResolved(
 export function pumpAttackQueue(g: GameState): void {
   pumpPending(g); // 先弹出排队中的待决策/018 强制必杀，保证「攻击与攻击之间可中断」
   if (g.pendingAttack || g.pending || g.phase === 'gameOver') return;
+  // T16「潜伏」：本回合禁攻 → **一次性清空多段队列**（否则"被禁的攻击"会残留队列 → `challengeStep` 要求队列为空 → 回合卡死 + 界面白等一拍）
+  if (attacksBanned(g)) {
+    if (g.attackQueue || g.virtualQueue) logLine(g, `「潜伏」：本回合不能进行攻击（多段攻击整段跳过）`);
+    g.attackQueue = null;
+    g.virtualQueue = null;
+    return;
+  }
   // 013 电刑：同一攻击者的多段攻击（1/2/3）
   const q = g.attackQueue;
   if (q) {

@@ -10,7 +10,7 @@ import { fxPush, fxSkillFired, fxSetSource, fxTrueLine } from './fx';
 import { pumpPending, queuePending } from './pending';
 import { resetToBattleStart } from './reset';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
-import { logLine, pname, vals } from './log';
+import { logLine, pname, vals, valsSorted } from './log';
 export { skillActive, hasActiveSkill };
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
@@ -66,7 +66,7 @@ export function changeOnePointDice(
     const gained = gainRandomDice(g, self, 'meditation', 2, rng);
     logLine(
       g,
-      `${pname(self)} 获得 2 个随机点数的冥想骰（${vals(gained)}），随后受到 2 点真实伤害`,
+      `${pname(self)} 获得 2 个随机点数的冥想骰（${valsSorted(gained)}），随后受到 2 点真实伤害`,
     );
     dealTrueDamage(g, self, 2, self);
   }
@@ -363,7 +363,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '龙腾万丈' });
       logLine(
         g,
-        `${pname(player)} 发动「龙腾万丈」：消耗 3 颗冥想骰（${vals(effective)}），获得 4 颗能力骰（${vals(
+        `${pname(player)} 发动「龙腾万丈」：消耗 3 颗冥想骰（${vals(effective)}），获得 4 颗能力骰（${valsSorted(
           dice,
         )}），2 颗移入攻击骰区、2 颗移入防御骰区，本回合攻击伤害 +1`,
       );
@@ -383,9 +383,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const med = gainRandomDice(g, player, 'meditation', 1, rng);
       logLine(
         g,
-        `${pname(player)} 发动「潜行」：消耗 2 颗攻击骰（${vals(effective)}），获得 2 颗防御骰（${vals(
+        `${pname(player)} 发动「潜行」：消耗 2 颗攻击骰（${vals(effective)}），获得 2 颗防御骰（${valsSorted(
           def,
-        )}）与 1 颗冥想骰（${med[0].value}点）`,
+        )}）与 1 颗冥想骰（${med[0].value}）`,
       );
     },
   },
@@ -533,11 +533,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         g,
         `${pname(player)} 发动必杀「斩神切」${discardAll ? '（「断苇一斩」：改为弃置对方全部能力骰）' : ''}：弃置自己全部 ${total} 颗能力骰，${pname(
           opponent,
-        )} 弃置 ${oppDiscarded} 颗，造成 ${x} 点真实伤害，获得 3 颗防御骰`,
+        )} 弃置 ${oppDiscarded} 颗，造成 ${x} 点真实伤害`,
       );
       dealTrueDamage(g, opponent, x, player);
       if (g.phase === 'gameOver') return;
-      gainRandomDice(g, player, 'defense', 3, rng);
+      const gainedZhan = gainRandomDice(g, player, 'defense', 3, rng);
+      logLine(g, `${pname(player)} 「斩神切」：获得 3 颗防御骰（${valsSorted(gainedZhan)}）`);
     },
   },
   // 完杀·必杀 零时枭首：消耗 1 攻击骰 → 弃对方 X 个防御骰；若对方仍有剩余防御骰，再获得 X 个随机攻击骰（X=消耗骰点数）
@@ -564,14 +565,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }
       consumeDice(g, o, 'defense', wanted);
       const gained = o.areas.defense.length > 0;
+      let gainedAtk: { value: number }[] = [];
       if (gained) {
-        gainRandomDice(g, player, 'attack', x, rng);
+        gainedAtk = gainRandomDice(g, player, 'attack', x, rng);
       }
       logLine(
         g,
         `${pname(player)} 发动必杀「零时枭首」：消耗 1 颗攻击骰（${x}点），弃置 ${pname(
           opponent,
-        )} 的 ${wanted.length} 颗防御骰${gained ? `，并获得 ${x} 颗攻击骰` : ''}`,
+        )} 的 ${wanted.length} 颗防御骰${gained ? `，并获得 ${x} 颗攻击骰（${valsSorted(gainedAtk)}）` : ''}`,
       );
     },
   },
@@ -663,7 +665,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const gained = gainRandomDice(g, player, 'defense', Math.max(0, cap - totalDice(p)), rng);
       logLine(
         g,
-        `${pname(player)} 发动必杀「高塔铁幕」：弃置全部 ${discarded.length} 颗能力骰，获得 ${gained.length} 颗随机防御骰（能力骰总数达到意志上限 ${cap}），立即结束主要阶段`,
+        `${pname(player)} 发动必杀「高塔铁幕」：弃置全部 ${discarded.length} 颗能力骰，获得 ${gained.length} 颗随机防御骰（${valsSorted(gained)}；能力骰总数达到意志上限 ${cap}），立即结束主要阶段`,
       );
       endMainPhase();
     },
@@ -761,9 +763,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       consumeDice(g, p, 'defense', validDef);
       const missing = 2 - validDef.length;
       if (missing > 0) dealTrueDamage(g, player, missing * 2, player);
-      gainRandomDice(g, player, 'defense', 4, rng);
+      const gainedWangjia = gainRandomDice(g, player, 'defense', 4, rng);
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '王家之拳' });
-      logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰，本回合攻击伤害 +1`);
+      logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰（${valsSorted(gainedWangjia)}），本回合攻击伤害 +1`);
     },
   },
   // 011 灵能屏障·启动：消耗最多 3 个防御骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
@@ -774,8 +776,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'defense' as const }));
       const effective = paySlots(g, player, spec, fills, reportConsumed);
       const n = effective.length;
-      gainRandomDice(g, player, 'meditation', n * 2, rng);
-      logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${n} 防御骰，获得 ${n * 2} 冥想骰`);
+      const gainedBarrier = gainRandomDice(g, player, 'meditation', n * 2, rng);
+      logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${n} 防御骰，获得 ${n * 2} 冥想骰（${valsSorted(gainedBarrier)}）`);
     },
   },
   // 011 灵能脉冲·启动：消耗最多 3 个攻击骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
@@ -786,8 +788,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'attack' as const }));
       const effective = paySlots(g, player, spec, fills, reportConsumed);
       const n = effective.length;
-      gainRandomDice(g, player, 'meditation', n * 2, rng);
-      logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${n} 攻击骰，获得 ${n * 2} 冥想骰`);
+      const gainedPulse = gainRandomDice(g, player, 'meditation', n * 2, rng);
+      logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${n} 攻击骰，获得 ${n * 2} 冥想骰（${valsSorted(gainedPulse)}）`);
     },
   },
   // 012 魔女·必杀 梦醒时分：将最多 3 个冥想骰移动至自己的另一个区域（攻击/防御），保留原本点数
@@ -871,7 +873,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         logLine(g, `「献祭」：本回合你的攻击伤害 +2`);
       } else {
         const gained = gainRandomAbilityDice(g, player, 3, rng);
-        logLine(g, `「献祭」：获得 3 个随机点数能力骰（${vals(gained)}），按其点数移动到对应区域`);
+        logLine(g, `「献祭」：获得 3 个随机点数能力骰（${valsSorted(gained)}），按其点数移动到对应区域`);
       }
     },
   },
@@ -886,7 +888,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const gained = gainRandomDice(g, player, 'attack', n, rng);
       logLine(
         g,
-        `${pname(player)} 发动「冥界行走」：消耗 ${n} 个冥想骰（${vals(effective)}），获得 ${n} 个随机点数攻击骰（${vals(gained)}）`,
+        `${pname(player)} 发动「冥界行走」：消耗 ${n} 个冥想骰（${vals(effective)}），获得 ${n} 个随机点数攻击骰（${valsSorted(gained)}）`,
       );
     },
   },
@@ -966,7 +968,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         g,
         `${pname(player)} 发动「蛮王之牙」：消耗 ${x} 个种类各不相同的骰（${vals(effective)}）→ ${
           discarded > 0 ? `弃置对方 ${discarded} 个防御骰` : ''
-        }${discarded > 0 && gained > 0 ? '、' : ''}${gained > 0 ? `获得 ${gained} 个 3 点攻击骰（${vals(gainedDice)}）` : ''}${
+        }${discarded > 0 && gained > 0 ? '、' : ''}${gained > 0 ? `获得 ${gained} 个 3 点攻击骰（${valsSorted(gainedDice)}）` : ''}${
           '；刷新启动次数，激活标记移至另一侧'
         }`,
       );
@@ -985,7 +987,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const gained = gainRandomAbilityDice(g, player, x, rng);
       logLine(
         g,
-        `${pname(player)} 发动必杀「漆黑绽放」：计数 ${x}，获得 ${x} 个随机点数能力骰（${vals(gained)}）`,
+        `${pname(player)} 发动必杀「漆黑绽放」：计数 ${x}，获得 ${x} 个随机点数能力骰（${valsSorted(gained)}）`,
       );
       logLine(g, `「${artifact.name}」：本神器失去持续式效果`);
       queuePending(g, { kind: 'zhihaiReroll', player, x, forced: false });
@@ -1288,7 +1290,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       artifact.continuousLost = true;
       logLine(
         g,
-        `${pname(player)} 发动必杀「寰宇飞升」：消耗 ${eff.length} 个冥想骰（${vals(eff)}）→ 获得 3 个随机攻击骰（${vals(atk)}）与 3 个随机防御骰（${vals(def)}）→ 回复 ${healed} 点生命`,
+        `${pname(player)} 发动必杀「寰宇飞升」：消耗 ${eff.length} 个冥想骰（${vals(eff)}）→ 获得 3 个随机攻击骰（${valsSorted(atk)}）与 3 个随机防御骰（${valsSorted(def)}）→ 回复 ${healed} 点生命`,
       );
       logLine(g, `「${artifact.name}」：本神器失去持续式效果`);
     },
@@ -1342,7 +1344,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const gained = gainRandomDice(g, player, 'meditation', 2, rng);
       logLine(
         g,
-        `${pname(player)} 发动「恶意」：消耗 1 个攻击骰（${vals(eff)}），获得 2 个随机点数冥想骰（${vals(gained)}）`,
+        `${pname(player)} 发动「恶意」：消耗 1 个攻击骰（${vals(eff)}），获得 2 个随机点数冥想骰（${valsSorted(gained)}）`,
       );
     },
   },

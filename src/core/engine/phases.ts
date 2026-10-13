@@ -2,7 +2,7 @@ import type { DiceKind, GameState, PlayerId } from '../model/types';
 import type { Rng } from '../rng/rng';
 import { createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { effectiveSpeed, effectiveWill, emptyDistribution, totalDice } from './derive';
-import { logLine, pname, vals } from './log';
+import { logLine, pname, vals, valsSorted } from './log';
 import { dealTrueDamage } from './combat';
 import { noteYuluoDiceConsumed, offerAdapt } from './effects';
 import { fxPush, fxSkillFired } from './fx';
@@ -22,7 +22,7 @@ export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
   }
   logLine(
     g,
-    count > 0 ? `${pname(player)} 补充 ${count} 颗能力骰` : `${pname(player)} 无需补充能力骰`,
+    count > 0 ? `${pname(player)} 补充 ${count} 颗能力骰（${valsSorted(rolled)}）` : `${pname(player)} 无需补充能力骰`,
     'refill',
   );
   offerAdapt(g, player, rolled, true); // T18「适应」

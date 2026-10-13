@@ -2,7 +2,7 @@ import type { GameState, Pending, PlayerId } from '../model/types';
 import { hasActiveSkill, skillUseKey } from './skill-state';
 import { gainRandomAbilityDice, withRngState } from './effects';
 import { effectiveWill, totalDice } from './derive';
-import { logLine, pname, vals } from './log';
+import { logLine, pname, valsSorted } from './log';
 import { applyMolu } from './combat';
 import { fxSkillFired } from './fx';
 
@@ -34,7 +34,7 @@ function checkZhihaiForced(g: GameState): boolean {
       const gained = gainRandomAbilityDice(g, id, x, rng);
       logLine(
         g,
-        `${pname(id)} 「漆黑绽放」计数达到 5，必杀强制发动：获得 ${gained.length} 个随机点数能力骰（${vals(gained)}）`,
+        `${pname(id)} 「漆黑绽放」计数达到 5，必杀强制发动：获得 ${gained.length} 个随机点数能力骰（${valsSorted(gained)}）`,
       );
     });
     logLine(g, `「${card.name}」：本神器失去持续式效果`);
