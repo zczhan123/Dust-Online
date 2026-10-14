@@ -115,6 +115,15 @@ function candidates(slot: ChallengeSlot, dice: Die[], taken: Set<string>): strin
       }
       return out;
     }
+    case 'distinct': {
+      // **N 颗点数互不相同**（**不要求连续**）——Z11「清算」（4 颗不相同）。
+      // 按点值去重后枚举"选 N 个不同点值"的组合；每个点值取一颗（确定性＝取该点值的第一颗）。
+      const byVal = new Map<number, Die>();
+      for (const d of free) if (!byVal.has(d.value)) byVal.set(d.value, d);
+      const vals = [...byVal.keys()].sort((a, b) => a - b);
+      if (vals.length < n) return [];
+      return combos(vals, n).map((vs) => vs.map((v) => byVal.get(v)!.id));
+    }
     default:
       return [];
   }
@@ -247,6 +256,11 @@ export function legendDamageCap(g: GameState): number | null {
 export function legendLateJustice(g: GameState): boolean {
   if (!legendHasSkill(g, 'z10-1')) return false;
   return g.players.A.life < 10 || g.players.B.life < 10;
+}
+
+/** 当前传奇卡的「计数」上限（卡字段 `countCap`；未设 → `Infinity`）。供 Z11「血祭」+1 时封顶。 */
+export function legendCountCap(g: GameState): number {
+  return CHALLENGES.find((c) => c.id === g.challenge?.cardId)?.countCap ?? Number.POSITIVE_INFINITY;
 }
 
 /**

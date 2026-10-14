@@ -477,6 +477,9 @@ export interface GameState {
     /** Z10「救赎」：**下一个传奇回合的覆盖参数**（该回合投 `rollDice` 个驱动骰、攻击伤害 `atkBonus`）。
      *  `救赎` 生效时置位 → 本回合照常结束 → `beginTurn` → `runLegendTurn` **读取并消费**（消费后清空）。 */
     nextTurnOverride?: { rollDice: number; atkBonus: number };
+    /** Z11「血祭」（**本技能发起的这批攻击**期间）：每次攻击后计数 +1（≤`countCap`）、每次造成伤害后自伤 =计数。
+     *  `血祭` 排队攻击时置位 → 该批 `virtualQueue` 走空时清除（之后其它技能的攻击不计入）。 */
+    xueji?: boolean;
     /** Z06「死即新生」：是否已触发过（整局 1 次）→ 面板置灰 */
     deathUsed?: boolean;
     /** Z06「死即新生」：本帧刚触发（面板绿色闪一下）——引擎在触发时置位、界面消费后清掉 */

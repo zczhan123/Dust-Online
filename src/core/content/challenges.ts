@@ -4,7 +4,7 @@
  * 转写规则见仓库外 `尘起时刻_挑战卡规格_Z01-Z12.md`（文本记法 + 结构化 schema）。
  */
 
-export type ChallengeSlotKind = 'pips' | 'any' | 'same' | 'straight' | 'exact';
+export type ChallengeSlotKind = 'pips' | 'any' | 'same' | 'straight' | 'exact' | 'distinct';
 
 export interface ChallengeSlot {
   kind: ChallengeSlotKind;
@@ -280,7 +280,24 @@ export const CHALLENGES: ChallengeCard[] = [
       },
     ],
   },
-  { id: 'Z11', legacy: '受缚邪灵', artifacts: ['031', '032', '033'] },
+  {
+    id: 'Z11', legacy: '受缚邪灵', artifacts: ['031', '032', '033'],
+    life: 40, defenseMin: 2, defenseRule: '只会抵挡伤害 ≥ 2 的攻击', countCap: 7, rollDice: 6,
+    skills: [
+      { id: 'z11-0', name: '回合开始', slots: null, effect: '投掷 6 个驱动骰。' },
+      { id: 'z11-1', name: '低语', marker: '∞', slots: null, effect: '将所有的点数不为 5 和 6 的驱动骰重新投掷 1 次。' },
+      { id: 'z11-2', name: '死亡亦逝', marker: '∞', slots: null, effect: '挑战者下降生命，直至生命的个位数为 0。「受缚邪灵」尽可能地回复生命，直至生命的个位数为 0。' },
+      {
+        id: 'z11-3', name: '清算', marker: '怜悯*', slotChoice: true, slots: [{ kind: 'distinct', count: 4 }],
+        effect: '挑战者弃置 X 个能力骰，若挑战者的能力骰数量不足 X 个，每少弃置 1 个能力骰，便对挑战者造成 3 点真实伤害。然后「受缚邪灵」的计数下降 1 点。X 为「受缚邪灵」叠加的计数。',
+      },
+      {
+        id: 'z11-4', name: '血祭', slots: [{ kind: 'pips', count: 0, faces: [5, 6], unlimited: true }],
+        effect: '将本技能上的驱动骰全部移动至攻击骰区，并使用所有攻击骰进行攻击。每次攻击后，「受缚邪灵」的计数 +1（最高叠加至 7 层）。每当攻击造成伤害后，「受缚邪灵」受到 X 点真实伤害。X 为「受缚邪灵」叠加的计数。',
+      },
+      { id: 'z11-5', name: '永恒女王', marker: '∞', slots: null, effect: '补充随机点数的防御骰，直至防御骰的数量为 3。' },
+    ],
+  },
   { id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'] },
 ];
 
@@ -325,6 +342,7 @@ export function slotPhrase(slots: ChallengeSlot[] | null, perGroup = false): str
   if (s.kind === 'same') return `（满足${s.count}颗同点时发动）`;
   if (s.kind === 'any') return `（满足${s.count}颗任意点时发动）`;
   if (s.kind === 'straight') return `（满足${s.count}颗顺点时发动）`;
+  if (s.kind === 'distinct') return `（满足${s.count}颗不相同的点数时发动）`;
   return '（必检）';
 }
 

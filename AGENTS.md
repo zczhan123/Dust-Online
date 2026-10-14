@@ -462,3 +462,10 @@
       2. **"逐次限定抵挡类型"**：`virtualQueue` 条目加 **`blockKind?`** → `pumpAttackQueue` 写进 `pa.blockKind`（**只作用于那条攻击**）；用于"下述 N 次攻击只能用冥想/攻击骰抵挡"。
       3. **★ "再次开始一个回合"＝真·新回合（Z10 救赎）**：设 `challenge.nextTurnOverride = {rollDice, atkBonus}` → `continueLegendTurn` 收尾处**不 `endTurn`**，而是 `turnIndex += 1` + 清本回合 buff + `firstRound.B=false` + `beginTurn`（activePlayer 仍是 B → `runLegendTurn` **消费 override**：投 N + 攻击加成）。战报再弹 `——「X」的回合——`（**T+1**）；可**连锁**。**关键教训**：**不能用 `endTurn`**——它会把 activePlayer 翻给对手；"同玩家开新回合"必须**保留 activePlayer**（否则新回合变成挑战者的）。
       4. **`alwaysOn` 新变体 `'lowLife'`**（`challengeSkillAlwaysOn`）：任一方生命 <10 时常亮。
+    - **Z11「受缚邪灵」核心机制（转写新卡可参考/复用）**：
+      1. **新槽型 `distinct`**（`challenges.ts` 的 `ChallengeSlotKind` + `challenge.ts` 的 `candidates` + `slotPhrase`）：**N 颗点数互不相同**（**不要求连续**，区别于 `straight`）。Z11「清算」＝4 颗；`slotPhrase` → `（满足4颗不相同的点数时发动）`。
+      2. **"本技能这批攻击"的作用范围标记＝`challenge.xueji`**（`types.ts`）：`z11-4 血祭` 排队攻击时置位、**该批 `virtualQueue` + `attackQueue` 走空时清除**（`combat.ts` 的 `afterAttackResolved` 末尾；`runLegendTurn` 回合开始兜底清）。两个钩子（`legendHasSkill(g,'z11-4')` 门禁，**别只看 `challenge`**）：**每次攻击后** `计数 = min(legendCountCap(g), 计数+1)`；**造成伤害后** `dealTrueDamage(g,'B',计数,'B')` + **`fxLegendSkill(g,'z11-4')`**（触发必弹名）。**新卡若"效果只在本技能这批攻击内生效"，照此用一次性标记，别用整回合标记。**
+      3. **`legendCountCap(g)`（`challenge.ts`）**：读当前卡 `countCap`（缺省 `Infinity`）；计数 +1 的封顶走它，**别硬编码 7**。
+      4. **链式后瞻的"最简形态"**：当"吃哪 N 颗"的下游唯一消费者是"某技能吃掉**全部**该集合的骰"时，**不必全量模拟**——候选 `sort` 直接取"与该下游集合的交集大小"即可（Z11：清算吃走含 5、6 的点值组 → `sort` ＝组内 5/6 颗数；有利取大＝少给血祭留 5/6；并列按点值升序枚举顺序确定性取）。
+      5. **`z11-2 死亡亦逝`＝非伤害抹零**（镜像 033 `diaoling.charge`）：挑战者 `floor`、自身 `min(lifeMax, ceil)`；`noteLifeDrop` + `fxTrueLine('B','A',drop,true)`（白墨线、不抖屏）。
+      6. **`z11-3 清算`"弃挑战者 N 颗"的顺序＝类型序 + 同类点数序**（`qingsuanOrder(pool, against)`）：**不利＝冥想 → 防御 → 攻击、同类先大后小**（弃光一种才动下一种）；**有利＝完全反向**（攻击 → 防御 → 冥想、同类先小后大）；**自选＝骰片面板**。auto 与"没记录选择"时的内部兜底**共用同一函数**（单源）。`n = min(计数, 挑战者能力骰数)`；骰数 ≤ 计数 → 全弃 + 缺口每颗 3 真伤。

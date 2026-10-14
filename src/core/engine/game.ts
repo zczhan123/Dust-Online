@@ -8,7 +8,7 @@ import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attac
 import { abilityDieInfo, abilityDicePool, canPayCosts, defaultCostFills, findDieOf, gainRandomDice, maxAffordableSlots, setDieValue, applyHeal, heal, moveDice, noteLifeDrop, offerAdapt, paySlots, withRngState } from './effects';
 import { areaOf, createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
-import { fxPush, fxReset, fxTacticFired, fxSkillFired, fxSetSource } from './fx';
+import { fxPush, fxReset, fxTacticFired, fxSkillFired, fxSetSource, fxTrueLine } from './fx';
 import { runChargeSkill } from './charge';
 import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { skillUseKey } from './skill-state';
@@ -500,6 +500,20 @@ function pickComboIds(g: GameState, pool: Die[], n: number, prefer: 'larger' | '
   const sum = (c: number[]): number => c.reduce((s, i) => s + pool[i].value, 0);
   const sorted = [...combos].sort((a, b) => (prefer === 'larger' ? sum(b) - sum(a) : sum(a) - sum(b)));
   return sorted[0].map((i) => pool[i].id);
+}
+
+/**
+ * Z11「清算」"弃挑战者 N 颗能力骰"的**确定性顺序**（类型 → 同类点数）：
+ *  · **不利**（对挑战者不利）＝ **冥想 → 防御 → 攻击**、同类**先大后小**（弃光一种才动下一种）；
+ *  · **有利** ＝ 完全反向（**攻击 → 防御 → 冥想**、同类**先小后大**）。
+ * 自选模式不走它（挑战者点骰片面板）；它供 auto 与"没记录选择"时的内部兜底共用。
+ */
+function qingsuanOrder(pool: Die[], against: boolean): Die[] {
+  const rank = (k: DiceKind): number =>
+    against ? (k === 'meditation' ? 0 : k === 'defense' ? 1 : 2) : k === 'attack' ? 0 : k === 'defense' ? 1 : 2;
+  return [...pool].sort(
+    (a, b) => rank(a.kind) - rank(b.kind) || (against ? b.value - a.value : a.value - b.value),
+  );
 }
 
 // ————————————————— Z08「黑枪」链式代决后瞻 —————————————————
@@ -1064,11 +1078,32 @@ function challengeDecisions(
         },
       ];
     }
+    case 'z11-3': {
+      // 清算：弃置挑战者 =计数 个能力骰（跨攻/防/冥；有得挑才问）→ 骰片面板
+      const X = g.challenge?.count ?? 0;
+      const flat: { id: string; value: number; kind: DiceKind }[] = [
+        ...A.areas.attack.map((d) => ({ id: d.id, value: d.value, kind: 'attack' as DiceKind })),
+        ...A.areas.defense.map((d) => ({ id: d.id, value: d.value, kind: 'defense' as DiceKind })),
+        ...A.areas.meditation.map((d) => ({ id: d.id, value: d.value, kind: 'meditation' as DiceKind })),
+      ];
+      const n = Math.min(X, flat.length);
+      if (n <= 0 || flat.length <= n) return [];
+      return [
+        {
+          prompt: `「清算」：弃置挑战者 ${n} 个能力骰`,
+          options: combinations(flat.length, n).map((c) => ({
+            id: c.map((i) => flat[i].id).join(','),
+            label: c.map((i) => `${KIND_CN[flat[i].kind]}${flat[i].value}`).join('、'),
+          })),
+          prefer: 'smaller',
+          pick: { pool: flat, n, owner: 'A' as PlayerId },
+        },
+      ];
+    }
     default:
       return [];
   }
 }
-
 /**
  * **自动结算**（`settleMode != 'manual'`）：替昔传从 `want.options` 里挑一个 id。
  * - `prefer: 'asc'|'desc'`（顺序类）：favor→desc、against→asc（`prefer` 即"对挑战者有利"的方向）。
@@ -1819,6 +1854,96 @@ export function applyChallengeSkill(
       g.challenge!.nextTurnOverride = { rollDice: 5, atkBonus: 1 };
       logLine(g, `「${legacy}」：${skill.name} — 再次开始 1 个「${legacy}」的回合（该回合投 5 个驱动骰、攻击伤害 +1）`);
       return { spawn, outIds };
+    case 'z11-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z11-1': {
+      // 低语：将所有**点数不为 5 和 6** 的驱动骰重新投掷 1 次（点数变化 → 通用"骰子翻转"动画）
+      withRng(g, (rng) => {
+        for (const d of g.challenge!.driven) {
+          if (d.value !== 5 && d.value !== 6) d.value = rng.rollDie();
+        }
+      });
+      logLine(g, `「${legacy}」：${skill.name} — 将点数不为 5 和 6 的驱动骰重新投掷 1 次`);
+      return { spawn, outIds };
+    }
+    case 'z11-2': {
+      // 死亡亦逝：挑战者生命"抹零"到十位；「受缚邪灵」尽可能回复到十位（≤生命上限）——**非伤害、非真伤**
+      const aBefore = A.life;
+      if (A.life % 10 !== 0) {
+        A.life = Math.floor(A.life / 10) * 10;
+        logLine(g, `${pname('A')} 的生命值下降（抹零）${aBefore} → ${A.life}`);
+      }
+      const bBefore = B.life;
+      if (B.life % 10 !== 0) {
+        B.life = Math.min(B.lifeMax, Math.ceil(B.life / 10) * 10);
+        logLine(g, `「${legacy}」的生命值回复（抹零）${bBefore} → ${B.life}`);
+      }
+      checkLifeEnd(g);
+      const aDrop = aBefore - A.life;
+      // 动效旁路：抹零＝非伤害的"生命下降"→ **白墨线**（传奇面板 → 挑战者生命条）、界面**不抖**（drop=true）
+      if (aDrop > 0 && g.phase !== 'gameOver') {
+        fxTrueLine('B', 'A', aDrop, true);
+        noteLifeDrop(g, 'A', aDrop);
+      }
+      return { spawn, outIds };
+    }
+    case 'z11-3': {
+      // 清算：挑战者弃置 X 个能力骰（X＝计数）；不足则每少 1 个 → 3 点真实伤害；随后"受缚邪灵"计数 −1
+      const X = g.challenge!.count;
+      const pool = [...A.areas.attack, ...A.areas.defense, ...A.areas.meditation];
+      const d = Math.min(X, pool.length);
+      const picks = g.challenge!.decisions?.[skill.id] ?? [];
+      let ids: string[] = picks[0] ? picks[0].split(',').filter((id) => pool.some((x) => x.id === id)) : [];
+      if (ids.length !== d) {
+        // 内部兜底（自选模式玩家点完骰片就有选择、走不到这里；仅测试/AI/异常）：与"有利"同序
+        ids = qingsuanOrder(pool, g.challenge!.settleMode === 'against').slice(0, d).map((x) => x.id);
+      }
+      const removedQingsuan: { kind: DiceKind; value: number }[] = [];
+      for (const id of ids) {
+        for (const kd of KINDS_ORDER) {
+          if (A.areas[kd].some((x) => x.id === id)) {
+            removedQingsuan.push(...consumeDice(g, A, kd, [id]));
+            break;
+          }
+        }
+      }
+      const shortfall = X - removedQingsuan.length;
+      logLine(
+        g,
+        `「${legacy}」：${skill.name} — 弃置挑战者 ${removedQingsuan.length} 个能力骰（${vals(removedQingsuan)}）${shortfall > 0 ? `，每少 1 个 3 点 → 造成 ${shortfall * 3} 点真实伤害` : ''}`,
+      );
+      if (shortfall > 0 && g.phase !== 'gameOver') dealTrueDamage(g, 'A', shortfall * 3, 'B');
+      g.challenge!.count = Math.max(0, g.challenge!.count - 1);
+      logLine(g, `「${skill.name}」：计数 → ${g.challenge!.count}`);
+      return { spawn, outIds };
+    }
+    case 'z11-4': {
+      // 血祭：本技能驱骰（全部 5/6）→ 攻击骰区，并使用**所有攻击骰**逐个攻击
+      for (const d of consumed) gain('attack', d.value);
+      g.challenge!.xueji = true; // 本技能这批攻击期间：每次攻击后计数 +1、造成伤害后自伤（见 combat.afterAttackResolved）
+      const atk = [...B.areas.attack];
+      // §19⑨ 多段攻击源：血祭
+      g.virtualQueue = atk.map((d) => ({
+        attacker: 'B' as PlayerId,
+        value: d.value,
+        label: skill.name,
+        owner: 'B' as PlayerId,
+        dieId: d.id,
+        dieStyle: 'solid' as const,
+      }));
+      logLine(g, `「${legacy}」：${skill.name} — 移动 ${atk.length} 颗驱动骰至攻击骰区并使用全部攻击骰逐个攻击`);
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z11-5': {
+      // 永恒女王：补充随机防御骰，直至防御骰数量为 3（满上限时走 legendDefNote 记"已满弃置"）
+      const need = Math.max(0, 3 - B.areas.defense.length);
+      withRng(g, (rng) => {
+        for (let i = 0; i < need; i++) gain('defense', rng.rollDie());
+      });
+      logLine(g, `「${legacy}」：${skill.name} — 补充随机防御骰至 3${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, need)}`);
+      return { spawn, outIds };
+    }
     default:
       return { spawn, outIds };
   }
@@ -1841,6 +1966,7 @@ function runLegendTurn(g: GameState): void {
   g.challenge.firedThisTurn = []; // Z03「拔城」：每回合清"本回合已发动"标记
   g.challenge.mingjieHeal = false; // Z06「冥界行走」：每回合清"本回合攻击回血"标记
   g.challenge.hengguan = false; // Z09「横贯」：每回合清"抵挡后必弃骰"标记
+  g.challenge.xueji = false; // Z11「血祭」：每回合清"本技能这批攻击"标记（正常在该批队列走空时清，这里兜底）
   // 传奇的"自己的回合"计数（与普通玩家同口径：它每进行一个回合 +1）——供 T16「潜伏」第二回合 +1 / T05 等判定
   g.players.B.turnsTaken = Math.min(4, g.players.B.turnsTaken + 1);
   g.challenge.deathJustTriggered = false; // Z06「死即新生」：绿色"刚触发"只在触发帧
@@ -2576,7 +2702,8 @@ function continueLegendTurn(g: GameState, once = false): void {
           skill.id === 'z08-3' ||
           skill.id === 'z08-4' ||
           skill.slots[0].kind === 'same' ||
-          skill.slots[0].kind === 'straight')
+          skill.slots[0].kind === 'straight' ||
+          skill.slots[0].kind === 'distinct')
       ) {
         // Z06 虚无形态/勾魂镰/圆舞（同点）+ Z07 不屈咆哮（顺点）+ Z08 凶弹业舞/共振/处刑通牒：
         //   有 **≥2 个不同**的候选组 → 挑战者代决"用哪一组"（Z08 走链式后瞻、Z07 按"蛮王发送数"自动）。
@@ -2594,6 +2721,22 @@ function continueLegendTurn(g: GameState, once = false): void {
         } else if (s.kind === 'same') {
           for (const gr of allSameGroups(s, g.challenge.driven)) {
             cands.push({ key: String(gr.value), label: `${gr.value}点组`, ids: gr.dice.map((d) => d.id), sort: gr.value });
+          }
+        } else if (s.kind === 'distinct') {
+          // Z11「清算」：4 颗**互不相同**点数（不要求连续）。自动方向（卡设）＝**尽量少给"血祭"留 5/6**
+          //   → `sort` ＝ 组内 5/6 的颗数（有利＝sort 大＝吃走 5、6；不利＝sort 小＝留着）。
+          //   并列按枚举顺序（点值升序）确定性取。下游唯一消费者＝血祭（其槽＝全部 5/6），故 sort 即完整后瞻。
+          const byVal = new Map<number, Die>();
+          for (const d of g.challenge.driven) if (!byVal.has(d.value)) byVal.set(d.value, d);
+          const valsD = [...byVal.keys()].sort((a, b) => a - b);
+          for (const idxs of combinations(valsD.length, s.count)) {
+            const vs = idxs.map((i) => valsD[i]);
+            cands.push({
+              key: vs.join(','),
+              label: `${vs.join('/')} 点`,
+              ids: vs.map((v) => byVal.get(v)!.id),
+              sort: vs.filter((v) => v === 5 || v === 6).length,
+            });
           }
         } else {
           for (let start = 1; start + s.count - 1 <= 6; start++) {
@@ -2680,8 +2823,23 @@ function continueLegendTurn(g: GameState, once = false): void {
         // 自动结算（有利/不利）：替昔传选齐，不弹面板（下面照常结算）
         const arr = dec[skill.id] ?? [];
         for (let k = got.length; k < wants.length; k++) {
-          // Z05「不可饶恕」有**专用口径**（颗数 → 区域权重 → 点值）；其余走通用 autoPick
-          const id = skill.id === 'z05-2' ? z05ChongfuAutoPick(g, wants[k], mode) : autoPick(wants[k], mode);
+          // Z05「不可饶恕」有**专用口径**（颗数 → 区域权重 → 点值）；Z11「清算」＝**类型序 + 同类点数序**；其余走通用 autoPick
+          const id =
+            skill.id === 'z05-2'
+              ? z05ChongfuAutoPick(g, wants[k], mode)
+              : skill.id === 'z11-3'
+                ? qingsuanOrder(
+                    [
+                      ...g.players.A.areas.attack,
+                      ...g.players.A.areas.defense,
+                      ...g.players.A.areas.meditation,
+                    ],
+                    mode === 'against',
+                  )
+                    .slice(0, wants[k].pick?.n ?? 0)
+                    .map((d) => d.id)
+                    .join(',')
+                : autoPick(wants[k], mode);
           if (id) arr.push(id);
         }
         dec[skill.id] = arr;

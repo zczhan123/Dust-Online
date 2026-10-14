@@ -10,6 +10,7 @@ import {
   addLegendDefense,
   fxLegendSkill,
   legendAttackBonus,
+  legendCountCap,
   legendDamageCap,
   legendDeathRevive,
   legendHasSkill,
@@ -856,6 +857,15 @@ export function afterAttackResolved(
       logLine(g, `「${xueji.name}」：进行 1 次攻击，计数 ${before} → ${xueji.count}`);
     }
   }
+  // Z11「受缚邪灵·血祭」：**本技能发起的这批攻击**期间——每次攻击后计数 +1（≤ 计数上限）。
+  {
+    const c = g.challenge;
+    if (g.mode === 'challenge' && c?.xueji && pa.attacker === 'B' && legendHasSkill(g, 'z11-4')) {
+      const before = c.count;
+      c.count = Math.min(legendCountCap(g), c.count + 1);
+      logLine(g, `「${legendLegacyName(g)}」：血祭 — 进行 1 次攻击，计数 ${before} → ${c.count}`);
+    }
+  }
   // 017 幽冥·冥界行走（持续）：你的攻击造成伤害后
   if (res.damageDealt > 0) onAttackDamage(g, pa.attacker, pa.baseValue ?? pa.value);
   // A06 异相·「勾魂」（持续）：你用"点数不存在于本神器之上"的攻击骰造成伤害后，将该攻击骰置于本神器上（永久）
@@ -937,6 +947,26 @@ export function afterAttackResolved(
       fxSkillFired(g, pa.attacker, 'ezhao.xueji');
       dealTrueDamage(g, pa.attacker, xueji.count, pa.attacker);
     }
+  }
+  // Z11「受缚邪灵·血祭」：这批攻击每次造成伤害后 → 自身受到 =计数 点真实伤害（放最末：不截断其它"攻击结算后"触发）
+  {
+    const c = g.challenge;
+    if (
+      g.mode === 'challenge' &&
+      c?.xueji &&
+      pa.attacker === 'B' &&
+      legendHasSkill(g, 'z11-4') &&
+      res.damageDealt > 0 &&
+      (g.phase as string) !== 'gameOver'
+    ) {
+      logLine(g, `「${legendLegacyName(g)}」：血祭 — 攻击造成伤害，受到 ${c.count} 点真实伤害`);
+      fxLegendSkill(g, 'z11-4');
+      dealTrueDamage(g, 'B', c.count, 'B');
+    }
+  }
+  // Z11「受缚邪灵·血祭」：这批攻击**全部结算完**（队列已空）→ 关掉批次标记（其后其它技能的攻击不再计入）
+  if (g.mode === 'challenge' && g.challenge?.xueji && pa.attacker === 'B' && !g.virtualQueue && !g.attackQueue) {
+    g.challenge.xueji = false;
   }
 }
 
