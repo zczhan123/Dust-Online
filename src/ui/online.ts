@@ -56,7 +56,7 @@ function btn(cls: string, label: string): HTMLButtonElement {
 function nameEl(side: 'A' | 'B', name: string | undefined, online: boolean): HTMLElement {
   const w = el('span', `online-name player-${side}`);
   const s = el('span', 'online-name-side');
-  s.textContent = `${side}：`;
+  s.textContent = `玩家${side}：`;
   const n = el('span', 'online-name-txt');
   n.textContent = name ?? (side === 'A' ? '房主' : '等待来客…');
   if (name) n.title = name;

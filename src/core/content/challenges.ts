@@ -62,9 +62,10 @@ export interface ChallengeSkill {
    * - `true`：始终生效；
    * - `'count'`：当 `g.challenge.count > 0` 时生效（Z02「锋芒」）；
    * - `'lifeBonus'`：当"因生命差产生的攻击加成 > 0"时生效（Z05「绝境天神」：生命每低 10 点就亮）；
+   * - `'lowLife'`：当**任一方生命 < 10** 时生效（Z10「迟来的正义」）。
    * 缺省＝不常亮。**数据驱动**（勿再按 `skill.id` 硬编码）。
    */
-  alwaysOn?: boolean | 'count' | 'lifeBonus';
+  alwaysOn?: boolean | 'count' | 'lifeBonus' | 'lowLife';
 }
 
 export interface ChallengeCard {
@@ -255,7 +256,30 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z09-x', name: '威压', unordered: true, slots: null, alwaysOn: true, effect: '挑战者的每次攻击最多对「天殇的战鬼」造成 4 点伤害。' },
     ],
   },
-  { id: 'Z10', legacy: '破晓之剑', artifacts: ['028', '029', '030'] },
+  {
+    id: 'Z10', legacy: '破晓之剑', artifacts: ['028', '029', '030'],
+    life: 45, defenseMin: 3, defenseCap: 4, defenseRule: '只会抵挡伤害 ≥ 3 的攻击', rollDice: 6,
+    skills: [
+      { id: 'z10-0', name: '回合开始', slots: null, effect: '投掷 6 个驱动骰。' },
+      { id: 'z10-1', name: '迟来的正义', marker: '∞', slots: null, passive: true, alwaysOn: 'lowLife', effect: '当「破晓之剑」或挑战者的生命少于 10 点时，「破晓之剑」的攻击伤害翻倍。' },
+      {
+        id: 'z10-2', name: '白昼之火', slotChoice: true, slots: [{ kind: 'same', count: 3 }],
+        effect: '挑战者改为只能使用冥想骰来抵挡下述的 3 次攻击。进行 3 次 6 点的攻击。获得 2 个随机点数的防御骰。',
+      },
+      {
+        id: 'z10-3', name: '陨落', slotChoice: true, slots: [{ kind: 'straight', count: 3 }],
+        effect: '挑战者改为只能使用攻击骰来抵挡下述的 3 次攻击。进行 3 次 6 点的攻击。获得 2 个随机点数的防御骰。',
+      },
+      {
+        id: 'z10-4', name: '涤罪大剑术', slotChoice: true, slots: [{ kind: 'same', count: 2 }],
+        effect: '「破晓之剑」回复 10 点生命。进行 3 次 4 点的攻击。获得 2 个随机点数的防御骰。如果攻击骰区有攻击骰，也使用所有攻击骰发起攻击。',
+      },
+      {
+        id: 'z10-5', name: '救赎', slots: [{ kind: 'same', count: 2 }],
+        effect: '再次开始 1 个「破晓之剑」的回合。在这个新的回合中，「破晓之剑」的驱动骰改为 5 个，并且攻击伤害 +1。',
+      },
+    ],
+  },
   { id: 'Z11', legacy: '受缚邪灵', artifacts: ['031', '032', '033'] },
   { id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'] },
 ];

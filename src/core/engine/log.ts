@@ -31,3 +31,8 @@ export function valsSorted(dice: { value: number }[]): string {
     .sort((a, b) => a - b)
     .join('/');
 }
+
+/** 技能/激活标记所在侧的**显示名**（`left`/`right` 是内部键，**禁止**直接写进战报/界面）。 */
+export function sideCn(s: 'left' | 'right'): string {
+  return s === 'left' ? '左' : '右';
+}

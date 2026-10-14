@@ -12,7 +12,7 @@ import { fxPush, fxReset, fxTacticFired, fxSkillFired, fxSetSource } from './fx'
 import { runChargeSkill } from './charge';
 import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill } from './skills';
 import { skillUseKey } from './skill-state';
-import { logLine, pname, valsSorted } from './log';
+import { logLine, pname, sideCn, vals, valsSorted } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
 import { CHALLENGES, type ChallengeCard, type ChallengeSkill, type ChallengeSlot } from '../content/challenges';
 import { matchSlots, matchGroupsPartial, legendCanBlock, addLegendDefense, fxLegendSkill, isInertTactic, LEGEND_PLAYER } from './challenge';
@@ -272,6 +272,15 @@ function syncLegendFengmang(g: GameState): void {
 
 /** 骰区中文（攻/防/冥），供代决文案。 */
 const KIND_CN: Record<DiceKind, string> = { attack: '攻', defense: '防', meditation: '冥' };
+
+/** 传奇防御骰"获得 / 移入"的括号内容：**满上限 → "防御骰区已满 N，M 颗弃置"**（避免空括号 `（）`）；否则列点数（升序 `/`）。 */
+function legendDefNote(cap: number, spawn: { value: number }[], attempted: number): string {
+  const capTxt = Number.isFinite(cap) ? String(cap) : '∞';
+  if (spawn.length < attempted) {
+    return `（防御骰区已满 ${capTxt}，${attempted - spawn.length} 颗弃置${spawn.length > 0 ? `；入区 ${valsSorted(spawn)}` : ''}）`;
+  }
+  return `（${spawn.length} 颗：${valsSorted(spawn)}）`;
+}
 
 /** 挑战者(A)**能力骰数量最多**的区域（并列取 KINDS_ORDER 靠前者，确定性）。供 Z03「震荡斩击」。 */
 function busiestAreaOfChallenger(g: GameState): DiceKind {
@@ -790,6 +799,77 @@ function z07QubuAutoPick(g: GameState, cands: { key: string; sort: number }[], m
   return items[0].key;
 }
 
+// ————————————————— Z10「破晓之剑」链式代决后瞻 —————————————————
+// 「白昼之火」〔3同点〕→「陨落」〔3顺点〕→「涤罪大剑术」〔2同点〕→「救赎」〔2同点〕依次消耗同一批驱动骰。
+// 自动（有利）＝ **① 后续发动技能越少 → ② 点数默认（大）**；不利＝完全取反（发动多 / 点数小）。
+interface Z10Cand {
+  key: string;
+  label: string;
+  sum: number;
+  removed: number[];
+}
+
+function z10SimCands(k: number, dr: number[]): Z10Cand[] {
+  const out: Z10Cand[] = [];
+  const sum = (a: number[]): number => a.reduce((s, x) => s + x, 0);
+  if (k === 2 || k === 4 || k === 5) {
+    const n = k === 2 ? 3 : 2; // 白昼之火＝3 同点；涤罪/救赎＝2 同点
+    const cnt = new Map<number, number>();
+    for (const v of dr) cnt.set(v, (cnt.get(v) ?? 0) + 1);
+    for (const [v, c] of [...cnt.entries()].sort((a, b) => a[0] - b[0])) {
+      if (c < n) continue;
+      const vals = Array.from({ length: n }, () => v);
+      out.push({ key: String(v), label: `${v}点组`, sum: sum(vals), removed: vals });
+    }
+  } else if (k === 3) {
+    for (let start = 1; start + 3 - 1 <= 6; start++) {
+      const vals = [start, start + 1, start + 2];
+      if (!vals.every((v) => dr.includes(v))) continue;
+      out.push({ key: vals.join(''), label: `${vals.join('')}顺点`, sum: sum(vals), removed: vals });
+    }
+  }
+  return out;
+}
+
+/** 有利＝(后续发动少 → 点数大)；不利＝(发动多 → 点数小)。 */
+function z10Better(a: { fired: number; sum: number }, b: { fired: number; sum: number }, mode: 'favor' | 'against'): boolean {
+  const dir = mode === 'against' ? -1 : 1;
+  if (a.fired !== b.fired) return dir * (a.fired - b.fired) < 0;
+  return mode === 'against' ? a.sum < b.sum : a.sum > b.sum;
+}
+
+function z10TailOpt(k: number, dr: number[], mode: 'favor' | 'against'): { fired: number; sum: number } {
+  if (k > 5) return { fired: 0, sum: 0 };
+  const cands = z10SimCands(k, dr);
+  if (cands.length === 0) return z10TailOpt(k + 1, dr, mode);
+  let best: { fired: number; sum: number } | null = null;
+  for (const c of cands) {
+    const rest = z10TailOpt(k + 1, minusMulti(dr, c.removed), mode);
+    const t = { fired: 1 + rest.fired, sum: c.sum + rest.sum };
+    if (best === null || z10Better(t, best, mode)) best = t;
+  }
+  return best!;
+}
+
+/** Z10「白昼之火 / 陨落 / 涤罪大剑术」的链式后瞻自动选组：返回应选的候选 key。 */
+function z10ChainPickKey(g: GameState, skill: ChallengeSkill, mode: 'favor' | 'against'): string | undefined {
+  const k = Number(skill.id.split('-')[1]);
+  const dr = (g.challenge?.driven ?? []).map((d) => d.value);
+  const cands = z10SimCands(k, dr);
+  if (cands.length === 0) return undefined;
+  let best: Z10Cand | null = null;
+  let bestScore: { fired: number; sum: number } | null = null;
+  for (const c of cands) {
+    const rest = z10TailOpt(k + 1, minusMulti(dr, c.removed), mode);
+    const score = { fired: 1 + rest.fired, sum: c.sum + rest.sum };
+    if (bestScore === null || z10Better(score, bestScore, mode)) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return best?.key;
+}
+
 /**
  * 本条技能在**本局面**下需要挑战者代决的点（模式 1）。返回按顺序要收集的选择。
  *  `atDeferred`＝这句话是在"延后一步"阶段问的（例：暗夜凶神的"弃哪颗防御骰"应在 8 点攻击结算**之后**问）。 */
@@ -939,6 +1019,20 @@ function challengeDecisions(
         },
       ];
     }
+    case 'z10-4':
+      // 涤罪大剑术：「攻击区有攻击骰则用其全部逐个攻击」→ >1 颗时定顺序（骰子已在攻击区，故前置问）
+      return B.areas.attack.length > 1
+        ? [
+            {
+              prompt: '「涤罪大剑术」：用攻击区全部攻击骰逐个攻击，按什么顺序？',
+              options: [
+                { id: 'asc', label: '由小到大' },
+                { id: 'desc', label: '由大到小' },
+              ],
+              prefer: 'desc',
+            },
+          ]
+        : [];
     case 'z05-2': {
       // 不可饶恕：X＝本回合驱动骰的众数；并列（多个点数同为最多）→ 挑战者代决用哪个点数的 X
       const cnt = new Map<number, number>();
@@ -1016,7 +1110,7 @@ export function applyChallengeSkill(
 ): { spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[]; outIds: string[] } {
   const legacy = card.legacy;
   const consumedTxt = consumed.map((d) => d.value).sort((a, b) => a - b).join('/');
-  logLine(g, `「${legacy}」：${skill.name}${consumedTxt ? `（消耗驱动骰 ${consumedTxt}）` : ''}`);
+  logLine(g, `「${legacy}」：${skill.name}${skill.passive ? '（常驻）' : consumedTxt ? `（消耗驱动骰 ${consumedTxt}）` : ''}`);
   const A = g.players.A;
   const B = g.players.B;
   const spawn: { id: string; value: number; area: 'attack' | 'defense' | 'meditation' }[] = [];
@@ -1046,17 +1140,18 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     case 'z01-2': {
       // 断斩一斩：① 弃双方全部能力骰（区域骰）→ ② 对挑战者 10 真伤 → ③ 昔传得 3 个随机点数防御骰 → ④ 立即结束回合（状态机处理 endsTurn）
+      const removedDuanzhan: { kind: DiceKind; value: number }[] = [];
       for (const p of [A, B]) {
         for (const kd of KINDS_ORDER) {
           const ids = p.areas[kd].map((d) => d.id);
-          if (ids.length) consumeDice(g, p, kd, ids);
+          if (ids.length) removedDuanzhan.push(...consumeDice(g, p, kd, ids));
         }
       }
       dealTrueDamage(g, 'A', 10, 'B');
       withRng(g, (rng) => {
         for (let i = 0; i < 3; i++) gain('defense', rng.rollDie());
       });
-      logLine(g, `「${legacy}」：${skill.name} — 获得 3 个随机防御骰（${valsSorted(spawn)}）`);
+      logLine(g, `「${legacy}」：${skill.name} — 弃置双方全部能力骰（${vals(removedDuanzhan)}）、对挑战者造成 10 点真实伤害、获得 3 个随机防御骰（${valsSorted(spawn)}）`);
       return { spawn, outIds };
     }
     case 'z01-3': {
@@ -1098,7 +1193,8 @@ export function applyChallengeSkill(
         ids = (mode === 'against' ? def.slice(-k) : def.slice(0, k)).map((d) => d.id);
       }
       ids = ids.filter((id) => A.areas.defense.some((d) => d.id === id));
-      if (ids.length) consumeDice(g, A, 'defense', ids);
+      const removedYuluo = ids.length ? consumeDice(g, A, 'defense', ids) : [];
+      if (removedYuluo.length > 0) logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者 ${removedYuluo.length} 个防御骰（${vals(removedYuluo)}）`);
       return { spawn, outIds };
     }
     case 'z01-5': {
@@ -1118,10 +1214,10 @@ export function applyChallengeSkill(
       // 尽可能弃置挑战者防御骰，直至剩 1（"留哪颗"＝代决，模式 1；未代决时默认留第一颗）
       const keepId = (g.challenge!.decisions?.[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
       const drop = A.areas.defense.filter((d) => d.id !== keepId).map((d) => d.id);
-      if (drop.length) consumeDice(g, A, 'defense', drop);
+      const removedZangdi = drop.length ? consumeDice(g, A, 'defense', drop) : [];
       // 获得 1/2/3/4 点攻击骰各 1
       for (const v of [1, 2, 3, 4]) gain('attack', v);
-      logLine(g, `「${legacy}」：${skill.name} — 获得攻击骰（${valsSorted(spawn)}）`);
+      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者防御骰${removedZangdi.length > 0 ? `（${vals(removedZangdi)}）` : '（无）'}、获得攻击骰（${valsSorted(spawn)}）`);
       return { spawn, outIds };
     }
     case 'z02-3': {
@@ -1183,14 +1279,16 @@ export function applyChallengeSkill(
         const mode = g.challenge!.settleMode;
         ids = (mode === 'against' ? sorted.slice(-n) : sorted.slice(0, n)).map((d) => d.id);
       }
-      if (ids.length) consumeDice(g, A, busiest, ids);
+      const removedZhandang = ids.length ? consumeDice(g, A, busiest, ids) : [];
       g.challenge!.firedThisTurn = [...(g.challenge!.firedThisTurn ?? []), skill.id];
+      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者 ${removedZhandang.length} 个${KIND_CN[busiest]}骰（${vals(removedZhandang)}）${ids.length < 4 ? '、攻击骰不足 4 → 1 次 5 点攻击' : ''}`);
       if (ids.length < 4) virtualAttack(g, 'B', 5, { skill: skill.name, owner: 'B' });
       return { spawn, outIds };
     }
     case 'z03-3': {
       // 战争横扫：每种类型各弃 1 颗；**每有一种"无骰可弃" → 1 次 5 点攻击**（多段走 virtualQueue）
       let missed = 0;
+      const removedSaodang: { kind: DiceKind; value: number }[] = [];
       const choices = g.challenge!.decisions?.[skill.id] ?? [];
       let ci = 0;
       for (const k of KINDS_ORDER) {
@@ -1205,9 +1303,10 @@ export function applyChallengeSkill(
           want && pool.some((d) => d.id === want)
             ? want
             : sorted[g.challenge!.settleMode === 'against' ? sorted.length - 1 : 0].id;
-        consumeDice(g, A, k, [id]);
+        removedSaodang.push(...consumeDice(g, A, k, [id]));
       }
       g.challenge!.firedThisTurn = [...(g.challenge!.firedThisTurn ?? []), skill.id];
+      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者各类型 1 颗（${vals(removedSaodang)}）${missed > 0 ? `、${missed} 种无骰可弃 → ${missed} 次 5 点攻击` : ''}`);
       if (missed > 0) {
         // §19⑨ 多段攻击源：战争横扫
         g.virtualQueue = Array.from({ length: missed }, () => ({
@@ -1251,10 +1350,12 @@ export function applyChallengeSkill(
       // 拔城：若本回合**既未**发动震荡斩击**也未**发动战争横扫 → 弃挑战者全部能力骰 + 2 次 5 点攻击
       const fired = g.challenge!.firedThisTurn ?? [];
       if (!fired.includes('z03-2') && !fired.includes('z03-3')) {
+        const removedBacheng: { kind: DiceKind; value: number }[] = [];
         for (const k of KINDS_ORDER) {
           const ids = A.areas[k].map((d) => d.id);
-          if (ids.length) consumeDice(g, A, k, ids);
+          if (ids.length) removedBacheng.push(...consumeDice(g, A, k, ids));
         }
+        logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者全部能力骰（${vals(removedBacheng)}）、2 次 5 点攻击`);
         // §19⑨ 多段攻击源：拔城
         g.virtualQueue = [0, 1].map(() => ({
           attacker: 'B' as PlayerId,
@@ -1345,11 +1446,12 @@ export function applyChallengeSkill(
     case 'z05-2': {
       // 不可饶恕：弃置挑战者的所有 X 点能力骰（X＝本回合驱动骰的众数，并列已由代决定）
       const x = z05ChongfuX(g, skill);
+      let removedAll: { kind: DiceKind; value: number }[] = [];
       for (const k of KINDS_ORDER) {
         const ids = A.areas[k].filter((d) => d.value === x).map((d) => d.id);
-        if (ids.length) consumeDice(g, A, k, ids);
+        if (ids.length) removedAll = removedAll.concat(consumeDice(g, A, k, ids));
       }
-      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者所有 ${x} 点能力骰`);
+      logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者所有 ${x} 点能力骰（${vals(removedAll)}）`);
       return { spawn, outIds };
     }
     case 'z05-3': {
@@ -1480,8 +1582,8 @@ export function applyChallengeSkill(
       if (decided) ids = decided.split(',');
       else ids = A.areas.defense.slice(0, n).map((d) => d.id);
       if (ids.length > 0) {
-        consumeDice(g, A, 'defense', ids);
-        logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者 ${ids.length} 个防御骰`);
+        const removed = consumeDice(g, A, 'defense', ids);
+        logLine(g, `「${legacy}」：${skill.name} — 弃置挑战者 ${ids.length} 个防御骰（${vals(removed)}）`);
       }
       delete dec[skill.id];
       return { spawn, outIds };
@@ -1646,6 +1748,77 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     case 'z09-x':
       return { spawn, outIds }; // 威压＝卡面级规则（钩子在 settleAttack）
+    case 'z10-0':
+      return { spawn, outIds }; // 投驱动骰已在回合开始完成
+    case 'z10-1':
+      return { spawn, outIds }; // 迟来的正义＝常驻规则（攻击伤害 ×2 在 combat 的伤害计算处）
+    case 'z10-2': {
+      // 白昼之火：挑战者只能用**冥想骰**挡下述 3 次攻击（每次 6 点）；获得 2 个随机防御骰
+      // §19⑨ 多段攻击源：白昼之火
+      g.virtualQueue = Array.from({ length: 3 }, (_, j) => ({
+        attacker: 'B' as PlayerId, value: 6, label: skill.name, owner: 'B' as PlayerId,
+        blockKind: 'meditation' as DiceKind,
+        legendGroup: { index: 1, total: 1, sub: j + 1, subTotal: 3 },
+      }));
+      withRng(g, (rng) => {
+        gain('defense', rng.rollDie());
+        gain('defense', rng.rollDie());
+      });
+      logLine(g, `「${legacy}」：${skill.name} — 3 次 6 点攻击（只能用冥想骰抵挡）、获得随机防御骰${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, 2)}`);
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z10-3': {
+      // 陨落：挑战者只能用**攻击骰**挡下述 3 次攻击（每次 6 点）；获得 2 个随机防御骰
+      // §19⑨ 多段攻击源：陨落
+      g.virtualQueue = Array.from({ length: 3 }, (_, j) => ({
+        attacker: 'B' as PlayerId, value: 6, label: skill.name, owner: 'B' as PlayerId,
+        blockKind: 'attack' as DiceKind,
+        legendGroup: { index: 1, total: 1, sub: j + 1, subTotal: 3 },
+      }));
+      withRng(g, (rng) => {
+        gain('defense', rng.rollDie());
+        gain('defense', rng.rollDie());
+      });
+      logLine(g, `「${legacy}」：${skill.name} — 3 次 6 点攻击（只能用攻击骰抵挡）、获得随机防御骰${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, 2)}`);
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z10-4': {
+      // 涤罪大剑术：回复 10 → 3 次 4 点攻击 → 得 2 随机防御骰 → 若攻击区有骰则用其全部逐个攻击（顺序代决在前置）
+      heal(g, 'B', 10);
+      withRng(g, (rng) => {
+        gain('defense', rng.rollDie());
+        gain('defense', rng.rollDie());
+      });
+      const order = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      const atk = [...B.areas.attack];
+      const q: NonNullable<GameState['virtualQueue']> = Array.from({ length: 3 }, (_, j) => ({
+        attacker: 'B' as PlayerId, value: 4, label: skill.name, owner: 'B' as PlayerId,
+        legendGroup: { index: 1, total: 1, sub: j + 1, subTotal: 3 },
+      }));
+      if (atk.length > 0) {
+        const diceQ = atk.map((d) => ({
+          attacker: 'B' as PlayerId, value: d.value, label: skill.name, owner: 'B' as PlayerId,
+          dieId: d.id, dieStyle: 'solid' as const,
+        }));
+        if (order === 'asc') diceQ.sort((a, b) => a.value - b.value);
+        else if (order === 'desc') diceQ.sort((a, b) => b.value - a.value);
+        const rank = new Map(diceQ.map((x, i) => [x.dieId, i]));
+        atk.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+        q.push(...diceQ);
+      }
+      logLine(g, `「${legacy}」：${skill.name} — 回复 10 点生命、3 次 4 点攻击、获得随机防御骰${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, 2)}${atk.length > 0 ? `、用攻击区全部 ${atk.length} 颗骰攻击` : ''}`);
+      // §19⑨ 多段攻击源：涤罪大剑术
+      g.virtualQueue = q;
+      pumpAttackQueue(g);
+      return { spawn, outIds };
+    }
+    case 'z10-5':
+      // 救赎：设"下一回合 override"（投 5、攻击 +1）→ 本回合照常结束 → beginTurn → runLegendTurn **重开一整回合**（真回合，T+1）
+      g.challenge!.nextTurnOverride = { rollDice: 5, atkBonus: 1 };
+      logLine(g, `「${legacy}」：${skill.name} — 再次开始 1 个「${legacy}」的回合（该回合投 5 个驱动骰、攻击伤害 +1）`);
+      return { spawn, outIds };
     default:
       return { spawn, outIds };
   }
@@ -1672,7 +1845,14 @@ function runLegendTurn(g: GameState): void {
   g.players.B.turnsTaken = Math.min(4, g.players.B.turnsTaken + 1);
   g.challenge.deathJustTriggered = false; // Z06「死即新生」：绿色"刚触发"只在触发帧
   const legacy = card.legacy;
-  const baseN = card.rollDice ?? 0;
+  // Z10「救赎」：读取"下一回合 override"（本回合投 N 驱动骰 + 攻击加成）——**消费后清空**
+  const ov = g.challenge.nextTurnOverride;
+  g.challenge.nextTurnOverride = undefined;
+  if (ov?.atkBonus) {
+    g.players.B.buffs.push({ attr: 'attackDamage', add: ov.atkBonus, duration: 'thisTurn', source: '救赎' });
+    logLine(g, `「${legacy}」：救赎 — 本回合攻击伤害 +${ov.atkBonus}`);
+  }
+  const baseN = ov?.rollDice ?? card.rollDice ?? 0;
   logLine(g, `——「${legacy}」的回合——`);
   logLine(g, `「${legacy}」：回合开始`);
   // Z05「绝境天神」：上个挑战者的回合受过伤 → 额外投掷驱动骰（8+2=10）
@@ -1767,13 +1947,13 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       }
     }
     const dropId = (dec[skill.id] ?? [])[0] ?? A.areas.defense[0]?.id;
-    if (dropId) consumeDice(g, A, 'defense', [dropId]);
+    const dropped = dropId ? consumeDice(g, A, 'defense', [dropId]) : [];
     delete dec[skill.id];
     // ③ 计数 +1（≤ 上限），并同步「锋芒」加成
     const cap = card.countCap ?? Number.POSITIVE_INFINITY;
     g.challenge.count = Math.min(cap, g.challenge.count + 1);
     syncLegendFengmang(g);
-    logLine(g, `「${card.legacy}」：${skill.name} — 弃置挑战者 1 个防御骰，计数 +1`);
+    logLine(g, `「${card.legacy}」：${skill.name} — 弃置挑战者 1 个防御骰（${dropped.length > 0 ? vals(dropped) : '—'}），计数 +1`);
     g.challenge.deferred = undefined;
     return;
   }
@@ -1835,7 +2015,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     // 龙腾万丈：把"最大/最小之外的**中间 2 颗**"移入防御骰区；放不下时由挑战者代决"哪颗进"。
     const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
     if (spawn === null) return; // 停在代决（challengePick）
-    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
     delete (g.challenge.decisions ?? {})[skill.id];
     g.challenge.deferred = undefined;
     fxPush({
@@ -1960,7 +2140,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       if (spawn === null) return; // 停在代决
       d.moved = true;
       delete (g.challenge.decisions ?? {})[skill.id];
-      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
       fxPush({
         kind: 'legendSkill', player: 'B', skillKey: skill.id, skillName: skill.name,
         consumed: [], spawn, outIds: [], attack: g.players.B.areas.attack.length > 0, announce: false,
@@ -2013,7 +2193,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
       if (spawn === null) return; // 停在代决（challengePick）
       d.moved = true;
-      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
       delete (g.challenge.decisions ?? {})[skill.id];
       fxPush({
         kind: 'legendSkill', player: 'B', skillKey: skill.id, skillName: skill.name,
@@ -2084,7 +2264,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     // 净化（延后一步）：把本技能上的驱动骰移入防御骰区（上限 4；放不下时挑战者代决"哪颗进"）
     const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
     if (spawn === null) return; // 停在代决（challengePick）
-    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
     delete (g.challenge.decisions ?? {})[skill.id];
     g.challenge.deferred = undefined;
     fxPush({
@@ -2106,7 +2286,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     if (!d.moved) {
       const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
       if (spawn === null) return; // 停在代决（challengePick）
-      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+      logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
       d.moved = true;
       delete (g.challenge.decisions ?? {})[skill.id];
       // 动效旁路：本步移入的骰（`spawn`）；`attack`＝移入之后逐个攻击（界面把攻击动画后移到"移入"之后）
@@ -2146,7 +2326,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     // 挑战者的这些攻击骰**全部离开**其攻击骰区（放不进防御区的部分＝弃置）
     const ids = dice.map((x) => x.id).filter((id) => g.players.A.areas.attack.some((dd) => dd.id === id));
     if (ids.length > 0) consumeDice(g, g.players.A, 'attack', ids);
-    logLine(g, `「${card.legacy}」：${skill.name} — 挑战者攻击骰移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+    logLine(g, `「${card.legacy}」：${skill.name} — 挑战者攻击骰移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
     delete (g.challenge.decisions ?? {})[skill.id];
     g.challenge.deferred = undefined;
     fxPush({
@@ -2165,17 +2345,18 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
   if (skill.id === 'z08-3') {
     // 共振·弃置分支：双方各弃 2 个防御骰（挑战者代决"弃哪几颗"；step 0＝黑枪侧、step 1＝挑战者侧）。
     const dec = (g.challenge.decisions ??= {});
+    const removedAll: { kind: DiceKind; value: number }[] = [];
     const doDiscard = (who: PlayerId, prefer: 'larger' | 'smaller'): boolean => {
       const pool = g.players[who].areas.defense;
       if (pool.length === 0) return true;
       if (pool.length <= 2) {
-        consumeDice(g, g.players[who], 'defense', pool.map((x) => x.id));
+        removedAll.push(...consumeDice(g, g.players[who], 'defense', pool.map((x) => x.id)));
         return true;
       }
       const key = `${skill.id}:${who}`;
       const chosen = (dec[key] ?? [])[0];
       if (chosen) {
-        consumeDice(g, g.players[who], 'defense', chosen.split(','));
+        removedAll.push(...consumeDice(g, g.players[who], 'defense', chosen.split(',')));
         return true;
       }
       const opts = combinations(pool.length, 2).map((c) => ({
@@ -2186,7 +2367,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       if (mode && mode !== 'manual') {
         const id = autoPick({ options: opts, prefer }, mode)!;
         dec[key] = [id];
-        consumeDice(g, g.players[who], 'defense', id.split(','));
+        removedAll.push(...consumeDice(g, g.players[who], 'defense', id.split(',')));
         return true;
       }
       g.challenge!.activeSkill = (card.skills ?? []).indexOf(skill);
@@ -2209,7 +2390,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
       delete dec[`${skill.id}:B`];
       delete dec[`${skill.id}:A`];
       g.challenge.deferred = undefined;
-      logLine(g, `「${card.legacy}」：${skill.name} — 双方各弃置 2 个防御骰`);
+      logLine(g, `「${card.legacy}」：${skill.name} — 双方各弃置 2 个防御骰（${vals(removedAll)}）`);
     }
     return;
   }
@@ -2217,7 +2398,7 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     // 蛇蝎之泪：本技能驱动骰（3/4 点）全部 → 防御骰区（受上限 4；放不下时挑战者代决"哪几颗进"）
     const spawn = placeDefenseFrom(g, card, skill, d.dice ?? []);
     if (spawn === null) return; // 停在代决（challengePick）
-    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区（${spawn.length} 颗：${valsSorted(spawn)}）`);
+    logLine(g, `「${card.legacy}」：${skill.name} — 移入防御骰区${legendDefNote(card.defenseCap ?? Number.POSITIVE_INFINITY, spawn, (d.dice ?? []).length)}`);
     delete (g.challenge.decisions ?? {})[skill.id];
     g.challenge.deferred = undefined;
     fxPush({
@@ -2402,6 +2583,7 @@ function continueLegendTurn(g: GameState, once = false): void {
         const s = skill.slots[0];
         const isZ08 = skill.id === 'z08-2' || skill.id === 'z08-3' || skill.id === 'z08-4';
         const isZ09 = skill.id === 'z09-2' || skill.id === 'z09-3' || skill.id === 'z09-4';
+        const isZ10 = skill.id === 'z10-2' || skill.id === 'z10-3' || skill.id === 'z10-4';
         const cands: { key: string; label: string; ids: string[]; sort: number }[] = [];
         if (isZ08) {
           const capZ = card.defenseCap ?? Number.POSITIVE_INFINITY;
@@ -2445,6 +2627,7 @@ function continueLegendTurn(g: GameState, once = false): void {
             const key2 =
               (isZ08 ? z08ChainPickKey(g, skill, mode) : undefined) ??
               (isZ09 ? z09ChainPickKey(g, skill, mode) : undefined) ??
+              (isZ10 ? z10ChainPickKey(g, skill, mode) : undefined) ??
               (skill.id === 'z07-2' ? z07QubuAutoPick(g, cands, mode) : undefined);
             if (key2 !== undefined) {
               decS[slotKey] = [key2];
@@ -2587,6 +2770,15 @@ function continueLegendTurn(g: GameState, once = false): void {
     });
   }
   g.challenge.turn += 1;
+  // Z10「救赎」：设了"下一回合 override" → **同一玩家开真·新回合**（`turnIndex++`、清本回合 buff、不再算首回合），
+  //   不交还挑战者；`beginTurn` 见 activePlayer 仍是传奇 → 再走 `runLegendTurn`（消费 override：投 5 + 攻击 +1）。
+  if (g.challenge.nextTurnOverride) {
+    g.players.B.buffs = g.players.B.buffs.filter((b) => b.duration !== 'thisTurn');
+    g.firstRound.B = false;
+    g.turnIndex += 1;
+    beginTurn(g);
+    return;
+  }
   endTurn(g); // 交回合给挑战者（其 beginTurn 走正常流程）
 }
 
@@ -2943,7 +3135,7 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0, settleMode: opts.settleMode ?? 'manual' };
   // Z06「漆黑死神」：黑白指示物，战斗开始＝**黑面朝上**（回合结束翻面）
   if (card.token) g.challenge.token = 'black';
-  logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」（${card.id}）· 生命 ${g.players.B.life}`);
+  logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」· 生命 ${g.players.B.life}`);
   // 挑战者的战术牌：构筑直接生效
   if (opts.tactic) applyTacticStart(g, 'A');
   // 战前收口：**初始生命修正**（标准流程在"战前收口" `maybeEnterInitialReroll` 结算；挑战建局不经 `tactics` 阶段 → 这里补，
@@ -5114,7 +5306,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
           zz.activeMarkerSide = to;
           zz.armedSide = null;
           zz.armedTurn = -1;
-          logLine(g, `${pname(pd.player)} 「拔城」：切换「${zz.name}」的技能（${from ?? '未激活'} → ${to}）`);
+          logLine(g, `${pname(pd.player)} 「拔城」：切换「${zz.name}」的技能（${from ? sideCn(from) : '未激活'} → ${sideCn(to)}）`);
           // 动效旁路：切换「主宰」技能 → 主宰卡上弹「切换」小气泡（与尘起切换同款，此前是静默换面）
           fxPush({ kind: 'rise', player: pd.player, artifactId: zz.id, side: to, mode: 'switch' });
         }
@@ -5323,8 +5515,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
       }
       if (!found) throw new Error('雨落狂流：对方没有该能力骰');
       g.pending = null;
-      consumeDice(g, o, found.kind, [found.id]);
-      logLine(g, `${pname(pd.player)} 「雨落狂流」：弃置 ${pname(opp)} 的 1 个能力骰`);
+      const removed = consumeDice(g, o, found.kind, [found.id]);
+      logLine(g, `${pname(pd.player)} 「雨落狂流」：弃置 ${pname(opp)} 的 1 个能力骰（${removed.length > 0 ? vals(removed) : '—'}）`);
       break;
     }
     case 'shouhunCancel': {

@@ -15,6 +15,9 @@ export { skillActive, hasActiveSkill };
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
 
+/** 能力骰类型的**单字显示名**（`attack/defense/meditation` 是内部键，**禁止**直接写进战报/界面）。 */
+const kindShort = (k: DiceKind): string => (k === 'attack' ? '攻' : k === 'defense' ? '防' : '冥');
+
 /**
  * L12「知我心者立地成佛」：**双方 6 区中"有骰且仅有 1 种点数"的区域**（空区域不算、含多种点数不算）。
  * **引擎与界面共用同一来源**（界面用它做"发动前预览：会造成几点伤害"，避免另抄一份规则）。
@@ -92,7 +95,7 @@ export interface SkillHandler {
 /** 从玩家的某区域移除指定骰（校验归属），返还供应堆。
  *  kind 为防御/冥想时触发 A06 异相·「幽魂不散」（技能效果"弃置"）。
  *  「雨落狂流」口径 (B)：**不看是谁执行的弃置**——只要该玩家的骰被弃置且不符合其分布即计数。 */
-export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[]): void {
+export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[]): { kind: DiceKind; value: number }[] {
   const area = p.areas[kind];
   const removed: { kind: DiceKind; value: number }[] = [];
   for (const id of ids) {
@@ -103,6 +106,7 @@ export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: s
   }
   noteYuluoDiceConsumed(g, p.id, removed);
   if (kind === 'defense' || kind === 'meditation') xuyuYouhunTrigger(g, p.id, ids.length);
+  return removed;
 }
 
 /**
@@ -116,7 +120,7 @@ export function consumeDiceByKind(
   g: GameState,
   p: PlayerState,
   byKind: Partial<Record<DiceKind, string[]>>,
-): void {
+): { kind: DiceKind; value: number }[] {
   const removed: { kind: DiceKind; value: number }[] = [];
   const counts: Partial<Record<DiceKind, number>> = {};
   for (const kind of ['attack', 'defense', 'meditation'] as DiceKind[]) {
@@ -131,10 +135,11 @@ export function consumeDiceByKind(
     }
     counts[kind] = ids.length;
   }
-  if (removed.length === 0) return;
+  if (removed.length === 0) return [];
   noteYuluoDiceConsumed(g, p.id, removed); // ← 一次效果只一次
   if (counts.defense) xuyuYouhunTrigger(g, p.id, counts.defense);
   if (counts.meditation) xuyuYouhunTrigger(g, p.id, counts.meditation);
+  return removed;
 }
 
 /**
@@ -739,10 +744,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
       let sum = 0;
       for (const e of effective) sum += e.value;
-      if (oppIds.length) consumeDice(g, g.players[opp], kind, oppIds);
+      const removedZhendang = oppIds.length ? consumeDice(g, g.players[opp], kind, oppIds) : [];
       const dmg = Math.floor(sum / 2);
       dealTrueDamage(g, opp, dmg, player);
-      logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kind}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰，造成 ${dmg} 点真实伤害`);
+      logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kindShort(kind)}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰（${vals(removedZhendang)}），造成 ${dmg} 点真实伤害`);
       bachengHook(g, player, effective.length, oppIds.length);
     },
   },
@@ -760,12 +765,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const defIds = (params.defenseDieIds as string[]) ?? [];
       if (new Set(defIds).size !== defIds.length) throw new Error('duplicate die id');
       const validDef = defIds.filter((id) => p.areas.defense.some((d) => d.id === id)).slice(0, 2);
-      consumeDice(g, p, 'defense', validDef);
+      const removedWangjia = consumeDice(g, p, 'defense', validDef);
       const missing = 2 - validDef.length;
       if (missing > 0) dealTrueDamage(g, player, missing * 2, player);
       const gainedWangjia = gainRandomDice(g, player, 'defense', 4, rng);
       p.buffs.push({ attr: 'attackDamage', add: 1, duration: 'thisTurn', source: '王家之拳' });
-      logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰（${valsSorted(gainedWangjia)}），本回合攻击伤害 +1`);
+      logLine(g, `${pname(player)} 发动「王家之拳」：消耗 2 冥想，弃置 ${validDef.length} 防御${removedWangjia.length > 0 ? `（${vals(removedWangjia)}）` : ''}${missing > 0 ? `（少弃 ${missing}，受 ${missing * 2} 真伤）` : ''}，获得 4 防御骰（${valsSorted(gainedWangjia)}），本回合攻击伤害 +1`);
     },
   },
   // 011 灵能屏障·启动：消耗最多 3 个防御骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
@@ -1313,12 +1318,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const ids = (params.dieIds as string[] | undefined) ?? [];
       if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
       if (ids.length !== d) throw new Error(`「清算」需弃置对方 ${d} 颗能力骰（X=${X}）`);
+      const removedQingsuan: { kind: DiceKind; value: number }[] = [];
       for (const id of ids) {
         const found = findDieOf(g, oppId, id);
         if (!found) throw new Error(`not ${oppId} ability die: ${id}`);
-        consumeDice(g, opp, found.kind, [id]);
+        removedQingsuan.push(...consumeDice(g, opp, found.kind, [id]));
       }
-      logLine(g, `${pname(player)} 发动「清算」：弃置 ${pname(oppId)} ${d} 颗能力骰（X=${X}）`);
+      logLine(g, `${pname(player)} 发动「清算」：弃置 ${pname(oppId)} ${d} 颗能力骰（X=${X}；${vals(removedQingsuan)}）`);
       const shortfall = X - d;
       if (shortfall > 0 && g.phase !== 'gameOver') {
         logLine(g, `「清算」：对方只有 ${d} 颗，每差 1 颗 3 点 → 造成 ${shortfall * 3} 点真实伤害`);
@@ -1536,10 +1542,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         const live = r.ids.filter((id) => g.players[r.who].areas[r.kind].some((d) => d.id === id));
         if (live.length) (byPlayer[r.who][r.kind] ??= []).push(...live);
       }
+      const removedLidi: { kind: DiceKind; value: number }[] = [];
       for (const who of ['A', 'B'] as PlayerId[]) {
-        if (Object.keys(byPlayer[who]).length > 0) consumeDiceByKind(g, g.players[who], byPlayer[who]);
+        if (Object.keys(byPlayer[who]).length > 0) removedLidi.push(...consumeDiceByKind(g, g.players[who], byPlayer[who]));
       }
-      if (n > 0) logLine(g, `「立地成佛」：弃置这 ${n} 个区域中的全部能力骰`);
+      if (n > 0) logLine(g, `「立地成佛」：弃置这 ${n} 个区域中的全部能力骰（${vals(removedLidi)}）`);
     },
   },
 };

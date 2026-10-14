@@ -1,5 +1,6 @@
 import type { Artifact, GameState, PlayerId } from '../model/types';
 import { heal } from './effects';
+import { sideCn } from './log';
 
 /**
  * 第三列「充能 +1」的**唯一入口**：`applyDustRiseToArtifact` 与 L03「统御战场」等**所有**"给第三列充能"的效果
@@ -45,8 +46,6 @@ export function applyDustRiseToArtifact(
   if (!a) throw new Error(`no artifact: ${artifactId}`);
   if (!canTargetForDustRise(a)) throw new Error(`artifact ${artifactId} cannot be dust-risen`);
 
-  const sideLabel = (s: 'left' | 'right'): string => (s === 'left' ? '左' : '右');
-
   if (a.column === 3) {
     const req = a.chargeReq ?? 0;
     // 已完成充能（已激活）：021 决意「续充」——改为计数 +1（上限），并回复等同计数的生命
@@ -68,11 +67,11 @@ export function applyDustRiseToArtifact(
     a.activeMarkerSide = chosen;
     a.armedSide = chosen;
     a.armedTurn = g.turnIndex;
-    return `激活「${a.name}」的${sideLabel(chosen)}侧`;
+    return `激活「${a.name}」的${sideCn(chosen)}侧`;
   }
 
   a.activeMarkerSide = a.activeMarkerSide === 'left' ? 'right' : 'left';
   a.armedSide = a.activeMarkerSide;
   a.armedTurn = g.turnIndex;
-  return `将「${a.name}」切换到${sideLabel(a.activeMarkerSide)}侧`;
+  return `将「${a.name}」切换到${sideCn(a.activeMarkerSide)}侧`;
 }

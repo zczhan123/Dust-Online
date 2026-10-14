@@ -13,6 +13,7 @@ import {
   legendDamageCap,
   legendDeathRevive,
   legendHasSkill,
+  legendLateJustice,
   legendLegacyName,
 } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
@@ -367,7 +368,9 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   const base = attackDamageBonus(g, player);
   const bonus = Math.max(base.value, mods?.minBonus ?? 0);
   const bonusLabel = mods?.minBonus !== undefined && mods.minBonus > base.value ? mods.bonusLabel : base.label;
-  const value = attackPoint + bonus;
+  // Z10「迟来的正义」：任一方生命 <10 时，传奇的攻击伤害＝**攻击点数 ×2**（**不加其它加成**，遵黄金法则）
+  const lateJustice = player === 'B' && legendLateJustice(g);
+  const value = lateJustice ? attackPoint * 2 : attackPoint + bonus;
   const pa: PendingAttack = {
     attacker: player,
     value,
@@ -377,8 +380,8 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
     sourceValue: effDie.value,
     baseValue: attackPoint,
     rawPoint: effDie.value,
-    bonusValue: bonus,
-    bonusLabel,
+    bonusValue: lateJustice ? attackPoint : bonus,
+    bonusLabel: lateJustice ? '迟来的正义' : bonusLabel,
     ...(tianfa ? { blockKind: tianfa.blockKind } : {}),
   };
   applyNextTurnHalving(g, player, pa);
@@ -482,15 +485,17 @@ export function virtualAttack(
   if (tianfa) fxSkillFired(g, player, tianfa.key);
   const rawTianfa = tianfa && tianfa.value !== undefined ? tianfa.value : baseValue;
   const point = applyWuguang(g.players[player], rawTianfa); // L06 无光领域：攻击点数 ±1
+  // Z10「迟来的正义」：任一方生命 <10 时，传奇的攻击伤害＝**攻击点数 ×2**（不加其它加成）
+  const lateJustice = player === 'B' && legendLateJustice(g);
   g.pendingAttack = {
     attacker: player,
-    value: point + base.value,
+    value: lateJustice ? point * 2 : point + base.value,
     unblockable: opts?.unblockable ?? g.unblockableThisTurn,
     physical: false,
     baseValue: point,
     rawPoint: baseValue,
-    bonusValue: base.value,
-    bonusLabel: base.label,
+    bonusValue: lateJustice ? point : base.value,
+    bonusLabel: lateJustice ? '迟来的正义' : base.label,
     ...(source ? { sourceSkill: source.skill, sourceSkillOwner: source.owner } : {}),
   };
   applyNextTurnHalving(g, player, g.pendingAttack);
@@ -966,7 +971,7 @@ export function pumpAttackQueue(g: GameState): void {
     // ⚠️ 这里**不删**它——骰子留在区里（"用掉"发生在**这次攻击结算后**，见 settleAttack）：
     //   于是"新骰飞进来"与"旧骰还并排在区里"能同帧存在，界面再按"先进后出"演；
     //   等待响应期间由界面把区里那颗真骰**藏起来**（观感＝飞出去后区里就没它了）。
-    if (next.dieId || next.legendGroup) {
+    if (next.dieId || next.legendGroup || next.blockKind) {
       const pa = g.pendingAttack as PendingAttack | null; // TS 在函数开头已把它收窄成 null，这里重新取
       if (pa) {
         if (next.dieId) {
@@ -975,6 +980,7 @@ export function pumpAttackQueue(g: GameState): void {
         }
         if (next.dieStyle) pa.dieStyle = next.dieStyle;
         if (next.legendGroup) pa.legendGroup = next.legendGroup; // 因"多组"触发的攻击 → 提示"第 K / N 组"
+        if (next.blockKind) pa.blockKind = next.blockKind; // Z10：本条只能用该类型骰抵挡
       }
     }
     // 034/A03 菩提·触发（攻击侧）：**用了攻击骰**的攻击（挑战「枭首 / 裁雨流 / 真实之剑 / 无上剑术」等）

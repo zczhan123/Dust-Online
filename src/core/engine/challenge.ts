@@ -243,6 +243,12 @@ export function legendDamageCap(g: GameState): number | null {
   return card?.damageCapPerHit ?? null;
 }
 
+/** Z10「迟来的正义」：当前卡含 `z10-1` 且**任一方生命 < 10** → 传奇攻击伤害翻倍（＝攻击点数 ×2）。 */
+export function legendLateJustice(g: GameState): boolean {
+  if (!legendHasSkill(g, 'z10-1')) return false;
+  return g.players.A.life < 10 || g.players.B.life < 10;
+}
+
 /**
  * 该神器技能在**这一方手里**是否**整条失效**（挑战模式的"特殊规则"；名单唯一来源 `CHALLENGE_RULE_NOTES`）。
  *

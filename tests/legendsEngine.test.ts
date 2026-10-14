@@ -396,6 +396,10 @@ describe('L03 拔城 + 统御战场', () => {
     expect(g.pending?.kind).toBe('bacheng');
     applyAction(g, { t: 'bacheng', accept: true });
     expect(zz.activeMarkerSide).toBe('right'); // 已切换「主宰」技能
+    // 战报用**中文左右**（不得外泄内部键 left/right）
+    const txt = g.log.map((l) => l.text).join('\n');
+    expect(txt).toContain(`切换「${zz.name}」的技能（左 → 右）`);
+    expect(txt).not.toMatch(/left|right/);
   });
 
   it('统御战场：受攻击伤害 → 「孤王」充能 +1 且连锁执行「高塔铁幕」（封顶 3、满亦不再）', () => {

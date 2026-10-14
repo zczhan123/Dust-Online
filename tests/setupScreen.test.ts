@@ -681,6 +681,15 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
   });
 
+  it('传 Z10（破晓之剑）：已转写 → 显示生命 45 / 防御骰上限 4（不是"待转写"）', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('mate', 'legend').click();
+    expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“破晓之剑”');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 45');
+    expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 4');
+    expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
+  });
+
   it('传 Z03（孤塔之王）：已转写且无上限 → 显示「防御骰上限 无」（不是"待转写"）', () => {
     renderChallengeSetup(root, () => {});
     abOf('batton', 'legend').click();

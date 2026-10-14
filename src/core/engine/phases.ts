@@ -125,7 +125,7 @@ export function endPhase(g: GameState, player: PlayerId, dieIds?: string[]): num
   }
   if (removed.length > 0) noteYuluoDiceConsumed(g, player, removed);
   if (discarded > 0) {
-    logLine(g, `${pname(player)} 弃置 ${discarded} 颗能力骰（超出意志上限）`, 'end');
+    logLine(g, `${pname(player)} 弃置 ${discarded} 颗能力骰（超出意志上限：${vals(removed)}）`, 'end');
   }
   return discarded;
 }

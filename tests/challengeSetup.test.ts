@@ -25,6 +25,13 @@ describe('挑战模式 · 建局与状态', () => {
     expect(totalDice(g.players.B)).toBe(0);
   });
 
+  it('开局战报：用卡名、**不带卡片代号**（不得出现 （Z02））', () => {
+    const g = make();
+    const txt = g.log.map((l) => l.text).join('\n');
+    expect(txt).toContain('挑战模式：对手＝传说中的「永暗之刃」· 生命 50');
+    expect(txt).not.toMatch(/（Z\d/);
+  });
+
   it('挑战者＝A：正常拿到能力骰与尘印标记；传奇先手', () => {
     const g = make();
     expect(totalDice(g.players.A)).toBe(effectiveWill(g.players.A));

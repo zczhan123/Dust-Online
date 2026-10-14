@@ -501,6 +501,10 @@ describe('007 主宰', () => {
     expect(g.players.B.life).toBe(lifeBefore - 7);
     expect(g.players.A.areas.attack.map((d) => d.id)).toEqual(['c5']);
     expect(g.players.B.areas.attack.map((d) => d.id)).toEqual(['o5']);
+    // 战报用**中文骰类**（不得外泄内部键 attack/defense/meditation）
+    const txt = g.log.map((l) => l.text).join('\n');
+    expect(txt).toContain('发动「震荡斩击」：消耗 4 颗攻（点数和 14）');
+    expect(txt).not.toMatch(/attack|defense|meditation/);
   });
 
   it('震荡斩击（能弃则必须弃）：少弃 → 抛错且状态不变', () => {

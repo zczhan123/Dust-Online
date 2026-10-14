@@ -1398,10 +1398,11 @@ export function challengeImageUrl(id: string): string {
  * **数据驱动**：读 `ChallengeSkill.alwaysOn`（`true`＝始终；`'count'`＝计数>0；`'lifeBonus'`＝生命差攻击加成>0；缺省＝不常亮）。
  * 新 Z 卡的持续技能在数据里填 `alwaysOn` 即可，**不要再按 `skill.id` 硬编码**。
  */
-function challengeSkillAlwaysOn(state: GameState, sk: { alwaysOn?: boolean | 'count' | 'lifeBonus' }): boolean {
+function challengeSkillAlwaysOn(state: GameState, sk: { alwaysOn?: boolean | 'count' | 'lifeBonus' | 'lowLife' }): boolean {
   if (sk.alwaysOn === true) return true;
   if (sk.alwaysOn === 'count') return (state.challenge?.count ?? 0) > 0;
   if (sk.alwaysOn === 'lifeBonus') return legendAttackBonus(state).value > 0;
+  if (sk.alwaysOn === 'lowLife') return state.players.A.life < 10 || state.players.B.life < 10;
   return false;
 }
 

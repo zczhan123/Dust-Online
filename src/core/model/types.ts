@@ -474,6 +474,9 @@ export interface GameState {
     /** Z09「横贯」（本技能期间）：挑战者每进行 1 次抵挡后，必须弃置自己 1 个任意能力骰。
      *  `横贯` 发动时置位、传奇回合开始时清零；挑战者抵挡结算处命中 → 排队代决。 */
     hengguan?: boolean;
+    /** Z10「救赎」：**下一个传奇回合的覆盖参数**（该回合投 `rollDice` 个驱动骰、攻击伤害 `atkBonus`）。
+     *  `救赎` 生效时置位 → 本回合照常结束 → `beginTurn` → `runLegendTurn` **读取并消费**（消费后清空）。 */
+    nextTurnOverride?: { rollDice: number; atkBonus: number };
     /** Z06「死即新生」：是否已触发过（整局 1 次）→ 面板置灰 */
     deathUsed?: boolean;
     /** Z06「死即新生」：本帧刚触发（面板绿色闪一下）——引擎在触发时置位、界面消费后清掉 */
@@ -538,6 +541,8 @@ export interface GameState {
     legendGroup?: LegendGroup;
     /** 本条攻击**不可抵挡**（Z08「处刑通牒」的 +1 分支：本回合其攻击不可抵挡）。 */
     unblockable?: boolean;
+    /** 本条攻击**只能用该类型骰抵挡**（Z10「白昼之火」= 冥想 / 「陨落」= 攻击；只作用于这条攻击）。 */
+    blockKind?: DiceKind;
   }[] | null;
   /** 额外重掷阶段（013 雷暴·持续：在对方重掷阶段结束时插入） */
   extraReroll: { player: PlayerId; resume: PlayerId } | null;
