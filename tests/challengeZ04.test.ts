@@ -145,6 +145,36 @@ describe('挑战模式 · Z04 效果', () => {
     expect(vals(g.players.B.areas.defense)).toEqual([3, 3, 3]);
     expect(vals(g.challenge!.driven)).toEqual([6]);
   });
+
+  it('灵能屏障·并列：两个点数同为最多 → 代决（自选弹面板；有利＝取点数小）', () => {
+    // 自选：并列 → 弹 challengePick（options＝并列点数）
+    const g = make();
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.challenge!.turn = 2;
+    g.challenge!.resumeAt = 5; // z04-5 灵能屏障
+    g.challenge!.driven = [die('d1', 2), die('d2', 2), die('d5', 5), die('d6', 5)];
+    g.players.B.areas.defense = [];
+    g.pending = null; // 清掉 `skipInitialReroll` 引发的 D1「开局选骰」代决（本测试只驱动 z04-5）
+    applyAction(g, { t: 'challengeStep' });
+    const pd = g.pending as { kind?: string; options?: { id: string }[] } | null;
+    expect(pd?.kind).toBe('challengePick');
+    expect(pd!.options!.map((o) => o.id)).toEqual(['2', '5']);
+
+    // 有利：自动取点数小（2）→ 移入 2、2
+    const g2 = make('favor');
+    skipInitialReroll(g2);
+    g2.phase = 'main';
+    g2.activePlayer = 'B';
+    g2.challenge!.turn = 2;
+    g2.challenge!.resumeAt = 5;
+    g2.challenge!.driven = [die('d1', 2), die('d2', 2), die('d5', 5), die('d6', 5)];
+    g2.players.B.areas.defense = [];
+    g2.pending = null; // 同上：清 D1 代决
+    applyAction(g2, { t: 'challengeStep' });
+    expect(vals(g2.players.B.areas.defense)).toEqual([2, 2]);
+  });
 });
 
 describe('挑战模式 · Z04 D1（开局选骰）', () => {

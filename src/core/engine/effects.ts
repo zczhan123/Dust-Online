@@ -13,6 +13,7 @@ import { logLine, pname } from './log';
 import { hasActiveSkill, skillActive } from './skill-state';
 import { emptyDistribution } from './derive';
 import { dealTrueDamage } from './combat';
+import { isValueLocked } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 // 注意：与 pending.ts 是**循环引用**（pending → effects 的 gainRandomAbilityDice/withRngState）；
 // 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
@@ -241,13 +242,17 @@ export function abilityDicePool(g: GameState, player: PlayerId): AbilityDie[] {
   const p = g.players[player];
   const out: AbilityDie[] = [];
   for (const k of KINDS) {
-    for (const d of p.areas[k]) out.push({ id: d.id, value: d.value, kind: k, source: 'area' });
+    for (const d of p.areas[k]) {
+      if (isValueLocked(g, player, d.value)) continue; // Z12「不动菩提」：被封锁点数的骰**不可用**
+      out.push({ id: d.id, value: d.value, kind: k, source: 'area' });
+    }
   }
   if (hasActiveSkill(p, 'jingang.pozhang.continuous')) {
     const dist = emptyDistribution(p);
     if (dist) {
       for (const a of p.artifacts) {
         for (const h of a.heldDice ?? []) {
+          if (isValueLocked(g, player, h.value)) continue; // 存放骰同受封锁
           out.push({ id: h.id, value: h.value, kind: areaOf(h.value, dist), source: 'artifact' });
         }
       }
@@ -437,7 +442,12 @@ export function paySlots(
     for (const id of ids) {
       if (used.has(id)) throw new Error(`duplicate die id: ${id}`);
       used.add(id);
-      if (!findDieOf(g, player, id) && !heldAsAbility(g, player, id)) throw new Error(`not your die: ${id}`);
+      const foundV = findDieOf(g, player, id);
+      const heldV = foundV ? null : heldAsAbility(g, player, id);
+      if (!foundV && !heldV) throw new Error(`not your die: ${id}`);
+      // Z12「不动菩提」：被封锁点数的能力骰**不可"使用/消耗"**（只锁挑战者 A；不锁传奇强制弃置）
+      const lockedV = foundV ? foundV.die.value : heldV!.value;
+      if (isValueLocked(g, player, lockedV)) throw new Error(`「不动菩提」：${lockedV} 点的能力骰本回合不可使用/消耗`);
     }
     if (ids.length === 1) {
       const found = findDieOf(g, player, ids[0]);

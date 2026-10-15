@@ -2,7 +2,7 @@ import { areaOf, createDie, newDieId } from '../model/dice';
 import type { Rng } from '../rng/rng';
 import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '../model/types';
 import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
-import { isInertSkill } from './challenge';
+import { isInertSkill, isValueLocked } from './challenge';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
 import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
@@ -95,8 +95,15 @@ export interface SkillHandler {
 /** 从玩家的某区域移除指定骰（校验归属），返还供应堆。
  *  kind 为防御/冥想时触发 A06 异相·「幽魂不散」（技能效果"弃置"）。
  *  「雨落狂流」口径 (B)：**不看是谁执行的弃置**——只要该玩家的骰被弃置且不符合其分布即计数。 */
-export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[]): { kind: DiceKind; value: number }[] {
+export function consumeDice(g: GameState, p: PlayerState, kind: DiceKind, ids: string[], opts?: { byLegend?: boolean }): { kind: DiceKind; value: number }[] {
   const area = p.areas[kind];
+  // Z12「不动菩提」：**挑战者自己**的弃置受封锁；传奇技能的**强制弃置**由调用方传 `{ byLegend: true }` 豁免
+  if (!opts?.byLegend) {
+    for (const id of ids) {
+      const d = area.find((x) => x.id === id);
+      if (d && isValueLocked(g, p.id, d.value)) throw new Error(`「不动菩提」：${d.value} 点的能力骰本回合不可弃置`);
+    }
+  }
   const removed: { kind: DiceKind; value: number }[] = [];
   for (const id of ids) {
     const idx = area.findIndex((d) => d.id === id);
@@ -120,9 +127,20 @@ export function consumeDiceByKind(
   g: GameState,
   p: PlayerState,
   byKind: Partial<Record<DiceKind, string[]>>,
+  opts?: { byLegend?: boolean },
 ): { kind: DiceKind; value: number }[] {
   const removed: { kind: DiceKind; value: number }[] = [];
   const counts: Partial<Record<DiceKind, number>> = {};
+  // Z12「不动菩提」：先整体校验封锁（挑战者自己的弃置受锁；传奇强制弃置传 `{ byLegend: true }`）
+  if (!opts?.byLegend) {
+    for (const kind of ['attack', 'defense', 'meditation'] as DiceKind[]) {
+      const area = p.areas[kind];
+      for (const id of byKind[kind] ?? []) {
+        const d = area.find((x) => x.id === id);
+        if (d && isValueLocked(g, p.id, d.value)) throw new Error(`「不动菩提」：${d.value} 点的能力骰本回合不可弃置`);
+      }
+    }
+  }
   for (const kind of ['attack', 'defense', 'meditation'] as DiceKind[]) {
     const ids = byKind[kind] ?? [];
     if (ids.length === 0) continue;

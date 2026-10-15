@@ -263,6 +263,23 @@ export function legendCountCap(g: GameState): number {
   return CHALLENGES.find((c) => c.id === g.challenge?.cardId)?.countCap ?? Number.POSITIVE_INFINITY;
 }
 
+/** Z12「不动菩提」：挑战者本回合被**封锁**的点数（仅 `mode==='challenge'` 且已置位；否则 `null`）。 */
+export function legendLockValue(g: GameState): number | null {
+  if (g.mode !== 'challenge' || !g.challenge) return null;
+  return g.challenge.lockValue ?? null;
+}
+
+/**
+ * 某玩家的某点数是否被 Z12「不动菩提」封锁——**只锁挑战者（A）**；标准/轮选/构筑/联机恒 `false`。
+ * 用于：`paySlots`（使用/消耗）、`consumeDice`/`consumeDiceByKind`（弃置）、`abilityDicePool`（池过滤）。
+ * ⚠️ 传奇技能对挑战者骰的**强制弃置**不走封锁（调用方传 `{ byLegend: true }`）；**意志上限弃骰豁免**。
+ */
+export function isValueLocked(g: GameState, player: PlayerId, value: number): boolean {
+  if (player !== 'A') return false;
+  const lv = legendLockValue(g);
+  return lv !== null && value === lv;
+}
+
 /**
  * 该神器技能在**这一方手里**是否**整条失效**（挑战模式的"特殊规则"；名单唯一来源 `CHALLENGE_RULE_NOTES`）。
  *

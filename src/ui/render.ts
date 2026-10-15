@@ -17,7 +17,7 @@ import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
 import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase } from '../core/content/challenges';
-import { legendAttackBonus } from '../core/engine/challenge';
+import { legendAttackBonus, isValueLocked, legendLockValue } from '../core/engine/challenge';
 import { LEGEND_DISPLAY_NAME } from '../core/engine/log';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
@@ -1248,9 +1248,9 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
       const flow = ctx.hooks.ui.dustFlow;
       if (flow && flow.step === 'pay' && player.id === actorOf(ctx.state)) {
         const converting = !!flow.convertPick;
-        const pickable = converting
+        const pickable = !isValueLocked(ctx.state, player.id, d.value) && (converting
           ? true
-          : hasDustVariant(ctx, flow.artifactId, 'dice') && d.kind === 'meditation';
+          : hasDustVariant(ctx, flow.artifactId, 'dice') && d.kind === 'meditation');
         if (pickable) {
           die.classList.add('clickable');
           die.title = '点击用于尘起支付';
@@ -1261,7 +1261,7 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     } else if (ctx.selectionStep) {
       const step = ctx.selectionStep;
       if (step.kind === 'dice' && ctx.selectionOwner === player.id && step.areas.includes(kind)) {
-        const selectable = !step.filter || step.filter(d);
+        const selectable = !isValueLocked(ctx.state, player.id, d.value) && (!step.filter || step.filter(d));
         if (selectable) {
           die.classList.add('clickable');
           die.title = '点击选择该骰';
@@ -1802,6 +1802,12 @@ function globalHint(ctx: Ctx): HintPart[] {
   // A07 异相·历王之血之印：本回合双方所有持续式效果失效（全回合、双方可见）
   if ((['A', 'B'] as PlayerId[]).some((id) => state.players[id].artifacts.some((a) => a.continuousLostThisTurn))) {
     out.push({ text: `${out.length ? '　｜　' : ''}「历王之血之印」生效中——本回合双方所有持续式效果失效` });
+  }
+  // Z12「不动菩提」：挑战者本回合被封锁的点数（**全局**：不分阶段、不看是否轮到挑战者）——
+  //   挑战者几乎任何场景（攻击 / 抵挡 / 尘起 / 技能代价 / 主动弃骰）都可能受此限制，故常驻可见。
+  const lockV = legendLockValue(state);
+  if (lockV !== null) {
+    out.push({ text: `${out.length ? '　｜　' : ''}「不动菩提」：不能用 / 耗 / 弃 ${lockV} 点能力骰`, color: 'B' });
   }
   return out;
 }
@@ -3668,7 +3674,7 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
       if (sel.currentSel.has(d.id)) {
         die.classList.add('selected');
       }
-      if (!step.filter || step.filter(d)) {
+      if (!isValueLocked(ctx.state, ownerId, d.value) && (!step.filter || step.filter(d))) {
         die.classList.add('clickable');
         die.addEventListener('click', () => toggleSelDie(ctx.hooks, step, d));
       } else {
@@ -3690,7 +3696,7 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
         chip.textContent = String(h.value);
         chip.title = `「金刚·破障」：神器上存放的骰（${h.value} 点，视为${KIND_NAMES[k]}骰）`;
         if (sel.currentSel.has(h.id)) chip.classList.add('selected');
-        if (!step.filter || step.filter(hd)) {
+        if (!isValueLocked(ctx.state, ownerId, h.value) && (!step.filter || step.filter(hd))) {
           chip.classList.add('clickable');
           chip.addEventListener('click', () => toggleSelDie(ctx.hooks, step, hd));
         } else {
@@ -5863,6 +5869,12 @@ function dispatchDustSeal(ctx: Ctx): void {
 function pickDustDie(ctx: Ctx, dieId: string): void {
   const flow = ctx.hooks.ui.dustFlow;
   if (!flow) return;
+  // Z12「不动菩提」：被封锁点数的骰不可用于尘起支付（"付款步"的单颗/置换入口）
+  {
+    const owner = ctx.state.players[actorOf(ctx.state)];
+    const dd = AREA_ORDER.flatMap((k) => owner.areas[k]).find((x) => x.id === dieId);
+    if (dd && isValueLocked(ctx.state, owner.id, dd.value)) return;
+  }
   if (flow.convertPick) {
     const pick = flow.convertPick;
     const i = pick.indexOf(dieId);
@@ -5970,8 +5982,12 @@ function dustPayStep(ctx: Ctx, payer: PlayerState): HTMLElement {
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);
       die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
-      die.classList.add('clickable');
-      die.addEventListener('click', () => pickDustDie(ctx, d.id));
+      if (isValueLocked(ctx.state, payer.id, d.value)) {
+        die.classList.add('pay-die--used'); // Z12「不动菩提」：封锁点数的骰不可用于尘起支付
+      } else {
+        die.classList.add('clickable');
+        die.addEventListener('click', () => pickDustDie(ctx, d.id));
+      }
       medDice.appendChild(die);
     }
     // 034 破障（持续）：神器上按分布视为冥想骰的存放骰也可用于尘起支付

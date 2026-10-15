@@ -638,3 +638,47 @@ describe('挑战模式 · Z04 D1（开局选骰）提示栏', () => {
     expect(hint.textContent).not.toContain('强制执行');
   });
 });
+
+describe('挑战模式 · Z12「不动菩提」封锁提示（全局常驻）', () => {
+  const makeZ12 = (lockValue?: number): GameState => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z12', challenger: ['001', '002', '003'] });
+    g.phase = 'main';
+    if (lockValue !== undefined) g.challenge!.lockValue = lockValue;
+    return g;
+  };
+
+  it('有封锁 → 快速操作栏出现「不动菩提」+ 点数（按传奇红上色）', () => {
+    const { root } = mount(makeZ12(3));
+    const glob = root.querySelector('.hint-global');
+    expect(glob).not.toBeNull();
+    expect(glob!.textContent).toContain('「不动菩提」');
+    expect(glob!.textContent).toContain('3 点');
+    expect(glob!.classList.contains('player-B')).toBe(true);
+  });
+
+  it('封锁定在尘起阶段也可见（不分阶段）', () => {
+    const g = makeZ12(5);
+    g.phase = 'dustRise';
+    const { root } = mount(g);
+    expect(root.querySelector('.hint-global')?.textContent ?? '').toContain('不动菩提');
+  });
+
+  it('无封锁 → 不出现', () => {
+    const { root } = mount(makeZ12(undefined));
+    expect(root.querySelector('.hint-global')?.textContent ?? '').not.toContain('不动菩提');
+  });
+
+  it('标准模式 → 永不含（隔离）', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['004', '005', '006'] });
+    const { root } = mount(g);
+    expect(root.textContent).not.toContain('不动菩提');
+  });
+
+  it('面板：z12-1 行常亮（生效中）', () => {
+    const { root } = mount(makeZ12());
+    const table = root.querySelector('.challenge-skill-table');
+    expect(table).not.toBeNull();
+    expect(table!.textContent).toContain('不动菩提');
+    expect(table!.textContent).toContain('生效中');
+  });
+});

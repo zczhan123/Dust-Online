@@ -298,7 +298,29 @@ export const CHALLENGES: ChallengeCard[] = [
       { id: 'z11-5', name: '永恒女王', marker: '∞', slots: null, effect: '补充随机点数的防御骰，直至防御骰的数量为 3。' },
     ],
   },
-  { id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'] },
+  {
+    id: 'Z12', legacy: '渡世行僧', artifacts: ['034', '035', '036'],
+    life: 50, defenseMin: 3, defenseRule: '只会抵挡伤害 ≥ 3 的攻击', rollDice: 8,
+    skills: [
+      { id: 'z12-0', name: '回合开始', slots: null, effect: '投掷 8 个驱动骰。' },
+      { id: 'z12-1', name: '不动菩提', marker: '∞', slots: null, alwaysOn: true, effect: '直到「渡世行僧」的下个回合开始前，挑战者无法使用、消耗、或弃置 X 点的能力骰。X 为本回合投掷的驱动骰中，数量最多的点数。' },
+      {
+        id: 'z12-2', name: '万象俱灭', marker: '怜悯*', slots: [{ kind: 'straight', count: 6 }],
+        effect: '弃置挑战者的全部能力骰。造成等同于弃置能力骰点数总和的真实伤害。',
+      },
+      {
+        id: 'z12-3', name: '超度', slotChoice: true,
+        slots: [{ kind: 'pips', count: 1, faces: [1, 2] }, { kind: 'pips', count: 1, faces: [3, 4] }, { kind: 'pips', count: 1, faces: [5, 6] }],
+        effect: '将挑战者能力骰数量最多的区域中的全部能力骰重掷，并根据新的点数，将其移动至挑战者对应点数的区域。造成 5 点真实伤害。',
+      },
+      {
+        id: 'z12-4', name: '破障', slotChoice: true,
+        slots: [{ kind: 'pips', count: 1, faces: [1, 2] }, { kind: 'pips', count: 1, faces: [3, 4] }, { kind: 'pips', count: 1, faces: [5, 6] }],
+        effect: '进行 5 次 4 点的攻击。如果攻击骰区有攻击骰，也使用所有攻击骰发起攻击。',
+      },
+      { id: 'z12-5', name: '万丈明光', slots: [{ kind: 'same', count: 2 }], effect: '补充随机点数的防御骰，直至防御骰的数量为 3。「渡世行僧」回复 3 点生命。' },
+    ],
+  },
 ];
 
 /** 把挑战技能的槽转换成显示文本（**自造记法，求短**；与结构化数据一一对应）。 */
