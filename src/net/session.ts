@@ -62,7 +62,9 @@ function loadSavedRoom(): SavedRoom | null {
     const raw = sessionStorage.getItem(ROOM_KEY);
     if (!raw) return null;
     const o = JSON.parse(raw) as Partial<SavedRoom>;
-    return o && typeof o.roomId === 'string' && (o.role === 'host' || o.role === 'guest' || o.role === 'spectator')
+    // **只认对局者**（房主/来客）：旁观者刷新**不该**看到「你有一局未完成的联机对局」
+    //（防御历史数据：旧版本可能给旁观者写过这条记录）
+    return o && typeof o.roomId === 'string' && (o.role === 'host' || o.role === 'guest')
       ? { roomId: o.roomId, role: o.role }
       : null;
   } catch {
@@ -222,8 +224,10 @@ export function hasSavedRoom(): boolean {
 }
 
 /** 放弃"上次未退出的房间"（清掉持久化身份 → 不再自动重连）。 */
+/** 放弃"上次未退出的房间"（清掉持久化身份 → 不再自动重连）。**共享记录也一并清**（否则大厅还挂着"继续"）。 */
 export function abandonSavedRoom(): void {
   clearSavedRoom();
+  clearRejoinRecord();
 }
 
 /**
@@ -375,7 +379,9 @@ export class NetSession {
       key: onlineKey(),
     });
     this.startHeartbeat();
-    saveSavedRoom({ roomId, role });
+    // **旁观者不算"对局者"** → 不写本标签页的「未完成对局」记录（刷新不会弹"继续上一局"）；
+    //   但仍写**共享**记录（localStorage）→ 大厅那一行可以给「继续旁观」一键回去看。
+    if (role !== 'spectator') saveSavedRoom({ roomId, role });
     saveRejoinRecord({ roomId, role });
     this.emit();
   }

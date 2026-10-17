@@ -14,7 +14,7 @@ describe('挑战模式 · 规则调整（批 1）', () => {
     expect(b).toHaveLength(6);
   });
 
-  it('033 死亡亦逝（**挑战者**装填生效）：传奇回合结束时 → 挑战者代决（player=A / owner=B），且**只能弃最少**', async () => {
+  it('033 死亡亦逝（**挑战者**装填生效）：传奇回合结束时 → 挑战者代决（player=A / owner=B）；保留点数的骰子**必须全部保留**（不能多弃）', async () => {
     const { driveLegendTurn } = await import('./helpers');
     // 挑战者自己带 033（挑战模式里昔日**从不使用神器效果** → 033 只能来自挑战者）
     const g = createChallengeGame({ seed: 1, cardId: 'Z12', challenger: ['031', '032', '033'] });
@@ -48,6 +48,23 @@ describe('挑战模式 · 规则调整（批 1）', () => {
     ).toBe(keep.length);
   });
 
+  it('033（代决传奇）：保留的点数**可以任意选**（颗数少也行）；但该点数的骰子不能只留一部分', () => {
+    const mk = (dice: number[]) => {
+      const g = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['001', '002', '003'] });
+      g.pending = { kind: 'tiaolingPick', player: 'A', owner: 'B' };
+      g.players.B.areas.attack = dice.map((v, i) => ({ id: `bd${i}`, value: v, kind: 'attack' as const }));
+      g.players.B.areas.defense = [];
+      g.players.B.areas.meditation = [];
+      return g;
+    };
+    // 骰面 3,3,5 → **保留 5**（颗数少）→ 弃 3,3：合法
+    const g1 = mk([3, 3, 5]);
+    applyAction(g1, { t: 'tiaolingResolve', pick: 'same', dieIds: ['bd0', 'bd1'] });
+    expect(g1.players.B.areas.attack.map((d) => d.value)).toEqual([5]);
+    // 骰面 3,3,5 → 保留 3 但**只留 1 颗 3**（弃掉另一颗）→ 非法（不能多弃）
+    const g2 = mk([3, 3, 5]);
+    expect(() => applyAction(g2, { t: 'tiaolingResolve', pick: 'same', dieIds: ['bd0', 'bd2'] })).toThrow();
+  });
   it('033 死亡亦逝：**未装填**（或挑战者没带）时，传奇回合结束**不**挂代决', async () => {
     const { driveLegendTurn } = await import('./helpers');
     // Z11 的预设里虽有 033，但传奇从不装填神器 → 不算生效（修正：不再有"传奇预设例外"）

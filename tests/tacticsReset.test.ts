@@ -112,7 +112,7 @@ describe('L04 重开 × 战术牌', () => {
     expect(g.players.B.hasDustSeal).toBe(false);
   });
 
-  it('T04 持有者发动 L04（重置整局）→ T04 照字面触发（重开之后结算）', () => {
+  it('T04 持有者发动 L04（重置整局）→ **先结算 T04 末路，再重开**（生命被 L04 继承）', () => {
     const g = createGame({
       seed: 1,
       firstPlayer: 'A',
@@ -131,5 +131,21 @@ describe('L04 重开 × 战术牌', () => {
     useDream(g, 'B');
     expect(g.players.B.life).toBe(lifeB - req); // 造成 req 真实伤害
     expect(g.players.A.life).toBe(lifeA + req); // 回复 req 生命
+  });
+
+  it('T04 的末路把对方打死 → L04 **不重开**（已 gameOver）', () => {
+    const g = createGame({
+      seed: 1,
+      firstPlayer: 'A',
+      legendA: 'L04',
+      heroA: ['001', '002', '003'],
+      heroB: ['001', '002', '003'],
+      tacticA: 'T04',
+      tacticB: 'T03',
+    });
+    const req = g.players.A.artifacts.find((a) => a.column === 3)!.chargeReq!;
+    g.players.B.life = req - 1; // 末路会造成 req 真实伤害 → 打死
+    useDream(g, 'B');
+    expect(g.phase).toBe('gameOver'); // 没有重开（重开会是 initialReroll）
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
-import { createGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
+import { createGame, createChallengeGame, applyAction, skipInitialReroll, beginTurn } from '../src/core/engine/game';
 import { effectiveWill } from '../src/core/engine/derive';
 import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
 import { dealTrueDamage } from '../src/core/engine/combat';
@@ -3598,7 +3598,7 @@ describe('文案与选中态修复（用户反馈）', () => {
     expect(onAction).toHaveBeenCalledWith({ t: 'kuyuResolve', area: 'defense' });
   });
 
-  it('033 凋零·死亡亦逝：①/② + 弃骰选择器（待决策直接派发）', () => {
+  it('033 凋零·死亡亦逝（自己弃）：①/② + 骰片选择器（可弃 0 颗、也可多弃）', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['031', '032', '033'], heroB: ['001', '002', '003'] });
     skipInitialReroll(state);
     state.pending = { kind: 'tiaolingPick', player: 'A' };
@@ -3608,14 +3608,38 @@ describe('文案与选中态修复（用户反馈）', () => {
     const { ui, onAction } = mount(state, root);
     root.querySelector<HTMLButtonElement>('.actionlist [data-act="tiaolingOpen"]')!.click();
     expect(ui.selection?.pendingKind).toBe('tiaolingPick');
-    const opt = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find(
+    // ② 全不同 → 骰片选择器（旧逻辑：自己挑要弃的骰）
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find(
       (b) => b.dataset.option === 'diff',
-    )!;
-    opt.click();
+    )!.click();
     Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    // 弃掉重复的 d1（3 点）→ 剩余 3/5/6 全不同
     root.querySelector<HTMLElement>('.selector .pay-die[data-id="d1"]')!.click();
     Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
     expect(onAction).toHaveBeenCalledWith({ t: 'tiaolingResolve', pick: 'diff', dieIds: ['d1'] });
+  });
+
+  it('033 凋零·死亡亦逝（挑战·代决传奇）：① 全相同 → 只能保留"数量最多"的点数，其余自动弃', () => {
+    const state = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['031', '032', '033'] });
+    skipInitialReroll(state);
+    state.pending = { kind: 'tiaolingPick', player: 'A', owner: 'B' };
+    state.players.B.areas.attack = [3, 3, 5].map((v, i) => ({ id: `b${i}`, value: v, kind: 'attack' as const }));
+    state.players.B.areas.defense = [];
+    state.players.B.areas.meditation = [];
+    const { ui, onAction } = mount(state, root);
+    root.querySelector<HTMLButtonElement>('.actionlist [data-act="tiaolingOpen"]')!.click();
+    expect(ui.selection?.pendingKind).toBe('tiaolingPick');
+    // ① 全相同
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn')).find(
+      (b) => b.dataset.option === 'same',
+    )!.click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    // 第二步列出**所有现存点数**（可任意选）；保留 3 → 弃掉 5
+    const valBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .option-btn'));
+    expect(valBtns.map((b) => b.dataset.option).sort()).toEqual(['3', '5']);
+    valBtns[0].click();
+    Array.from(root.querySelectorAll<HTMLButtonElement>('.selector .btn')).find((b) => b.textContent === '确认')!.click();
+    expect(onAction).toHaveBeenCalledWith({ t: 'tiaolingResolve', pick: 'same', dieIds: ['b2'] });
   });
 
   it('035 千劫·超度：选择 2 颗同点冥想骰 → 选目标玩家/区域', () => {

@@ -2,7 +2,6 @@ import type { DiceKind, Die, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { abilityDicePool, abilityDieInfo } from '../core/engine/effects';
 import { effectiveWill } from '../core/engine/derive';
-import { siwangMinDiscard } from '../core/engine/game';
 
 export type SelectStep =
   | {
@@ -1405,8 +1404,11 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ options }) => ({ area: options[0] ?? 'attack' }),
   },
-  // 033 凋零·死亡亦逝（待决策）：择①全相同/②全不同 + 弃能力骰
-  //   · 挑战模式下**代决传奇**（`player:'A'`、`owner:'B'`）时：不允许"故意多弃" → 只能弃**最少颗数**
+  // 033 凋零·死亡亦逝（待决策）：① 全相同 / ② 全不同 → 弃能力骰
+  //   · **代决传奇**（挑战模式；`player:'A'`、`owner:'B'`）：只能弃**最少颗数** →
+  //     选"保留哪个点数"后**其余自动弃**（没有选骰步骤；只列"数量并列最多"的点数）
+  //   · **自己弃**（标准/轮选/构筑/挑战者自己）：**旧逻辑**＝骰片选择器（可弃 0 颗、也可故意多弃），
+  //     校验"剩余全相同/全不同"
   '@tiaolingPick': {
     steps: ({ state, options }) => {
       const pd = state.pending;
@@ -1416,8 +1418,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
       const pick = options[0] === 'same' ? 'same' : 'diff';
       const legendDuty = state.mode === 'challenge' && ownerId !== decider; // 挑战者替传奇代决
-      const minDiscard = siwangMinDiscard(all, pick === 'same');
-      return [
+      const steps: SelectStep[] = [
         {
           kind: 'option',
           label: '「死亡亦逝」：选择执行哪一项',
@@ -1426,34 +1427,64 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
             { value: 'diff', label: '② 弃至剩余全部点数不同' },
           ],
         },
-        {
-          kind: 'dice',
-          label: legendDuty
-            ? '选择要弃置的能力骰（代决「昔日传奇」：只能弃最少的颗数）'
-            : '选择要弃置的能力骰（可弃 0 颗，也可多弃）',
-          owner: ownerId === decider ? 'self' : 'opponent',
-          areas: KINDS,
-          min: 0,
-          max: all.length,
-          validate: (picked) => {
-            const discard = new Set(picked.map((d) => d.id));
-            const remaining = all.filter((d) => !discard.has(d.id)).map((d) => d.value);
-            const ok = pick === 'same' ? new Set(remaining).size <= 1 : new Set(remaining).size === remaining.length;
-            if (!ok) {
-              return { ok: false, hint: pick === 'same' ? '需弃到剩余全部点数相同' : '需弃到剩余全部点数不同' };
-            }
-            if (legendDuty && picked.length !== minDiscard) {
-              return { ok: false, hint: `代决「昔日传奇」时只能弃最少的颗数（${minDiscard} 颗）` };
-            }
-            return { ok: true, hint: pick === 'same' ? '剩余已全部相同 ✓' : '剩余已全部不同 ✓' };
-          },
-        },
       ];
+      if (legendDuty) {
+        if (pick === 'same') {
+          // 代决：**保留的点数可以任意选**（用户定 2026-10-16）；该点数上的骰子必须**全部保留**（不能多弃）
+          const vals = [...new Set(all.map((d) => d.value))].sort((a, b) => a - b);
+          steps.push({
+            kind: 'option',
+            label: '「死亡亦逝」：选择要【保留】的点数（其余全部弃置）',
+            options: vals.map((v) => ({ value: String(v), label: `保留 ${v} 点` })),
+          });
+        }
+        return steps;
+      }
+      // 自己弃：旧逻辑（骰片选择器，可 0 颗、可多弃）
+      steps.push({
+        kind: 'dice',
+        label: '选择要弃置的能力骰（可弃 0 颗，也可多弃）',
+        owner: ownerId === decider ? 'self' : 'opponent',
+        areas: KINDS,
+        min: 0,
+        max: all.length,
+        validate: (picked) => {
+          const discard = new Set(picked.map((d) => d.id));
+          const remaining = all.filter((d) => !discard.has(d.id)).map((d) => d.value);
+          const ok = pick === 'same' ? new Set(remaining).size <= 1 : new Set(remaining).size === remaining.length;
+          if (!ok) {
+            return { ok: false, hint: pick === 'same' ? '需弃到剩余全部点数相同' : '需弃到剩余全部点数不同' };
+          }
+          return { ok: true, hint: pick === 'same' ? '剩余已全部相同 ✓' : '剩余已全部不同 ✓' };
+        },
+      });
+      return steps;
     },
-    buildParams: ({ options, chosenDice }) => ({
-      pick: options[0] === 'same' ? 'same' : 'diff',
-      dieIds: chosenDice[1] ?? [],
-    }),
+    buildParams: ({ state, options, chosenDice }) => {
+      const pd = state.pending;
+      const ownerId: PlayerId = pd && pd.kind === 'tiaolingPick' ? pd.owner ?? pd.player : state.activePlayer;
+      const decider: PlayerId = pd && pd.kind === 'tiaolingPick' ? pd.player : state.activePlayer;
+      const legendDuty = state.mode === 'challenge' && ownerId !== decider;
+      const pick = options[0] === 'same' ? 'same' : 'diff';
+      if (!legendDuty) {
+        // 自己弃：骰片选择器选出的就是"要弃的骰"
+        return { pick, dieIds: chosenDice[1] ?? [] };
+      }
+      const p = state.players[ownerId];
+      const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
+      if (pick === 'same') {
+        const keep = Number(options[1]);
+        return { pick: 'same' as const, dieIds: all.filter((d) => d.value !== keep).map((d) => d.id) };
+      }
+      // 全不同：每种点数保留 1 颗（多余的自动弃置）
+      const seen = new Set<number>();
+      const dieIds: string[] = [];
+      for (const d of all) {
+        if (seen.has(d.value)) dieIds.push(d.id);
+        else seen.add(d.value);
+      }
+      return { pick: 'diff' as const, dieIds };
+    },
   },
   // 035 千劫·超度（启动）：消耗 2 个同点数冥想骰 → 5 真伤 → 选任意玩家一区重掷
   // 持「真实之剑」：① 选 2 颗【同点】冥想骰（0–2 颗）→（不足）② 选置换源 → 选区域（直发，不再确认）

@@ -8,7 +8,8 @@ import { setOnlineBattleHandler } from './ui/onlineMode';
 import { loadPrefs, savePrefs } from './ui/prefs';
 import type { Action, GameState, PlayerId } from './core/model/types';
 import { bindTurnTimer, unbindTurnTimer, setTurnTimerPaused } from './ui/turnTimer';
-import { hasSavedRoom, type NetSession } from './net/session';
+import { hasSavedRoom, loadRejoinRecord, type NetSession } from './net/session';
+import { diag, isDiagEnabled, challengeSnapshot } from './ui/diag';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
@@ -93,6 +94,8 @@ const dispatchAction = (a: Action): void => {
   if (online && actorOf(state) !== online.state.myPlayer) return;
   // 联机·对方掉线/退出（暂停中）→ 忽略本地动作（锁步下防分叉）
   if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
+  // 【排查·?diag=1】只记挑战模式：动作 + 动作后的状态快照（"隐形骰子"排查用）
+  if (isDiagEnabled() && state.mode === 'challenge') diag('action', { t: a.t, a });
   try {
     if (online) online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
     else applyAction(state, a);
@@ -101,6 +104,7 @@ const dispatchAction = (a: Action): void => {
   } catch (e) {
     ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
   }
+  if (isDiagEnabled() && state.mode === 'challenge') diag('state', challengeSnapshot(state));
   render();
 };
 
@@ -176,7 +180,7 @@ const render = (): void => {
       battleShell = null;
       setLocalViewPlayer(null);
 // 刷新后若本标签页"上次还在房里" → 直接进联机大厅（会自动尝试重连，拿到状态快照即回战斗）
-if (hasSavedRoom()) goLobby();
+if (hasSavedRoom() || loadRejoinRecord()) goLobby();
 else showSetup();
     },
     onPrefsChange: (p) => savePrefs(p),
@@ -292,5 +296,5 @@ setOnlineBattleHandler((session) => {
 });
 // 首次进入：若上次还有"未完成的联机对局" → 直达联机大厅（那里会弹「继续上一局」）；
 // 否则回首页菜单。（刷新后直接回到可续局的位置，不用先点"联机"再进大厅。）
-if (hasSavedRoom()) goLobby();
+if (hasSavedRoom() || loadRejoinRecord()) goLobby();
 else showSetup();

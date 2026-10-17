@@ -4,7 +4,7 @@ import { refillPhase, doReroll, endPhase } from './phases';
 import { effectiveSpeed, effectiveWill, emptyDistribution, rerollAllowance, totalDice } from './derive';
 import { applyDustRiseToArtifact, canTargetForDustRise } from './dustRise';
 import { incrementDustfall } from './dustfall';
-import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attacksBanned, checkLifeEnd, maybeBarrier, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, SHOUHUN_CONT_KEYS, YonghengQueenSignal, tacticActiveBonus, settleAttack, type AttackMods } from './combat';
+import { afterAttackResolved, applyLifeLoss, applyMolu, artifactWithSkill, attacksBanned, checkLifeEnd, maybeBarrier, doAttack, finalizeAttackResolution, halveAttackDamage, resolveBlock, dealTrueDamage, applyDeferredTrueDamage, pumpAttackQueue, virtualAttack, dianxingValuesOf, noteFirstDamageFromOpponent, noteYoudiAfterDamage, removeLegendSourceDie, SHOUHUN_CONT_KEYS, YonghengQueenSignal, tacticActiveBonus, settleAttack, type AttackMods } from './combat';
 import { abilityDieInfo, abilityDicePool, canPayCosts, defaultCostFills, findDieOf, gainRandomDice, maxAffordableSlots, setDieValue, applyHeal, heal, moveDice, noteLifeDrop, offerAdapt, paySlots, withRngState } from './effects';
 import { areaOf, createDie, newDieId, placeDieByDistribution } from '../model/dice';
 import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
@@ -1995,7 +1995,12 @@ export function applyChallengeSkill(
       const have = new Set(B.areas.defense.map((x) => x.value));
       const missing = [1, 2, 3, 4, 5, 6].filter((v) => !have.has(v));
       for (const v of missing) gain('defense', v);
-      logLine(g, `「${legacy}」：${skill.name} — 补充 ${missing.length} 个防御骰（覆盖 1–6：${valsSorted(spawn)}）`);
+      logLine(
+        g,
+        `「${legacy}」：${skill.name} — 补充 ${missing.length} 个防御骰${
+          missing.length > 0 ? `（${valsSorted(spawn)}）` : '（防御骰区已覆盖 1–6）'
+        }`,
+      );
       return { spawn, outIds };
     }
     case 'z09-5':
@@ -6050,6 +6055,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
         // 触发"使用攻击骰后/进行攻击后"类；但 damageDealt=0 → "造成伤害后"类不触发；blocked=false → "被抵挡后"类不触发。
         // 关键：必须推进多段攻击队列（否则 013 电刑 / A01 不败之王 的第 2/3 段会凭空消失）。
         if (cont) fxSkillFired(g, pd.owner, cont.key);
+        // **取消也必须移除传奇的源骰**（挑战模式"逐颗飞出"的骰子留在区里等结算；漏掉会永久隐形）
+        removeLegendSourceDie(g, pa2, 0);
         if ((g.phase as string) !== 'gameOver') {
           afterAttackResolved(g, pa2, { blocked: false, damageDealt: 0 });
           pumpAttackQueue(g);
@@ -6060,7 +6067,11 @@ function applyActionCore(g: GameState, action: Action): GameState {
       const before = g.players[pd.owner].life;
       applyLifeLoss(g, pd.owner, pa2.value);
       logLine(g, `${pname(pd.owner)} 未抵挡，受到 ${pa2.value} 点伤害（生命 ${before} → ${g.players[pd.owner].life}）`);
+      // 与 `settleAttack` 同口径：先移除源骰，再补"受到伤害后"类钩子（T14 复仇 / T17 诱敌——所有模式都要）
+      removeLegendSourceDie(g, pa2, pa2.value);
       if ((g.phase as string) !== 'gameOver') {
+        noteFirstDamageFromOpponent(g, pd.owner, pa2.value, pa2.attacker);
+        noteYoudiAfterDamage(g, pd.owner, pa2.value, pa2.attacker);
         afterAttackResolved(g, pa2, { blocked: false, damageDealt: pa2.value });
         pumpAttackQueue(g);
       }
@@ -6558,9 +6569,23 @@ function applyActionCore(g: GameState, action: Action): GameState {
           action.pick === 'same' ? '「死亡亦逝」：弃置后须全部点数相同' : '「死亡亦逝」：弃置后须全部点数不同',
         );
       }
-      // 挑战模式：**代决传奇**时只能"弃最少"（不许故意多弃）；挑战者弃**自己的**不受此限
-      if (g.mode === 'challenge' && ownerId === 'B' && ids.length !== siwangMinDiscard(all, action.pick === 'same')) {
-        throw new Error('「死亡亦逝」：挑战模式下代决「昔日传奇」时只能弃置最少的颗数');
+      // 挑战模式·**代决传奇**（用户定 2026-10-16）：
+      //  · 全相同：**保留的点数可以任意选**，但该点数的骰子必须**全部保留**（不能多弃）
+      //  · 全不同：每种点数保留 1 颗（不能多弃重复骰）
+      // 挑战者弃**自己的**不受此限（可故意多弃）。
+      if (g.mode === 'challenge' && ownerId === 'B') {
+        if (action.pick === 'same') {
+          const keep = vals[0];
+          const keepAll = remaining.length === all.filter((d) => d.value === keep).length;
+          if (!keepAll) {
+            throw new Error('「死亡亦逝」：代决「昔日传奇」时，所选点数的骰子必须全部保留（不能多弃）');
+          }
+        } else {
+          const distinct = new Set(all.map((d) => d.value)).size;
+          if (remaining.length !== distinct) {
+            throw new Error('「死亡亦逝」：代决「昔日传奇」时，每种点数只能保留 1 颗（不能多弃）');
+          }
+        }
       }
       for (const id of ids) {
         const found = findDieOf(g, ownerId, id);
@@ -6631,6 +6656,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
         logLine(g, `${pname(pd.player)} 「不动菩提」：移除 1 个 ${pd.value} 点存放骰，取消对方的攻击`);
         // 动效：攻击骰 + 灰存放骰 并排 → 一起消失
         g.pendingAttack = null;
+        // **取消也必须移除传奇的源骰**（挑战模式"逐颗飞出"的骰子留在区里等结算；漏掉会永久隐形）
+        removeLegendSourceDie(g, pa, 0);
         fxPush({ kind: 'attackJoin', player: pd.player, mode: 'cancel', dieIds: joinIds, value: pd.value });
         pumpAttackQueue(g);
       }
@@ -6703,6 +6730,9 @@ function applyActionCore(g: GameState, action: Action): GameState {
       assertConversionAllowed(g, skillOwner, action.params?.costSlots as SlotFill[] | undefined);
       const handler = SKILL_HANDLERS[s.key];
       if (!handler) throw new Error(`no handler for skill: ${s.key}`);
+      // T04「末路」× L04「重开」：**先结算末路（真伤＋回血），再执行 L04 的重置重开**（用户定 2026-10-16）
+      // 其余必杀仍在下面（技能效果之后）结算末路
+      if (s.key === 'tata.mengjing') applyMolu(g, skillUser);
       g.skillConsumedThisAction = 0;
       // 动效旁路：记录"当前正在结算的发动卡"（真伤白墨线锚点 = 该技能卡图）
       fxSetSource({ player: skillOwner, artifactId: a.id, side: s.side, skillKey: s.key });
@@ -6775,8 +6805,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
         dealTrueDamage(g, skillOwner, 2, skillOwner); // 自伤：source=自己
       }
       // 战术牌 T04「末路」（触发）：启动**必杀式**后 → 造成/回复＝第三列神器充能需求
-      // （覆盖：普通启动 / L08 没有怜悯 / L04 重开；018 强制必杀在 pending.ts 里另调）
-      if (s.kind === 'ultimate') applyMolu(g, skillUser);
+      // （覆盖：普通启动 / L08 没有怜悯 / 018 强制必杀在 pending.ts 里另调；**L04 重开已在执行处理器之前结算**）
+      if (s.kind === 'ultimate' && s.key !== 'tata.mengjing') applyMolu(g, skillUser);
       // 019 蛮王之牙等：启动后刷新自身「每回合一次」计数（本回合可再次启动）
       if (s.refresh) g.skillsUsedThisTurn = g.skillsUsedThisTurn.filter((k) => k !== skillUseKey(skillUser, s.key));
       // 011 灵能脉冲·触发：通过技能消耗能力骰后，可额外造成等同消耗数量的真实伤害（每回合最多 1 次）

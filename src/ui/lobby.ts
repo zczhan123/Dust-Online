@@ -1,4 +1,4 @@
-import { NetSession, hasSavedRoom, abandonSavedRoom, hasRejoinRecordFor } from '../net/session';
+import { NetSession, hasSavedRoom, abandonSavedRoom, loadRejoinRecord } from '../net/session';
 import { createNet, resolveNetUrl } from '../net/connect';
 import type { RoomConfig, RoomInfo } from '../net/protocol';
 import { ensureInkFilter, renderHeroSetup, renderBuildSetup, renderRotationSetup, type SetupOptions } from './setupScreen';
@@ -213,8 +213,10 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
     host.textContent = `房主：${r.hostName}`;
     side.append(seats, host);
     const versionMismatch = r.version !== APP_BUILD;
-    // **只认本人**：这间房是不是"我上次那局"（本机 key + 最近房间记录）→ 是则给「继续对局」
-    const canResume = !myRoomId && !mine && !versionMismatch && hasRejoinRecordFor(r.id);
+    // **只认本人**：这间房是不是"我上次那局"（本机 key + 最近房间记录）→ 是则给「继续对局 / 继续旁观」
+    const resumeRec = loadRejoinRecord();
+    const canResume = !myRoomId && !mine && !versionMismatch && resumeRec?.roomId === r.id;
+    const resumeLabel = resumeRec?.role === 'spectator' ? '继续旁观' : '继续对局';
     // **旁观**：只有"真开战 + 允许旁观"才给按钮（未开始 / 选战术阶段没有入口）
     const canSpectate =
       !myRoomId && !mine && !versionMismatch && r.inBattle === true && r.config.allowSpectators;
@@ -228,7 +230,7 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
       side.appendChild(s);
     } else if (canResume) {
       const s = el('span', 'lobby-state lobby-state--join');
-      s.textContent = '继续对局';
+      s.textContent = resumeLabel;
       side.appendChild(s);
     } else if (r.filled >= r.seats) {
       const s = el('span', 'lobby-state lobby-state--full');

@@ -5,6 +5,9 @@ import {
   banHas,
   banReset,
   hasRejoinRecordFor,
+  hasSavedRoom,
+  abandonSavedRoom,
+  loadRejoinRecord,
   onlineKey,
 } from '../src/net/session';
 import { createGame } from '../src/core/engine/game';
@@ -161,7 +164,39 @@ describe('联机身份 key（准账号）· 黑名单 · 只认本人的重连',
     ];
     g.joinRoom('room-a', 'guest');
     expect(hasRejoinRecordFor('room-a')).toBe(true);
+    expect(hasSavedRoom()).toBe(true); // 对局者：本标签页也有记录（刷新弹「继续上一局」）
     g.leaveRoom();
+    expect(hasRejoinRecordFor('room-a')).toBe(false);
+    g.close();
+  });
+
+  it('**旁观者**不算对局者：不写本标签页记录（刷新不弹"未完成的对局"），只写共享记录（大厅给「继续旁观」）', () => {
+    const { net } = mkStub('p-spec');
+    const s = new NetSession(net, '看客');
+    s.state.rooms = [
+      { id: 'room-a', hostId: 'p-host', hostName: '房主', guestName: null, config: cfg, seats: 2, filled: 2, version: APP_BUILD, inBattle: true },
+    ];
+    s.joinRoom('room-a', 'spectator');
+    expect(hasSavedRoom()).toBe(false); // ← 不弹"未完成的联机对局"
+    expect(hasRejoinRecordFor('room-a')).toBe(true);
+    expect(loadRejoinRecord()?.role).toBe('spectator');
+    s.close();
+  });
+
+  it('历史遗留的"旁观"本标签页记录 → 也不再触发「未完成的对局」', () => {
+    sessionStorage.setItem('dust.room.v1', JSON.stringify({ roomId: 'room-a', role: 'spectator' }));
+    expect(hasSavedRoom()).toBe(false);
+  });
+
+  it('「放弃并新开」→ 共享记录也被清（大厅不再挂"继续"）', () => {
+    const { net } = mkStub('p-guest');
+    const g = new NetSession(net, '访客');
+    g.state.rooms = [
+      { id: 'room-a', hostId: 'p-host', hostName: '房主', guestName: null, config: cfg, seats: 2, filled: 1, version: APP_BUILD },
+    ];
+    g.joinRoom('room-a', 'guest');
+    expect(hasRejoinRecordFor('room-a')).toBe(true);
+    abandonSavedRoom();
     expect(hasRejoinRecordFor('room-a')).toBe(false);
     g.close();
   });

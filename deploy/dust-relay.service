@@ -1,0 +1,34 @@
+# 尘起时刻 · 联机中继常驻服务（systemd）
+#
+# 安装：
+#   sudo cp deploy/dust-relay.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dust-relay
+# 看状态/日志：
+#   systemctl status dust-relay
+#   journalctl -u dust-relay -f
+#
+# 注意：
+# - ExecStart 里的 node 路径：用 `command -v node` 查出来替换
+#   （nvm 装的 node 不在 /usr/bin/node）
+# - User：Debian/Ubuntu 用 www-data；CentOS/RHEL 用 nginx（或改成你建的用户）
+# - 端口 8787 只给本机 nginx 反代用，**不要**在防火墙对外开放
+
+[Unit]
+Description=Dust relay (尘起时刻联机中继)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dust/relay
+ExecStart=/usr/bin/node relay.mjs 8787
+Restart=always
+RestartSec=3
+User=www-data
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

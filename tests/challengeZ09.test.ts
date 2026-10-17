@@ -111,10 +111,13 @@ describe('挑战模式 · Z09 效果', () => {
   it('凛冽之音：补"缺失的点数"各 1 颗（指定点数、≤6、确定性）', () => {
     const g = make();
     setA(g, {});
-    setB(g, { defense: [] });
-    applyChallengeSkill(g, Z09, SK('z09-4'), [die('x', 2), die('y', 2)]);
+    setB(g, { defense: [], attack: [die('atk0', 4, 'attack')] });
+    const spawned = applyChallengeSkill(g, Z09, SK('z09-4'), [die('x', 2), die('y', 2)]);
     // 空防御区 → 补 1–6 各 1 颗（恰好 6 颗，不再随机重掷）
     expect(g.players.B.areas.defense.map((d) => d.value).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
+    // **只生成防御骰**：攻击骰区一颗都不能多（回归：曾怀疑"凛冽之音同时生成攻击骰"）
+    expect(g.players.B.areas.attack.map((d) => d.id)).toEqual(['atk0']);
+    expect(spawned.spawn.every((s) => s.area === 'defense')).toBe(true);
 
     const g2 = make();
     setA(g2, {});
@@ -123,6 +126,7 @@ describe('挑战模式 · Z09 效果', () => {
     // 已有 1/3 → 只补缺的 2/4/5/6
     expect(g2.players.B.areas.defense.map((d) => d.value).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(g2.players.B.areas.defense).toHaveLength(6);
+    expect(g2.players.B.areas.attack).toHaveLength(0);
   });
 
   it('威压：主要阶段提示挑战者（`battleNotes`，按 B 上色、文案含"最多造成 4 点伤害"）', () => {

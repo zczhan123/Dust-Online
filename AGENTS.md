@@ -180,7 +180,7 @@
   **会话层**（`session.ts`）：`onStatus` 记 `st.netStatus` → 首次 `open` 不动作；**断线后 `open` 且已在房内 → 自动 `sendRejoin()`**（对端回 `snapshot`）；发送后 **5s** 内没收到任何房内消息 → `notice` 提示（不重置对局）；`resetRoom`/收到房内消息会清该计时。
   **界面**：`online.ts` 的 `renderDrop` 在 `netStatus==='reconnecting'` 时显示「正在重连服务器…」，**不要**误报「对方已掉线」。回归：`tests/netReconnect.test.ts`（退避/主动关闭/会话 rejoin）+ `tests/netWs.test.ts`（**中继重启 → 自动重连 + 断线期间消息补发**）。
   ⚠️ **已知边界**：中继**不排队**——若消息发出时**对端也还没重连回来**，那条就丢了（锁步下靠 `rejoin` + `snapshot` 把状态对齐，而不是补消息）。单测断言请针对"中继收到补发"，别假设"对端一定收到"。
-  **★「刷新 ≠ 退出」（2026-10-15 修）**：① **删掉 `beforeunload` 里发 `room:leave`**（刷新只会"掉线"，由心跳 ≤12s 判定 → 对端显示「对方掉线，可等待重连…」）；只有**主动点退出**才发 `room:leave`/`room:gone`。② `case 'rejoin'` / `case 'snapshot'` 成功后**必须清 `peerLeft`/`peerOnline`**（否则界面永远停在"本局作废"）。③ `case 'room:join'` 在**对局中**（或该 role 已在座＝刷新后 peerId 变了）→ 视为"回来"：**按 role 替换成员 + 发 `snapshot`**（不能只发 presence，否则从房间列表点进来是个空房间）。④ 首次加载：`if (hasSavedRoom()) goLobby(); else showSetup();` → 刷新后直达大厅弹「继续上一局」。
+  **★「刷新 ≠ 退出」（2026-10-15 修）**：① **删掉 `beforeunload` 里发 `room:leave`**（刷新只会"掉线"，由心跳 ≤12s 判定 → 对端显示「对方掉线，可等待重连…」）；只有**主动点退出**才发 `room:leave`/`room:gone`。② `case 'rejoin'` / `case 'snapshot'` 成功后**必须清 `peerLeft`/`peerOnline`**（否则界面永远停在"本局作废"）。③ `case 'room:join'` 在**对局中**（或该 role 已在座＝刷新后 peerId 变了）→ 视为"回来"：**按 role 替换成员 + 发 `snapshot`**（不能只发 presence，否则从房间列表点进来是个空房间）。④ 首次加载：`if (hasSavedRoom() || loadRejoinRecord()) goLobby(); else showSetup();`（**旁观者刷新**不弹「未完成的对局」：`joinRoom` 只给 host|guest 写本标签页记录，观众只写共享 `dust.rejoin.v1` → 大厅显示「继续旁观」；`abandonSavedRoom()` 连共享记录一起清） → 刷新后直达大厅弹「继续上一局」。
   ⚠️ 副作用：房主**直接关标签**时房间会在列表里多留 ≤12s（心跳超时前）；朋友局可接受。回归：`tests/netRejoin.test.ts`。
 - **中继按房间隔离（2026-10-15）**：`scripts/relay.mjs` 不再是"无脑广播"，而是**按 `roomId` 隔离**（导出 `attachRelay(wss)` 供单测；`node scripts/relay.mjs [port]` 自启动不变）。
   - **连接→房间映射**：建立＝`room:announce`（取 `room.id`，房主）/ `room:join` / `rejoin`；解除＝`room:leave`（**先转发给同房再解映射**）、`room:gone`（**清该房所有连接**，含房主）、连接断开。
@@ -336,6 +336,10 @@
       - **禁止**只判 `g.mode === 'challenge'` ＋ 某个**共享状态**（如 `g.challenge.count`）——`count` 是**多张卡共用**的字段（Z02 锋芒/暗夜凶神、Z05、Z07 都有计数）→ 会**跨卡误触发**。
       - 战报里**禁止写死某张卡的名字**（用 `legendLegacyName(g)`）——写死会在跨卡误触发时**指错卡**。
       - **真实事故 2026-10-12**：与 **Z02「永暗之刃」** 对战时（它也有计数），挑战者 6 点攻击命中 → 误触发 **Z07「围攻」**：取消伤害 + 扣了 Z02 的计数（用户实测）。同理把「裁雨流」也补了卡门禁 + `pa.attacker === 'B'`（挑战者若发同名攻击，不得污染 Z01 的"前 3 次"/搬骰进传奇防御区）。门禁测试 `tests/challengeCardGate.test.ts`。
+    - ⑫ **"取消 / 延后传奇攻击"的待决策必须移除源骰（2026-10-16 立规，真实事故："隐形骰子"）**：挑战模式下传奇用**区域真骰**发起的攻击（`virtualQueue` 带 `dieId`／枭首／残杀／横贯／真实之剑／破障…）→ 骰子**留在攻击/防御区**等结算，正常结算由 `settleAttack` → **`combat.removeLegendSourceDie(g, pa, damageDealt)`**（唯一入口）移除。
+      - **凡"取消 / 延后攻击"的待决策**——**020/A04「兽魂」`shouhunCancel`**、**034/A03「不动菩提」`putiResolve`（攻击侧）**——解决时**必须**调 `removeLegendSourceDie`；漏调 → 骰子留在区里 + 界面按"已飞出"把它藏了 → **永久隐形**（真实事故 2026-10-16：`chg-B-35` 因兽魂代决隐形；用 `?diag=1` 的 `DOM-MISSING` 定位）。
+      - **新增此类 pending 必须登记**，并检查是否绕过了 `settleAttack`：若绕过，还须补 **`noteFirstDamageFromOpponent` / `noteYoudiAfterDamage`**（T14 复仇 / T17 诱敌——**所有模式**都受影响，不只是挑战）等"受到伤害后"钩子。
+      - 回归：`tests/challengeCancelSource.test.ts`（兽魂取消/不取消、菩提取消攻击、标准模式 T14）。
 20. **待决策 → 决策人 一览**（新增 pending 必须在此登记；UI 用 `actorOf()`，其优先级 = `pending` → `pendingAttack` → `activePlayer`，**待决策优先**——旧实现先判 pendingAttack，导致"威压（攻击方决策）"被写成被攻击方，已修）：
     `dunwuHalve`=防守方 ｜ `fengmang`/`caiyuliu`/`shouhunCancel`/`sijiChuxing`/`hengguan`/`hanguangPick`/`chenaiFreeRise`/`dianxing`/`leibao`=攻击方 ｜ `weimu`=帷幕持有者 ｜ `zhihaiReroll`=持有者 ｜ `weijuPay`=被要求方 ｜ `gongzhenPick`=发起者 ｜ **`xianzhenPick`=生命最低方**（026 陷阵：两个时点共用 —— ① 重掷阶段结束（额外重掷阶段结束同样算）② L09「鏖战」的主要阶段结束；执行＝其选择弃置持有者的 1 个能力骰，随后持有者另两类各得 1 颗） ｜ **`weiyaPick`=威压持有者** ｜ `leibaoReroll`=雷暴持有者 ｜ `activationResolve`/`chargeResolve`=蓄能方 ｜ **`quanzhiAssign`=全知持有者本人**（029：其补充/重掷阶段落区由本人分配） ｜ **`kuyu`=低语持有者本人**（032：其主要阶段结束时宣称类型） ｜ **`tiaolingPick`=当前回合玩家本人**（033：各人回合结束弃自己的骰） ｜ **`wanzhangDiscard`=万丈明光持有者本人**（035：其主要阶段开始时弃 2 骰） ｜ **`putiPick`=不动菩提持有者本人**（034：对方使用防御/攻击骰后，决定是否移除同点存放骰取消其效果） ｜ **`endDiscard`=当前回合玩家本人**（结束阶段：能力骰总数超出意志上限，由本人自选弃哪几颗） ｜ **`shizushouhun`=持有者本人**（L07：激活「兽魂」后，可选额外消耗 1 冥想骰把计数重设为 3） ｜ **`shangjin`=持有者本人**（L08：发动「处刑通牒」后，选择启动 1 个"已激活的启动式"技能；该次启动不计入每回合上限） ｜ **`dizuidaijianshu`=持有者本人**（L10：尘起行动后，选对方 2 颗种类不相同的能力骰弃置） ｜ **`nudengzuiren`=持有者本人**（L10：将要回复生命时，决定"正常回复 / 改为对对方造成等量真实伤害"） ｜ **`duanexing`=持有者本人**（L12：受到伤害/真伤后，可弃置对方 1 个**攻击骰**，每回合最多 1 次）
 
@@ -352,6 +356,7 @@
 - **每张新卡的「战斗提示」随卡一起做**（见上节：引擎登记 + 精确断言测试 + 文案先给用户确认）。
 - 声称完成前必须给出 `vitest` / `tsc` / `build` 的实际结果。
 - **验证只走自动化（2026-10-10 用户强制）**：只用 `tsc` / `vitest` / `vite build`；能 jsdom 断言的（提示文案、`fx` 事件、状态流转、DOM 结构）**写成测试**来锁。**严禁**用"起 dev 截图核对"当验证手段——它基本发现不了问题、纯费 token。纯动画/视觉层（jsdom 测不到）**不主动起 dev 核对**，交用户在实玩中反馈；测试只锁其**状态层与 `fx` 事件层**。
+- **排查用「诊断日志」（2026-10-16，用户要求）**：网址加 **`?diag=1`** 才记录（默认关闭、零开销）→ 设置面板出现「诊断日志」→ 一键复制（http 下剪贴板被禁 → 自动全选文本框，Ctrl+C）。实现＝`src/ui/diag.ts`（环形 800 条）。**只记挑战模式**：① `main.ts` 的 `dispatchAction` 记 `action` + `challengeSnapshot`（双方三区/驱动骰/待决策/攻击队列）；② `render.ts` 的 `hideLegendFlownDie` 记 `hide`；③ 每帧比对"数据里的骰子 id vs `.panel--challenge .die" → **数据有、画面没有**就记 **`DOM-MISSING`**（排除在 `legendGoneIds` 里的正常隐藏）。**排查渲染/骰子问题一律用它取证，不要靠 console.log 或截图**；用户贴日志即可复现分析。测试：`tests/diag.test.ts`。
 - **提「修复方案」必须附大白话（2026-10-06 用户要求）**：在同一条回复里写清 **现象 → 为什么（配生活化比喻，如"屏幕是一叠透明纸"）→ 怎么修**，**不要让用户再问"用大白话解释"**。（用户是非开发者。）
 21. **「使用能力骰」的边界（026 威压；2026-09-28 用户更正）**：威压的触发是**持有者本人**的「**使用**」（卡面："当**你**使用 1 个任意能力骰后…"）→ 算"使用"的**只有**：**攻击支付 / 抵挡支付 / 尘起的冥想骰支付**（尘起支付**也会**触发威压，顺序＝支付先、切换后，符合 FAQ 26.2.1）；**不算**：**「消耗」（技能代价，`paySlots` 的 `reason='skill'`）**、重掷、019 免费尘起、尘印支付。
     - **实现**：`effects.ts` 的威压块带过滤 `reason !== 'skill'`（**2026-09-28 修**：此前把"消耗"也算作"使用"→ 022 填弹这类消耗会误触发；旧测试曾把该错误行为当"防回归"锁住，已同步改为"消耗→不触发"）。`Pending{weiyaPick}` 带 `reason`（attack/defense/dustRise）供提示显示。
@@ -371,6 +376,11 @@
     - **界面表现（2026-10-07 追加，勿违）**：阶段被自动翻页时**不能悄无声息** —— `render.ts` 的 `phaseBannerSegs()` 按 `STANDARD_PHASES` 顺序**依次补播**被跨过的阶段横幅：**被跨过的过渡段**用较短的 `MOTION.bannerHoldTransient`（600ms），**当前真实阶段**用 `MOTION.bannerHold`；**串行排程、绝不重叠**（`playBanner` 返回值即下一段起点）。**换手那一帧不再吞掉阶段横幅** → 「回合开始 → 尘起阶段 → 主要阶段」可三段连播。**「重掷阶段」不加横幅**（没骰就静默跳过）。回归：`tests/phaseBannerSegs.test.ts`。
     - **测试口径**：需要"到主要阶段"的测试统一用 `tests/helpers.ts` 的 **`toMain(g)`**（只在还没到 main 时补推进）——旧的"`skipInitialReroll` → 一次 `advance`"写法在自动翻页后会**走过头**。回归见 `tests/autoAdvancePhase.test.ts`。
 
+27. **三条「歧义」的裁定（2026-10-16 用户定，全模式适用）**：
+    - **T09 慈悲 × 009 高塔铁幕**：**无歧义**——T09 一旦发动就**取消了该伤害** → 009 没有「受到」可触发；**T09 不发动才轮到 009**。顺序由规则天然决定，维持现状（先慈悲、再 009）。
+    - **T04 末路 × L04 重开**：**先结算 T04 末路（真伤＋回血），再「重开」**（L04 继承生命 → 重开时的生命含末路回复）；**若末路先把某方打死 → 不再重开**。实现：`game.ts` 的 `case 'skill'` 对 `tata.mengjing` **在处理器之前**调 `applyMolu`；处理器里 `gameOver` 早退。测试 `tests/tacticsReset.test.ts`。
+    - **T15 影子 × 010 真实之剑**：置换的 **2 颗源骰不算使用/消耗/弃置** → **不触发**影子；置换出的 **虚拟 5 算使用** → **触发**（「虚拟骰都可以触发」）。T15 只看 `effective`（已是现状）。测试 `tests/tacticsT15Sword.test.ts`。
+    - **Z12 不动菩提（仅挑战）**：锁的只是「使用/消耗/弃置」——**真实之剑置换的源骰不受锁**；**置换出的有效 5 受锁**（V=5 → 置换按钮不出现、`canPayCosts` 为假）；**「点数下降」类（005 影袭）不受锁**（下降后的「使用」按新点数受锁）。实现：`paySlots` 对 2 颗置换跳过源骰封锁 + 校验 `effective.value`；`canPayFromPool` 在 V=5 时不走置换、并把「被锁但可作置换源」的骰用 `lockedConversionDice` 计入；`render.ts` 的 `convertAvailable` / 「2 颗顶 1」入口同步。测试 `tests/challengeZ12Sword.test.ts`。
 ## 挑战模式（单人 vs 昔日传奇「自动机」）—— 2026-10-07 落地，勿违
 
 > 设计文档：`..\plans\挑战模式设计.md`；代决点清单：`..\plans\挑战模式-代为操作清单.md`；逐批计划：`..\plans\2026-10-07-挑战模式-Plan*.md`。**本轮只转写并打通 Z02（传说中的"永暗之刃"）**。
@@ -392,6 +402,7 @@
       ① **开飞那一刻**（与 `attackStart` 的 `costDur` 同刻）定时调用它 → 治"停留"；
       ② **每次渲染**对名单里的 id 再调一次 → 治"重绘复活"。
       ⚠️ 只做①（v0.16.6）→ 挑战者一点抵挡、元素重建 → 骰子"复活"；只做②（v0.16.7）→ 开飞当下到下次重绘之间没人去掉 → 骰子"停留"。**且禁用 CSS `visibility:hidden`**。
+      **Z09「凛冽之音」只生成防御骰**（`z09-4` 只有 `gain('defense', …)`，补缺失的 1–6）；战报在"补充 0 个"时写"（防御骰区已覆盖 1–6）"。回归：`tests/challengeZ09.test.ts` 断言**攻击骰区不变**。
       **攻击骰区的排列＝攻击顺序**：`z02-4` 按代决排完队列后，把 `B.areas.attack` 也按同序重排 →"最左边那颗先飞出去"。
    - **扣驱动骰的时机**：**真正结算前才扣**（曾因"提问前就扣"导致续跑重算槽匹配→整条被跳过）。
 5. **代决（模式 1）**：传奇本该自己做的抉择**全部由挑战者决定**。机制＝`Pending{kind:'challengePick', player:'A', prompt, options[]}` ＋ `Action{t:'challengePick', id}`；`challengeDecisions()` 给出本条需要的选择，`continueLegendTurn` 逐条问、收集齐再结算；选择存 `g.challenge.decisions`（按技能 id）。**已接**：`z02-2` 留哪颗防御骰、`z02-3` 弃哪颗防御骰、`z02-4` 枭首攻击顺序（`asc/desc`）。**未代决时一律有确定性默认**（AI/测试兼容）。
@@ -527,7 +538,7 @@
       9. **「临时驱动骰区域」按点数升序显示（仅显示层）**：`render.ts` 的 `.challenge-staging` 渲染前对 `challenge.driven` 取**排序副本**（点数升序 → 同点按 id）；**不改 `challenge.driven`**（引擎槽匹配用 `sortedDice` 副本、与显示顺序无关）；重掷/追加后每帧自动重排。（另一处 `.area--driven`（标签「驱动骰槽」）渲染的是恒空的 `slot`、不涉及。）
     - **挑战模式「规则调整」批（2026-10-15，只影响挑战模式的选择/战斗界面）**：
       1. **024 凶弹业舞（必杀）**：挑战下只按 **5 个区域**结算（跳过传奇没有的冥想骰区）——`skills.ts` 的 handler + `ui/skillSelection.ts` 的 `steps`/`buildParams` **双处**都按 `g.mode==='challenge'` 分支；标准模式照旧 6 个。
-      2. **033 死亡亦逝（持续）· 挑战下"由挑战者代决传奇的弃骰"（2026-10-15 修正）**：⚠️ **昔日传奇从不使用神器效果**（卡面预设只为取分布/生命，且它从不装填）→ **挑战里 033 只可能来自挑战者**；曾经的"传奇预设 033 当生效"例外＝**错误立论，已删**（`siwangActive` 现在就是 `hasActiveSkill(players[id],'diaoling.siwang')`）。判定**唯一来源**＝`game.ts` 的 **`siwangShouldFire(g, activePlayer)`**（`['A','B'].some(装填生效)` ＋ 该回合玩家**区域骰 > 0`）——**两条"回合结束"路径共用**（① 挑战者主要阶段结束 `advancePhase` ② 传奇回合结束 `continueLegendTurn` 收尾），**禁止各写一份**（真实事故：路径②原先只看 `siwangActive(g,'B')` → 挑战者带 033 时**传奇回合结束永不触发**，见 `尘起\bug.txt` T6/T7）。传奇回合结束时 → `tiaolingPick{player:'A', owner:'B'}`：⚠️ **必须挂在 `endTurn` 之后**（`beginTurn` 会清 `g.pending`/`pendingQueue`）；代决传奇时**只能弃最少颗数**（`siwangMinDiscard` 引擎校验 + 界面 `validate` 共用）；传奇**区域为空则不挂**（无事可做）。标准模式仍由本人决定、可多弃。回归：`tests/challengeAdjust.test.ts`（挑战者带 033 → 挂代决 + 多弃被拒；Z11 预设 033 **不**触发；`siwangShouldFire` 的"任一方装填→双方各自回合结束都执行"）。
+      2. **033 死亡亦逝（持续）· 挑战下"由挑战者代决传奇的弃骰"（2026-10-15 修正）**：⚠️ **昔日传奇从不使用神器效果**（卡面预设只为取分布/生命，且它从不装填）→ **挑战里 033 只可能来自挑战者**；曾经的"传奇预设 033 当生效"例外＝**错误立论，已删**（`siwangActive` 现在就是 `hasActiveSkill(players[id],'diaoling.siwang')`）。判定**唯一来源**＝`game.ts` 的 **`siwangShouldFire(g, activePlayer)`**（`['A','B'].some(装填生效)` ＋ 该回合玩家**区域骰 > 0`）——**两条"回合结束"路径共用**（① 挑战者主要阶段结束 `advancePhase` ② 传奇回合结束 `continueLegendTurn` 收尾），**禁止各写一份**（真实事故：路径②原先只看 `siwangActive(g,'B')` → 挑战者带 033 时**传奇回合结束永不触发**，见 `尘起\bug.txt` T6/T7）。传奇回合结束时 → `tiaolingPick{player:'A', owner:'B'}`：⚠️ **必须挂在 `endTurn` 之后**（`beginTurn` 会清 `g.pending`/`pendingQueue`）；代决传奇时**只能弃最少颗数**（`siwangMinDiscard` 引擎校验）；传奇**区域为空则不挂**（无事可做）。标准模式仍由本人决定、可多弃。**选择器（2026-10-16 拆成两条）**：**代决传奇**＝① 全相同/全不同 → ②（仅「全相同」）选**要保留的点数**（**可任意选现存点数**；但该点数的骰子必须**全部保留**、不能多弃）→ **其余自动弃**（无选骰步骤，不会卡死）；**自己弃**（标准/轮选/构筑/挑战者自己）＝**旧逻辑**：① 全相同/全不同 → ② **骰片选择器**（可弃 0 颗、也可**故意多弃**）。回归：`tests/challengeAdjust.test.ts`（挑战者带 033 → 挂代决 + 多弃被拒；Z11 预设 033 **不**触发；`siwangShouldFire` 的"任一方装填→双方各自回合结束都执行"）+ `tests/render.test.ts`（两种模式的 UI 流程）。
       3. **规则面板**：改叫「**挑战模式规则调整**」（标题 + 按钮）、**条目不带编号**、补 3 条（凶弹业舞 / 死亡亦逝 / 先机）、浮窗**居中**（`.settings-overlay.challenge-rules-overlay`）。
       4. **「调整」徽标（红底白字）**：名单＝`ADJUSTED_ARTIFACTS` + `ADJUSTED_TACTICS`（**唯一来源** `challenges.ts`；当前值见下面第 8 条）；**只按 `mode==='challenge'` 显示**。位置：卡图 **`.card-adjust-badge`** 默认占「异相」位、有异相时 `--below` 排其下；战术横条用 `--inline`。**落点共 4 处**：① `render.ts` 的 `artifactCard` ② 战斗界面战术横条 `tacticBar` ③ `setupScreen.ts` 挑战选择界面的**神器** `cardImg` ④ `setupScreen.ts` 的 **`tacticSection`**（战术卡 chip：新增 `opts.challenge` 开关，只有挑战的调用点传 `true`，命中 `ADJUSTED_TACTICS` 才打徽标）——⚠️ ③④ 是**两条不同的链**，只改一条会漏（真实事故：先机在挑战选择界面的卡图漏了徽标）。
       5. **选择界面"右键看技能"里 `unordered` 技能的序号显示 `x`**（`setupScreen.ts` 的挑战弹窗 `pick-sk-t`：`${sk.unordered ? 'x' : i}) ${sk.name}`）。

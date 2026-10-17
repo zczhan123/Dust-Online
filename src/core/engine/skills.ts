@@ -291,6 +291,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // L04 我将在下个梦境与你再度相逢（必杀·尘落前置 0）：继承生命/尘落/技能计数，重置其余状态并重开一局，失去本技能
   'tata.mengjing': {
     run({ g, player, params }) {
+      // T04「末路」先结算（可能在执行前就把某方打死）→ 已 gameOver 时**不再重开**
+      if ((g.phase as string) === 'gameOver') return;
       const first: PlayerId = params.first === 'B' ? 'B' : 'A';
       const lifeA = g.players.A.life;
       const lifeB = g.players.B.life;

@@ -30,6 +30,7 @@ import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skil
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
+import { diag, isDiagEnabled, missingDiceInDom, challengeSnapshot, diagDump, diagClear, diagCount } from './diag';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
 
@@ -88,6 +89,7 @@ const legendGoneIds = new Set<string>();
  */
 function hideLegendFlownDie(root: HTMLElement, id: string): void {
   legendGoneIds.add(id);
+  diag('hide', { id });
   const el = root.querySelector<HTMLElement>(
     `.panel--challenge .area[data-kind="attack"] .die[data-id="${id}"], ` +
       `.panel--challenge .area[data-kind="defense"] .die[data-id="${id}"]`,
@@ -2186,10 +2188,15 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
       ];
     }
     if (pd.kind === 'tiaolingPick') {
+      const legendDuty = ctx.state.mode === 'challenge' && (pd.owner ?? pd.player) !== pd.player;
       return [
         { text: '（「' },
         { text: '凋零', color: pd.player },
-        { text: `」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同并弃置自己的能力骰；请选择` },
+        {
+          text: legendDuty
+            ? `」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同 → 再选要保留的点数（其余自动弃置）；请选择`
+            : `」）：${playerName(ctx, pd.player)} 回合结束，请择①全相同/②全不同并弃置自己的能力骰（可弃 0 颗、也可多弃）；请选择`,
+        },
       ];
     }
     if (pd.kind === 'endDiscard') {
@@ -3129,7 +3136,9 @@ function operationList(ctx: Ctx): HTMLElement {
     // 「真实之剑」(010) 置换入口：给 009 高塔铁幕·触发 / 011 灵能屏障·触发 / 023 畏惧·对方 的「消耗 1 颗」加「2 颗顶 1」
     if (
       (a.t === 'guwangCancel' || a.t === 'dunwuHalve' || a.t === 'weijuPay') &&
-      hasSword(ctx.state, actorOf(ctx.state))
+      hasSword(ctx.state, actorOf(ctx.state)) &&
+      // Z12「不动菩提」：置换出的有效点数 5 被封锁时，不提供"2 颗顶 1"入口
+      !isValueLocked(ctx.state, actorOf(ctx.state), 5)
     ) {
       const okToOpen =
         (a.t === 'guwangCancel' && a.cancel) || (a.t === 'dunwuHalve' && a.accept) || a.t === 'weijuPay';
@@ -3959,12 +3968,17 @@ function confirmSelection(ctx: Ctx): void {
         return;
       }
       if (sel.pendingKind === 'tiaolingPick') {
+        // 新版：① 全相同/全不同 ② 选要保留的点数 → buildParams 自动算出要弃的骰
+        const built = spec.buildParams({
+          state,
+          player,
+          chosenDice: sel.chosenDice,
+          options: sel.options,
+          numbers,
+          slots: sel.slots,
+        }) as { pick: 'same' | 'diff'; dieIds: string[] };
         hooks.ui.selection = null;
-        hooks.onAction({
-          t: 'tiaolingResolve',
-          pick: sel.options[0] === 'same' ? 'same' : 'diff',
-          dieIds: sel.chosenDice[1] ?? [],
-        });
+        hooks.onAction({ t: 'tiaolingResolve', pick: built.pick, dieIds: built.dieIds });
         return;
       }
       if (sel.pendingKind === 'wanzhangDiscard') {
@@ -5145,6 +5159,11 @@ function settingsPanel(ctx: Ctx): HTMLElement {
     box.appendChild(r);
   }
 
+  // 【排查·?diag=1】诊断日志入口（只在开启诊断时出现，正常游玩不显示）
+  if (isDiagEnabled()) {
+    row('诊断日志', [{ text: `查看（${diagCount()} 条）`, on: false, onClick: () => openDiagOverlay() }]);
+  }
+
   const actions = el('div', 'settings-actions');
   const reset = document.createElement('button');
   reset.type = 'button';
@@ -5163,6 +5182,93 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   });
   overlay.appendChild(box);
   return overlay;
+}
+
+/** 【排查·?diag=1】诊断日志浮层（复用设置浮层样式；一键复制，http 下浏览器禁用剪贴板 → 自动全选，Ctrl+C）。 */
+function openDiagOverlay(): void {
+  const overlay = el('div', 'settings-overlay');
+  const box = el('div', 'settings-panel');
+
+  const head = el('div', 'settings-head');
+  const title = el('div', 'settings-title');
+  title.textContent = '诊断日志（排查用）';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel settings-close';
+  close.textContent = '✕';
+  const bye = (): void => overlay.remove();
+  close.addEventListener('click', bye);
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const note = el('div', 'settings-label');
+  note.textContent = '把整段贴给开发者即可。为空＝还没记录（地址要带 ?diag=1；只记录挑战模式）。';
+  note.style.margin = '4px 0 8px';
+  box.appendChild(note);
+
+  const ta = document.createElement('textarea');
+  ta.readOnly = true;
+  ta.value = diagDump();
+  Object.assign(ta.style, {
+    width: '100%',
+    height: '220px',
+    fontFamily: 'Consolas, monospace',
+    fontSize: '12px',
+    lineHeight: '1.4',
+    whiteSpace: 'pre',
+    background: '#fff',
+    color: '#111',
+    border: '1px solid #bbb',
+    borderRadius: '4px',
+    padding: '6px',
+    boxSizing: 'border-box',
+  });
+  box.appendChild(ta);
+
+  const actions = el('div', 'settings-actions');
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn';
+  copy.textContent = '复制全部';
+  copy.addEventListener('click', () => {
+    const text = diagDump();
+    const fallback = (): void => {
+      ta.focus();
+      ta.select();
+      copy.textContent = '已全选 → 按 Ctrl+C';
+    };
+    const clip = navigator.clipboard;
+    if (clip && typeof clip.writeText === 'function') {
+      clip.writeText(text).then(
+        () => {
+          copy.textContent = '已复制 ✓';
+        },
+        fallback,
+      );
+    } else {
+      fallback();
+    }
+  });
+  actions.appendChild(copy);
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'btn btn-cancel';
+  clear.textContent = '清空';
+  clear.addEventListener('click', () => {
+    diagClear();
+    ta.value = '';
+  });
+  actions.appendChild(clear);
+  box.appendChild(actions);
+
+  overlay.appendChild(box);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) bye();
+  });
+  document.body.appendChild(overlay);
+  ta.focus();
+  ta.select();
 }
 
 /** 战报抽屉：从左侧滑出，点空白处关闭（窄屏或战报收起时使用） */
@@ -5433,6 +5539,8 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
 
 function convertAvailable(state: GameState, payer: PlayerId): boolean {
   if (!hasActiveSkill(state.players[payer], 'shenhong.sword')) return false;
+  // Z12「不动菩提」：置换出的有效点数是 5 → 5 点被封锁时置换不可用
+  if (isValueLocked(state, payer, 5)) return false;
   const p = state.players[payer];
   return p.areas.attack.length + p.areas.defense.length + p.areas.meditation.length >= 2;
 }
@@ -6827,8 +6935,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 这样挑战者点抵挡/不抵挡触发重绘时，它也不会"复活"；而"开飞当下"由定时器调用同一入口去掉，不会停留。
   if (state.mode === 'challenge') {
     for (const id of [...legendGoneIds]) hideLegendFlownDie(root, id);
-    // 自清理：只保留"此刻还在攻击骰区或防御骰区里"的 id（结算移除后自动掉出，不旧账复发）
-    //  · 攻击区＝枭首/裁雨流/无上剑术/战车；防御区＝真实之剑（甲，源骰留在防御区）
+    // 自清理：只保留"此刻还在攻击骰区/防御骰区里"的 id，其余自动解除（换了局面就不再隐藏）
+    //   · 枭首/裁雨流/无上剑术/战车，或真实之剑·甲：源骰可能在防御骰区
     const alive = new Set(
       [...state.players.B.areas.attack, ...state.players.B.areas.defense].map((d) => d.id),
     );
@@ -7042,6 +7150,25 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   }
   // 本帧动效总时长（含阶段横幅）——`main.ts` 用它给"挑战模式自动推进"配速（每步播完再走下一步）
   lastFrameMs = frameEnd;
+
+  // 【排查·?diag=1，只挑战模式】数据里有、画面上没有的骰子（＝"隐形骰子"）→ 记一条 DOM-MISSING。
+  // 刻意隐藏的（在 legendGoneIds 里）属正常，不报。
+  if (isDiagEnabled() && state.mode === 'challenge') {
+    const dataIds = [
+      ...state.players.A.areas.attack,
+      ...state.players.A.areas.defense,
+      ...state.players.A.areas.meditation,
+      ...state.players.B.areas.attack,
+      ...state.players.B.areas.defense,
+    ].map((d) => d.id);
+    const domIds = Array.from(root.querySelectorAll<HTMLElement>('.die[data-id]')).map(
+      (e) => e.dataset.id ?? '',
+    );
+    const missing = missingDiceInDom(dataIds, domIds).filter((id) => !legendGoneIds.has(id));
+    if (missing.length > 0) {
+      diag('DOM-MISSING', { missing, gone: [...legendGoneIds], snap: challengeSnapshot(state) });
+    }
+  }
 
   if (holdView) {
     // 两阶段：先在本视角把动效播完，再瞬间切到新视角（切的那一帧无动效）

@@ -569,6 +569,41 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
 }
 
 /**
+ * 挑战模式：传奇（B）用**区域真骰**发起的攻击，在结算/取消后把源骰从攻击骰区（或防御骰区）移除。
+ *
+ * **唯一入口**——正常结算（`settleAttack`）以及所有"取消 / 延后攻击"的待决策
+ * （020/A04「兽魂」`shouhunCancel`、034/A03「不动菩提」`putiResolve`）**都必须调它**；
+ * 漏调 → 骰子留在区里、界面又按"已飞出"把它藏了 → **永久隐形**（真实事故：`chg-B-35` 因兽魂代决而隐形）。
+ *
+ * - 源骰可能在**攻击骰区**（枭首/裁雨流/无上剑术/战车），也可能**留在防御骰区**（真实之剑·甲）→ 两区都查；
+ * - 只处理**传奇（B）**自己的那批真骰攻击；挑战者的攻击骰在支付时就已消耗 → 这里本应空转；
+ * - Z01「裁雨流」：**前 3 次造成伤害**的攻击骰 → 移入防御骰区（受 `defenseCap` 约束），其余照常移除。
+ * ⚠️ 必须是 **Z01 的卡**（`legendHasSkill`）——挑战者若也用名为「裁雨流」的攻击，
+ *    **不得**污染 Z01 的"前 3 次"计数、更不得把骰搬进**传奇的**防御骰区。
+ */
+export function removeLegendSourceDie(g: GameState, pa: PendingAttack, damageDealt: number): void {
+  if (g.mode !== 'challenge' || pa.attacker !== 'B' || !pa.sourceDieId) return;
+  const atkArea = g.players[pa.attacker].areas.attack;
+  let area = atkArea;
+  let idx = area.findIndex((d) => d.id === pa.sourceDieId);
+  if (idx < 0) {
+    area = g.players[pa.attacker].areas.defense; // 真实之剑：源骰在防御骰区
+    idx = area.findIndex((d) => d.id === pa.sourceDieId);
+  }
+  if (idx < 0) return;
+  const hits = g.challenge?.caiyuliuHits ?? 0;
+  if (legendHasSkill(g, 'z01-5') && pa.sourceSkill === '裁雨流' && damageDealt > 0 && hits < 3) {
+    const die = area.splice(idx, 1)[0];
+    // 移入防御骰区（**受 `defenseCap` 约束**；已满 → 直接弃置＝移除后不加入）。边界：仍占"前 3 次"名额。
+    const placed = addLegendDefense(g, die);
+    g.challenge!.caiyuliuHits = hits + 1;
+    if (placed) fxPush({ kind: 'move', player: pa.attacker, dieIds: [die.id] }); // 攻击骰区 → 防御骰区
+  } else {
+    area.splice(idx, 1);
+  }
+}
+
+/**
  * 一次攻击的**收尾**（落血 + 事件点 + 028×013 电刑 + 推进多段队列）。
  * 抽出为独立导出：正常结算走它；T09「慈悲」待决策解决后也走它（`applyDamage=false` ＝ 取消伤害）。
  */
@@ -627,30 +662,7 @@ export function settleAttack(
   //   · 真实之剑（甲，2026-10-11）：源骰**留在防御骰区**（不搬进攻击骰区）→ 找不到就回退到防御骰区。
   //（只处理**传奇（B）**自己的那批真骰攻击；挑战者的攻击骰在支付时就已消耗 → 这里本应空转。
   //  也避免误伤 001/C01 裁雨流那种"攻击骰结算后落区"的常规流程。）
-  if (g.mode === 'challenge' && pa.attacker === 'B' && pa.sourceDieId) {
-    const atkArea = g.players[pa.attacker].areas.attack;
-    let area = atkArea;
-    let idx = area.findIndex((d) => d.id === pa.sourceDieId);
-    if (idx < 0) {
-      area = g.players[pa.attacker].areas.defense; // 真实之剑：源骰在防御骰区
-      idx = area.findIndex((d) => d.id === pa.sourceDieId);
-    }
-    if (idx >= 0) {
-      // Z01「裁雨流」：**前 3 次造成伤害**的攻击骰 → 移入防御骰区（而非弃掉）；其余照常移走
-      // ⚠️ 必须是 **Z01 的卡**（`legendHasSkill`）——挑战者若也用名为「裁雨流」的攻击，
-      //    **不得**污染 Z01 的"前 3 次"计数、更不得把骰搬进**传奇的**防御骰区。
-      const hits = g.challenge?.caiyuliuHits ?? 0;
-      if (legendHasSkill(g, 'z01-5') && pa.sourceSkill === '裁雨流' && o.damageDealt > 0 && hits < 3) {
-        const die = area.splice(idx, 1)[0];
-        // 移入防御骰区（**受 `defenseCap` 约束**；已满 → 直接弃置＝移除后不加入）。边界：仍占"前 3 次"名额。
-        const placed = addLegendDefense(g, die);
-        g.challenge!.caiyuliuHits = hits + 1;
-        if (placed) fxPush({ kind: 'move', player: pa.attacker, dieIds: [die.id] }); // 攻击骰区 → 防御骰区
-      } else {
-        area.splice(idx, 1);
-      }
-    }
-  }
+  removeLegendSourceDie(g, pa, o.damageDealt);
   // Z06「冥界行走」（本回合）：传奇（B）的攻击**造成伤害** → 回复该**攻击点数**一半（向上取整）
   // ⚠️ 取 **`baseValue`（攻击的有效点数）**、**不含伤害加成**——与卡面"回复该**攻击点数**一半"一致，
   //    也与标准版 017 / 025·触发 / L05 同口径（凡"按攻击点数"一律 `baseValue ?? value`）。

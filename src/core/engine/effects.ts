@@ -13,7 +13,7 @@ import { logLine, pname } from './log';
 import { hasActiveSkill, skillActive } from './skill-state';
 import { emptyDistribution } from './derive';
 import { dealTrueDamage } from './combat';
-import { isValueLocked } from './challenge';
+import { isValueLocked, legendLockValue } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 // 注意：与 pending.ts 是**循环引用**（pending → effects 的 gainRandomAbilityDice/withRngState）；
 // 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
@@ -267,8 +267,40 @@ export interface CostNeed {
   meditation?: number;
 }
 
-/** 从给定池判断 `need` 是否可支付：每格 1 颗同类型能力骰；或（持 010/A02「真实之剑」）2 颗任意能力骰置换为 1 格（点数视为 5）。 */
-function canPayFromPool(g: GameState, player: PlayerId, pool: AbilityDie[], need: CostNeed): boolean {
+/** 被 Z12「不动菩提」封锁、但仍可当 **真实之剑置换源骰** 的能力骰（源骰不算使用/消耗/弃置 → 不受锁）。 */
+function lockedConversionDice(g: GameState, player: PlayerId, held: boolean): AbilityDie[] {
+  if (legendLockValue(g) === null) return [];
+  const p = g.players[player];
+  const out: AbilityDie[] = [];
+  for (const k of KINDS) {
+    for (const d of p.areas[k]) {
+      if (!isValueLocked(g, player, d.value)) continue;
+      out.push({ id: d.id, value: d.value, kind: k, source: 'area' });
+    }
+  }
+  if (held && hasActiveSkill(p, 'jingang.pozhang.continuous')) {
+    const dist = emptyDistribution(p);
+    if (dist) {
+      for (const a of p.artifacts) {
+        for (const h of a.heldDice ?? []) {
+          if (!isValueLocked(g, player, h.value)) continue;
+          out.push({ id: h.id, value: h.value, kind: areaOf(h.value, dist), source: 'artifact' });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** 从给定池判断 `need` 是否可支付：每格 1 颗同类型能力骰；或（持 010/A02「真实之剑」）2 颗任意能力骰置换为 1 格（点数视为 5）。
+ *  `locked` ＝ 被封锁点数、但可作**置换源骰**的骰子（不算"同类型可用"，只补置换的 2 颗）。 */
+function canPayFromPool(
+  g: GameState,
+  player: PlayerId,
+  pool: AbilityDie[],
+  need: CostNeed,
+  locked: AbilityDie[] = [],
+): boolean {
   const count = (k: DiceKind): number => pool.filter((d) => d.kind === k).length;
   const nA = need.attack ?? 0;
   const nD = need.defense ?? 0;
@@ -281,14 +313,16 @@ function canPayFromPool(g: GameState, player: PlayerId, pool: AbilityDie[], need
     Math.max(0, nM - count('meditation'));
   if (deficit === 0) return true; // 全部用同类型骰（T ≥ N 必然成立）
   if (!hasActiveSkill(g.players[player], 'shenhong.sword')) return false;
-  return pool.length - N >= deficit;
+  // Z12「不动菩提」：置换出的有效点数是 5 → 5 点被封锁时"必须置换"的方案不可行
+  if (isValueLocked(g, player, 5)) return false;
+  return pool.length + locked.length - N >= deficit;
 }
 
 /** `need` 是否可支付（门槛/提示判定用）。
  *  `opts.held` 是否把 034/A03 存放骰计入来源（选择向导尚不支持存放骰的技能传 false，避免"按钮点进去做不完"）。 */
 export function canPayCosts(g: GameState, player: PlayerId, need: CostNeed, opts: { held: boolean }): boolean {
   const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
-  return canPayFromPool(g, player, pool, need);
+  return canPayFromPool(g, player, pool, need, lockedConversionDice(g, player, opts.held));
 }
 
 /** 某类型最多能凑出几格（含置换；`max` 为上限，0 表示一格都付不起）。供"可变数量"技能的默认参数/范围。 */
@@ -300,8 +334,9 @@ export function maxAffordableSlots(
   opts: { held: boolean },
 ): number {
   const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
-  for (let n = Math.min(max, Math.floor(pool.length)); n >= 1; n--) {
-    if (canPayFromPool(g, player, pool, { [kind]: n })) return n;
+  const locked = lockedConversionDice(g, player, opts.held);
+  for (let n = Math.min(max, Math.floor(pool.length + locked.length)); n >= 1; n--) {
+    if (canPayFromPool(g, player, pool, { [kind]: n }, locked)) return n;
   }
   return 0;
 }
@@ -315,10 +350,11 @@ export function defaultCostFills(
   opts: { held: boolean },
 ): SlotFill[] {
   const pool = abilityDicePool(g, player).filter((d) => opts.held || d.source === 'area');
-  if (!canPayFromPool(g, player, pool, need)) throw new Error('defaultCostFills: cost not payable');
+  const locked = lockedConversionDice(g, player, opts.held);
+  if (!canPayFromPool(g, player, pool, need, locked)) throw new Error('defaultCostFills: cost not payable');
   const used = new Set<string>();
-  const take = (pred: (d: AbilityDie) => boolean): AbilityDie | undefined => {
-    const d = pool.find((x) => !used.has(x.id) && pred(x));
+  const take = (pred: (d: AbilityDie) => boolean, from = pool): AbilityDie | undefined => {
+    const d = from.find((x) => !used.has(x.id) && pred(x));
     if (d) used.add(d.id);
     return d;
   };
@@ -334,8 +370,9 @@ export function defaultCostFills(
     else deferred.push(k);
   }
   for (const _k of deferred) {
-    const a = take(() => true);
-    const b = take(() => true);
+    // 置换源骰：先拿未被封锁的；不够再拿被封锁的（源骰不受锁）
+    const a = take(() => true) ?? take(() => true, locked);
+    const b = take(() => true) ?? take(() => true, locked);
     if (!a || !b) throw new Error('defaultCostFills: not enough dice for conversion');
     fills.push({ dieIds: [a.id, b.id] });
   }
@@ -446,6 +483,9 @@ export function paySlots(
       const heldV = foundV ? null : heldAsAbility(g, player, id);
       if (!foundV && !heldV) throw new Error(`not your die: ${id}`);
       // Z12「不动菩提」：被封锁点数的能力骰**不可"使用/消耗"**（只锁挑战者 A；不锁传奇强制弃置）
+      // ⚠️ **真实之剑置换的"源骰"不算 使用/消耗/弃置**（用户定 2026-10-16）→ 不查封锁；
+      //    要查的是**置换出来的有效点数**（下方 `effective.value === 5`）。
+      if (ids.length === 2) continue;
       const lockedV = foundV ? foundV.die.value : heldV!.value;
       if (isValueLocked(g, player, lockedV)) throw new Error(`「不动菩提」：${lockedV} 点的能力骰本回合不可使用/消耗`);
     }
@@ -477,6 +517,8 @@ export function paySlots(
         const f = findDieOf(g, player, id);
         if (f) paidDice.push({ kind: f.kind, value: f.die.value });
       }
+      // Z12「不动菩提」：**置换出来的有效点数（5）要受锁**（源骰不锁、有效骰锁）→ V=5 时不能用真实之剑
+      if (isValueLocked(g, player, 5)) throw new Error('「不动菩提」：置换出的 5 点能力骰本回合不可使用/消耗');
       effective.push({ kind, value: 5, source: 'converted', realIds: [...ids] });
     }
     toRemove.push(...ids);
