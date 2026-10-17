@@ -663,7 +663,7 @@ button.pay-die {
   flex-direction: column;
   align-items: center;
   padding: 12px;
-  background: #ece7dc url('/cover.jpg') center top / cover no-repeat fixed;
+  background: #ece7dc url('../assets/cover.jpg') center top / cover no-repeat fixed;
 }
 .setup {
   width: 100%;
@@ -1715,6 +1715,15 @@ button.pay-die {
 #app.setup-page .lobby-state--join { color: #8fd0a2; }
 #app.setup-page .lobby-state--full { color: #f0b34a; }
 #app.setup-page .lobby-state--mine { color: #8fd0a2; }
+/* 「旁观」按钮（房间行右侧）：小号次级，点击不进座、只进战斗界面只读观看 */
+#app.setup-page .lobby-spectate {
+  cursor: pointer; font-family: var(--menu-sans); font-weight: 700; font-size: var(--fs-4);
+  padding: 3px 12px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, .10); border: 1px solid var(--line-strong); color: #f3f0e8;
+  transition: transform .12s ease, background .15s ease;
+}
+#app.setup-page .lobby-spectate:hover { background: rgba(255, 255, 255, .18); }
+#app.setup-page .lobby-spectate:active { transform: scale(.96); }
 #app.setup-page .lobby-row-note { flex: 1 1 100%; font-size: var(--fs-4); color: var(--t2); }
 #app.setup-page .lobby-status { font-family: var(--menu-sans); font-size: var(--fs-4); color: var(--t2); text-align: center; }
 
@@ -1851,7 +1860,12 @@ button.pay-die {
 .online-pop-title--ui { font-family: var(--menu-sans); }
 .online-chat-list { display: flex; flex-direction: column; gap: 4px; max-height: 34vh; overflow: auto; margin-bottom: 8px; }
 .online-chat-line { font-size: var(--fs-4); line-height: 1.4; }
-.online-chat-who { color: #9ec5ff; margin-right: 6px; }
+.online-chat-who { color: #c9c3b6; margin-right: 6px; }
+/* 聊天名字用**玩家色**（暗色浮层 → 亮色系，与战报 .log-actor 同族） */
+.online-chat-who.player-A { color: #7db2ff; }
+.online-chat-who.player-B { color: #ff8f8f; }
+/* 系统行（如旁观进来）：与普通行同格式，只是名字**中性灰、不染玩家色** */
+.online-chat-who--sys { color: var(--t2); }
 .online-chat-row { display: flex; gap: 6px; }
 .online-chat-input {
   flex: 1 1 auto; min-width: 0; min-height: 34px; padding: 6px 10px;
@@ -1866,6 +1880,24 @@ button.pay-die {
 .online-set-row { display: flex; gap: 10px; font-size: var(--fs-4); padding: 3px 0; }
 .online-set-k { flex: 0 0 auto; min-width: 4em; color: var(--t2); }
 .online-set-v { flex: 1 1 auto; }
+/* 值列靠右（给"重置"这类行内操作按钮用） */
+.online-set-v--end { display: flex; align-items: center; justify-content: flex-end; }
+/* 「本机」分隔标题（房间设置底部）：与上面各行同一条左起竖线 */
+.online-set-local {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--line-strong);
+  font-size: var(--fs-4); color: #c9c3b6; letter-spacing: .08em;
+}
+/* 行内小按钮（重置黑名单）：尺寸/字体与面板文字同一套，不再像"外来贴片" */
+.online-set-reset {
+  cursor: pointer; font-family: var(--menu-sans); font-weight: 700; font-size: var(--fs-4);
+  padding: 4px 12px; border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .10); border: 1px solid var(--line-strong); color: #f3f0e8;
+  transition: transform .12s ease, background .15s ease;
+}
+.online-set-reset:hover { background: rgba(255, 255, 255, .16); }
+.online-set-reset:active { transform: scale(.96); }
+.online-set-hint { margin-top: 6px; font-size: var(--fs-4); line-height: 1.5; color: var(--t2); }
 .online-start {
   margin-left: 8px; cursor: pointer; font-family: var(--menu-sans); font-weight: 700;
   font-size: var(--fs-3); min-height: clamp(36px, 5vh, 44px); padding: 6px 20px;
@@ -1881,13 +1913,17 @@ button.pay-die {
   padding: 16px; box-sizing: border-box;
 }
 .online-modal-overlay[hidden] { display: none; }
+/* 弹框（掉线 / 踢人 / 放弃新开 共用）：**暗色**，对齐"选择界面"那套面板 */
 .online-modal {
-  background: #fffdf8; border: 1px solid var(--line); border-radius: 14px;
+  background: #1b1a1d; border: 1px solid #3a3a40; border-radius: 14px;
   padding: 24px 32px; text-align: center; min-width: 260px; max-width: min(440px, 92vw);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, .35);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, .55);
+  color: #f3f0e8;
 }
-.online-modal-title { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
-.online-modal-text { font-size: 16px; font-weight: 700; color: #b23a3a; margin-bottom: 18px; line-height: 1.5; }
+.online-modal-title { font-size: 14px; color: #c9c3b6; margin-bottom: 8px; }
+.online-modal-text { font-size: 16px; font-weight: 700; color: #e8e4da; margin-bottom: 18px; line-height: 1.5; }
+/* 警示类文案（掉线 / 已退出 / 被移出）：暗底版的红 */
+.online-modal-text--warn { color: #f28b82; }
 .online-modal-btn {
   cursor: pointer; font-family: var(--menu-sans); font-weight: 700; font-size: 15px;
   padding: 10px 24px; border-radius: var(--r-md); border: 1px solid #6d28d9;
@@ -1895,7 +1931,20 @@ button.pay-die {
 }
 .online-modal-btn:active { transform: scale(.96); }
 .online-modal-foot { display: flex; gap: 10px; justify-content: center; }
-.online-modal-btn--ghost { background: transparent; color: var(--t1); border-color: var(--line-strong); }
+/* 「取消」＝**实心中性**（不再是透明的幽灵按钮：在暗底上要一眼看出"可以从这里退出"） */
+.online-modal-btn--ghost { background: rgba(255, 255, 255, .12); color: #f3f0e8; border-color: rgba(255, 255, 255, .34); }
+.online-modal-btn--ghost:hover { background: rgba(255, 255, 255, .18); }
+.online-modal-btn--danger { background: #dc2626; border-color: #991b1b; color: #fff; }
+.online-modal-btn--danger:hover { background: #e53434; }
+/* 房主踢人：对方身份药丸可点（键盘可达；hover 给出"可操作"的反馈） */
+.online-name--action { cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.online-name--action:hover { background: rgba(220, 38, 38, .18); border-color: rgba(220, 38, 38, .6); }
+.online-name--action:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* 旁观：系统聊天行与普通行**同格式**（`.online-chat-line--sys` 仅作标记/断言用，无额外视觉）
+   + 聊天"只能看"提示 + 玩家面板可点切视角 */
+.online-chat-hint { font-size: var(--fs-4); color: var(--t2); padding: 2px 0 6px; }
+#app .player--spectate { cursor: pointer; }
+#app .player--spectate:hover { box-shadow: 0 0 0 1px rgba(255, 255, 255, .28); }
 
 /* 联机战斗界面（4a）：操作者淡黄外光圈（不占布局）/ 对方操作只读提示 */
 #app .player--acting { box-shadow: 0 0 0 2px rgba(242, 203, 92, .55), 0 0 16px 3px rgba(242, 203, 92, .35); transition: box-shadow .22s ease-out; }
@@ -1956,7 +2005,7 @@ button.pay-die {
 
 /* 分栏（预设 3 栏 / 构筑 5 栏）*/
 #app.setup-page .pick-board { position: relative; z-index: 2; flex: 1 1 auto; min-height: 0; padding: 4px 18px 14px; display: grid; gap: 10px; }
-/* 联机·不可选（来客未到）→ 整块板面降到"禁用按钮"透明度；不改 pointer-events，右键/长按看卡面详情仍可用 */
+/* 联机·不可选（访客未到）→ 整块板面降到"禁用按钮"透明度；不改 pointer-events，右键/长按看卡面详情仍可用 */
 #app.setup-page .pick-board--locked { opacity: var(--disabled); transition: opacity .18s ease; }
 @media (prefers-reduced-motion: reduce) {
   #app.setup-page .pick-board--locked { transition: none; }

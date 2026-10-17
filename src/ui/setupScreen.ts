@@ -656,7 +656,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
       render();
     });
     bcast(); // 进场先广播一次"我这一侧"状态
-    // 来客加入 / 离开 → 重绘（解锁 / 锁住选择）
+    // 访客加入 / 离开 → 重绘（解锁 / 锁住选择）
     let lastGj = guestJoined();
     sess.subscribe(() => {
       const gj = guestJoined();
@@ -665,7 +665,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
         render();
       }
     });
-    // 对局一旦生成（房主 startGame / 来客收到 start）→ 进战斗界面
+    // 对局一旦生成（房主 startGame / 访客收到 start）→ 进战斗界面
     let battleEntered = false;
     sess.subscribe((s) => {
       if (battleEntered || !s.game) return;
@@ -1313,7 +1313,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
       drawPool();
       bcastDraft();
     }
-    // 来客加入 / 离开 → 重绘（解锁 / 锁住）；**来客加入时房主重随一次牌池并广播**（来客首帧牌池为空）
+    // 访客加入 / 离开 → 重绘（解锁 / 锁住）；**访客加入时房主重随一次牌池并广播**（访客首帧牌池为空）
     let lastGjR = guestJoinedR();
     sess.subscribe(() => {
       const gj = guestJoinedR();
@@ -1326,7 +1326,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
         render();
       }
     });
-    // 对局生成（房主 startGame / 来客收到 start）→ 进战斗界面
+    // 对局生成（房主 startGame / 访客收到 start）→ 进战斗界面
     let battleEnteredR = false;
     sess.subscribe((s) => {
       if (battleEnteredR || !s.game) return;
@@ -1529,7 +1529,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     }
     bar.appendChild(dots);
     const reroll = button('pick-reroll', '重新随机');
-    // 联机：仅**房主**、且**来客已到**、且**尚未开始**（未移除/未选）才能重随；否则置灰不可点。
+    // 联机：仅**房主**、且**访客已到**、且**尚未开始**（未移除/未选）才能重随；否则置灰不可点。
     // 重随必须**广播** → 两端一致（否则各画各的）。
     const rerollOff =
       onlineOnR &&
@@ -1640,7 +1640,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
     const board = el('div', 'pick-board lunxuan' + (locked ? ' pick-board--locked' : ''));
     board.appendChild(confirmCol('A'));
     if (pieces.length < 9) {
-      // 联机：来客首帧牌池尚空（房主"来客加入时重随 + 广播"异步到达）→ 占位，且不让 gridSlot 取到 undefined 报错
+      // 联机：访客首帧牌池尚空（房主"访客加入时重随 + 广播"异步到达）→ 占位，且不让 gridSlot 取到 undefined 报错
       const wait = el('div', 'pick-gridwait');
       wait.textContent = '等待房主发牌…';
       board.appendChild(wait);
@@ -1925,7 +1925,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
 
     const pt = el('div', 'pick-portrait');
     const im = document.createElement('img');
-    im.src = `/legend/${legendFile(legendIdx)}.jpg`;
+    im.src = `./legend/${legendFile(legendIdx)}.jpg`;
     im.alt = card.legacy;
     pt.appendChild(im);
     pt.tabIndex = 0;

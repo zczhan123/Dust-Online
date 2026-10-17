@@ -55,6 +55,22 @@ if (existsSync(fontPath)) {
   html = html.replace(/url\((['"]?)[^)'"]*zhimangxing-subset\.woff2\1\)/g, `url(data:font/woff2;base64,${b64})`);
 }
 
+// 4b) **图片也内联**（CSS 里 `url(./封面-hash.jpg)` 这类相对引用）：
+//     单文件版最后会删掉 assets/，不内联就会 404（封面等）。
+const MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
+html = html.replace(/url\((['"]?)\.\/([^)'"]+\.(?:png|jpe?g|webp|svg))\1\)/g, (m, _q, name) => {
+  const p = path.join(outDir, 'assets', name);
+  if (!existsSync(p)) return m;
+  const ext = path.extname(name).toLowerCase();
+  return `url(data:${MIME[ext] ?? 'application/octet-stream'};base64,${readFileSync(p).toString('base64')})`;
+});
+
 writeFileSync(htmlPath, html, 'utf8');
 
 // 5) 清理已内联的 assets/（内容都在 html 里了）

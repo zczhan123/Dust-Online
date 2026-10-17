@@ -1,4 +1,4 @@
-import { NetSession, hasSavedRoom, abandonSavedRoom } from '../net/session';
+import { NetSession, hasSavedRoom, abandonSavedRoom, hasRejoinRecordFor } from '../net/session';
 import { createNet, resolveNetUrl } from '../net/connect';
 import type { RoomConfig, RoomInfo } from '../net/protocol';
 import { ensureInkFilter, renderHeroSetup, renderBuildSetup, renderRotationSetup, type SetupOptions } from './setupScreen';
@@ -21,7 +21,7 @@ const MODE_LABEL: Record<RoomConfig['mode'], string> = {
 };
 const FIRST_LABEL: Record<RoomConfig['first'], string> = {
   host: '房主先手',
-  guest: '来客先手',
+  guest: '访客先手',
   random: '随机',
 };
 
@@ -213,6 +213,11 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
     host.textContent = `房主：${r.hostName}`;
     side.append(seats, host);
     const versionMismatch = r.version !== APP_BUILD;
+    // **只认本人**：这间房是不是"我上次那局"（本机 key + 最近房间记录）→ 是则给「继续对局」
+    const canResume = !myRoomId && !mine && !versionMismatch && hasRejoinRecordFor(r.id);
+    // **旁观**：只有"真开战 + 允许旁观"才给按钮（未开始 / 选战术阶段没有入口）
+    const canSpectate =
+      !myRoomId && !mine && !versionMismatch && r.inBattle === true && r.config.allowSpectators;
     if (versionMismatch) {
       const s = el('span', 'lobby-state lobby-state--full');
       s.textContent = '版本不同';
@@ -220,6 +225,10 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
     } else if (mine) {
       const s = el('span', 'lobby-state lobby-state--mine');
       s.textContent = '你的房间';
+      side.appendChild(s);
+    } else if (canResume) {
+      const s = el('span', 'lobby-state lobby-state--join');
+      s.textContent = '继续对局';
       side.appendChild(s);
     } else if (r.filled >= r.seats) {
       const s = el('span', 'lobby-state lobby-state--full');
@@ -231,6 +240,25 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
       side.appendChild(s);
     }
     row.append(main, side);
+    // 「旁观」按钮（房间行右侧、状态药丸旁）：进入战斗界面只读观看
+    if (canSpectate) {
+      const sp = document.createElement('button');
+      sp.type = 'button';
+      sp.className = 'lobby-spectate';
+      sp.textContent = '旁观';
+      sp.addEventListener('click', (e) => {
+        e.stopPropagation();
+        let off = (): void => {};
+        off = session.subscribe((s) => {
+          if (s.game) {
+            off();
+            enterOnlineBattle(session);
+          }
+        });
+        session.joinRoom(r.id, 'spectator');
+      });
+      side.appendChild(sp);
+    }
 
     if (r.config.note) {
       const n = el('div', 'lobby-row-note');
@@ -238,9 +266,21 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
       row.appendChild(n);
     }
 
-    const joinable = !myRoomId && !mine && r.filled < r.seats && !versionMismatch;
+    const joinable = !myRoomId && !mine && !versionMismatch && (canResume || r.filled < r.seats);
     row.addEventListener('click', () => {
       if (!joinable) return;
+      if (canResume) {
+        // 续局：带本机身份 key 向对端要快照；拿到对局后直接进战斗（不进选择页）
+        let off = (): void => {};
+        off = session.subscribe((s) => {
+          if (s.game) {
+            off();
+            enterOnlineBattle(session);
+          }
+        });
+        session.rejoinRoom(r.id);
+        return;
+      }
       session.joinRoom(r.id);
       enterSelection(r.config.mode);
     });
@@ -276,7 +316,7 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
     if (s.notice) {
       status.textContent = s.notice;
     } else if (s.roomId && s.role === 'host') {
-      status.textContent = '已创建房间，等待来客加入…（进入选择界面＝第 3 批）';
+      status.textContent = '已创建房间，等待访客加入…（进入选择界面＝第 3 批）';
     } else if (s.roomId && s.role === 'guest') {
       status.textContent = '已加入房间，等待房主开始…（进入选择界面＝第 3 批）';
     } else {
@@ -346,7 +386,7 @@ function openCreateModal(surface: HTMLElement, session: NetSession, onCreated: (
     rows.appendChild(
       rowEl('先手', [
         pill('房主先手', cfg.first === 'host', () => (cfg.first = 'host', render())),
-        pill('来客先手', cfg.first === 'guest', () => (cfg.first = 'guest', render())),
+        pill('访客先手', cfg.first === 'guest', () => (cfg.first = 'guest', render())),
         pill('随机', cfg.first === 'random', () => (cfg.first = 'random', render())),
       ]),
     );

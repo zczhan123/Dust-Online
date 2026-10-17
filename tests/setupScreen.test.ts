@@ -495,29 +495,29 @@ describe('联机 · 轮选（setupScreen）', () => {
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
   const second = (): El => document.body.appendChild(document.createElement('div'));
 
-  it('来客首帧牌池为空 → 占位「等待房主发牌…」（不建格、不报错）；房主重随广播到达后出 9 格', async () => {
+  it('访客首帧牌池为空 → 占位「等待房主发牌…」（不建格、不报错）；房主重随广播到达后出 9 格', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(cfg);
     await flush();
-    renderRotationSetup(root, () => {}, { session: host, onExit: () => {} }); // 房主先渲染（无来客）
+    renderRotationSetup(root, () => {}, { session: host, onExit: () => {} }); // 房主先渲染（无访客）
     const rootG = second();
     guest.joinRoom(roomId);
-    renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} }); // 立刻挂来客 UI（广播未到）
+    renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} }); // 立刻挂访客 UI（广播未到）
     expect(q(rootG, '.pick-gridwait')!.textContent).toContain('等待房主发牌');
     expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(0);
-    await flush(); // 房主"来客加入→重随+广播"到达
+    await flush(); // 房主"访客加入→重随+广播"到达
     expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(9);
     host.close();
     guest.close();
   });
 
-  it('非操作者（来客）九宫格"还没被选走"的置灰、不可点（无 legal），仍带 data-card-id（可看技能）', async () => {
+  it('非操作者（访客）九宫格"还没被选走"的置灰、不可点（无 legal），仍带 data-card-id（可看技能）', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(cfg);
     await flush();
@@ -526,7 +526,7 @@ describe('联机 · 轮选（setupScreen）', () => {
     guest.joinRoom(roomId);
     renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} });
     await flush();
-    // 来客＝非操作者（先手 A）：9 格全置灰、无可点框、仍可右键看技能
+    // 访客＝非操作者（先手 A）：9 格全置灰、无可点框、仍可右键看技能
     expect(qa(rootG, '.pick-boardwrap .pick-slot')).toHaveLength(9);
     expect(qa(rootG, '.pick-boardwrap .pick-slot--wait')).toHaveLength(9);
     expect(qa(rootG, '.pick-boardwrap .pick-slot.legal')).toHaveLength(0);
@@ -538,10 +538,10 @@ describe('联机 · 轮选（setupScreen）', () => {
     guest.close();
   });
 
-  it('「重新随机」门禁：来客禁用；房主(来客已到·未开始)可点；房主单人(无来客)禁用', async () => {
+  it('「重新随机」门禁：访客禁用；房主(访客已到·未开始)可点；房主单人(无访客)禁用', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(cfg);
     await flush();
@@ -550,7 +550,7 @@ describe('联机 · 轮选（setupScreen）', () => {
     guest.joinRoom(roomId);
     renderRotationSetup(rootG, () => {}, { session: guest, onExit: () => {} });
     await flush();
-    expect(q<HTMLButtonElement>(rootG, '.pick-reroll')!.disabled).toBe(true); // 来客不能重随
+    expect(q<HTMLButtonElement>(rootG, '.pick-reroll')!.disabled).toBe(true); // 访客不能重随
     expect(q<HTMLButtonElement>(root, '.pick-reroll')!.disabled).toBe(false); // 房主可
     host.close();
     guest.close();
@@ -562,7 +562,7 @@ describe('联机 · 轮选（setupScreen）', () => {
     await flush();
     const rootH = second();
     renderRotationSetup(rootH, () => {}, { session: host2, onExit: () => {} });
-    expect(q<HTMLButtonElement>(rootH, '.pick-reroll')!.disabled).toBe(true); // 来客未到 → 禁用
+    expect(q<HTMLButtonElement>(rootH, '.pick-reroll')!.disabled).toBe(true); // 访客未到 → 禁用
     host2.close();
   });
 });
@@ -625,7 +625,7 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-ab[data-act="pick"]')!.textContent).toBe('挑');
     expect(q(root, '.pick-ab[data-act="legend"]')!.textContent).toBe('传');
     expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“雨中剑圣”');
-    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L01.jpg');
+    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('./legend/L01.jpg');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
     expect(qa(root, '.pick-legend-arts .pick-slot')).toHaveLength(3);
     expect(qa(root, '.pick-sw.is-disabled')).toHaveLength(0); // 挑战：异相/战术均已接入
@@ -671,7 +671,7 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     renderChallengeSetup(root, () => {});
     abOf('xiu', 'legend').click();
     expect(q(root, '.pick-legend-full')!.textContent).toBe('传说中的“漆黑死神”');
-    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('/legend/L06.jpg');
+    expect(q(root, '.pick-portrait img')!.getAttribute('src')).toBe('./legend/L06.jpg');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 45');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 4');
     expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');

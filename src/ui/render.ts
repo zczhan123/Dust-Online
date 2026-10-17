@@ -215,8 +215,10 @@ export interface UiState {
 
 /** 联机对局时的 UI 上下文（缺省＝左右互搏，一切照旧） */
 export interface OnlineUi {
-  /** 本机玩家（固定视角 / 输入门禁用） */
-  myPlayer: PlayerId;
+  /** 本机玩家（固定视角 / 输入门禁用）。**旁观者＝null**（不能操作） */
+  myPlayer: PlayerId | null;
+  /** **旁观者**：全程只读（不能操作/不能发言）；点玩家面板切换视角 */
+  spectator?: boolean;
   /** A/B → 昵称 */
   names: Record<PlayerId, string>;
   /** 胜利弹窗「回大厅」 */
@@ -861,7 +863,7 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
   const art = el('div', `card-art${ctx.prefs.cardArt === 'thumb' ? ' card-art--thumb' : ''}`);
   const artImg = document.createElement('img');
   artImg.className = 'card-art-img';
-  artImg.src = `/cards/${a.id}.jpg`;
+  artImg.src = `./cards/${a.id}.jpg`;
   artImg.alt = `${a.name}${a.weapon ? `（${a.weapon}）` : ''}`;
   artImg.addEventListener('error', () => {
     art.classList.add('card-art--missing');
@@ -1719,6 +1721,14 @@ function playerPanel(
 ): HTMLElement {
   const panel = el('div', `player player--${role}`);
   panel.dataset.player = player.id;
+  // **旁观者**：点玩家面板切换视角（点 A 看 A、点 B 看 B；不点不切）
+  if (ctx.hooks.online?.spectator) {
+    panel.classList.add('player--spectate');
+    panel.addEventListener('click', () => {
+      setLocalViewPlayer(player.id);
+      ctx.hooks.requestRender();
+    });
+  }
   // 正在操作的一方加淡黄外光圈（不占布局）——**左右互搏与联机都显示**；与红/绿彩光并存（见 motion.ts panelGlow）
   if (ctx.state.phase !== 'gameOver' && actorOf(ctx.state) === player.id) {
     panel.classList.add('player--acting');
@@ -2282,6 +2292,8 @@ export function actorOf(state: GameState): PlayerId {
  */
 function onlineNonActor(ctx: Ctx): boolean {
   const on = ctx.hooks.online;
+  // 旁观者：**永远**只读（myPlayer 为 null，actorOf 恒不等于它，这里再显式兜一层）
+  if (on?.spectator) return ctx.state.phase !== 'gameOver';
   return !!on && ctx.state.phase !== 'gameOver' && actorOf(ctx.state) !== on.myPlayer;
 }
 
@@ -2404,7 +2416,9 @@ function actionZone(ctx: Ctx): HTMLElement {
   //（一处覆盖：操作列表 / 置换·全知·雨汇·影子·远见得骰·友敌·适配·锋芒·威压 面板 / 技能选择器 / 尘起流程 / 确认条）
   if (onlineNonActor(ctx)) {
     const note = el('div', 'actionlist-readonly');
-    note.textContent = `对方正在操作：${opponentActingText(ctx)}`;
+    note.textContent = ctx.hooks.online?.spectator
+      ? '旁观中（只读）· 点击任一玩家面板可切换视角'
+      : `对方正在操作：${opponentActingText(ctx)}`;
     zone.appendChild(note);
     return zone;
   }
@@ -3021,10 +3035,16 @@ function opponentActingText(ctx: Ctx): string {
 function operationList(ctx: Ctx): HTMLElement {
   const box = el('div', 'actionlist');
 
-  // 联机·对方操作时：只读提示，不给可点控件
-  if (ctx.hooks.online && ctx.state.phase !== 'gameOver' && actorOf(ctx.state) !== ctx.hooks.online.myPlayer) {
+  // 联机·对方操作时（或旁观者）：只读提示，不给可点控件
+  if (
+    ctx.hooks.online &&
+    ctx.state.phase !== 'gameOver' &&
+    (ctx.hooks.online.spectator === true || actorOf(ctx.state) !== ctx.hooks.online.myPlayer)
+  ) {
     const note = el('div', 'actionlist-readonly');
-    note.textContent = `对方正在操作：${opponentActingText(ctx)}`;
+    note.textContent = ctx.hooks.online.spectator
+      ? '旁观中（只读）· 点击任一玩家面板可切换视角'
+      : `对方正在操作：${opponentActingText(ctx)}`;
     box.appendChild(note);
     return box;
   }

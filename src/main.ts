@@ -69,7 +69,8 @@ const onlineUi = () => {
   const host = mem.find((m) => m.role === 'host');
   const guest = mem.find((m) => m.role === 'guest');
   return {
-    myPlayer: (online.state.myPlayer ?? 'A') as PlayerId,
+    myPlayer: online.state.myPlayer,
+    spectator: online.state.myPlayer === null, // 旁观者：全程只读（点面板切视角）
     names: { A: host?.name ?? '玩家A', B: guest?.name ?? '玩家B' } as Record<PlayerId, string>,
     peerOnline: online.state.peerOnline,
     onLeaveLobby: leaveOnlineToLobby,
@@ -269,14 +270,17 @@ setOnlineBattleHandler((session) => {
   battleShell?.dispose();
   battleShell = createOnlineShell({ session, onExit: () => {}, onGiveUp: leaveOnlineToLobby }, onlineLayer());
   state = session.state.game;
-  setLocalViewPlayer(session.state.myPlayer);
-  bindTurnTimer({
-    session,
-    myPlayer: session.state.myPlayer ?? 'A',
-    getState: () => state,
-    onTimeout: timeoutDispatch,
-    turnSeconds: session.state.config?.turnSeconds ?? 30,
-  });
+  // 旁观者：默认看 A；不绑回合计时器（否则超时会以 A 的身份发动作 ✗）
+  setLocalViewPlayer(session.state.myPlayer ?? 'A');
+  if (session.state.myPlayer) {
+    bindTurnTimer({
+      session,
+      myPlayer: session.state.myPlayer,
+      getState: () => state,
+      onTimeout: timeoutDispatch,
+      turnSeconds: session.state.config?.turnSeconds ?? 30,
+    });
+  }
   session.subscribe((s) => {
     setTurnTimerPaused(!s.peerOnline || s.peerLeft); // 对方掉线/退出 → 暂停倒计时；恢复 → 继续
     if (s.game) {
@@ -286,5 +290,7 @@ setOnlineBattleHandler((session) => {
   });
   render();
 });
-
-showSetup();
+// 首次进入：若上次还有"未完成的联机对局" → 直达联机大厅（那里会弹「继续上一局」）；
+// 否则回首页菜单。（刷新后直接回到可续局的位置，不用先点"联机"再进大厅。）
+if (hasSavedRoom()) goLobby();
+else showSetup();

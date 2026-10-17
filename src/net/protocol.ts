@@ -34,6 +34,9 @@ export interface RoomInfo {
   config: RoomConfig;
   seats: number;
   filled: number;
+  /** **已真正开战**（房主在离开"选战术/初始设置"阶段后置位）→ 大厅据此才提供「旁观」。
+   *  未开始 / 还在选战术牌时**不提供旁观**（与星杯"`gameStarted && observe`"同构）。 */
+  inBattle?: boolean;
   /** 房主的构建版本（锁步下两端必须同版本，否则会分叉）→ 版本不同的房间客户端应拒绝加入 */
   version: string;
 }
@@ -64,29 +67,77 @@ export type NetMessage =
   | { t: 'hi'; from: string; name: string } // 应答"报到"
   | { t: 'room:announce'; from: string; room: RoomInfo } // 房主（新增/变更）公告房间
   | { t: 'room:gone'; from: string; roomId: string } // 房主关房
-  | { t: 'room:join'; from: string; roomId: string; name: string; role: Role; version: string }
-  | { t: 'room:leave'; from: string; roomId: string }
-  | { t: 'room:denied'; from: string; roomId: string; reason: 'version' } // 拒绝加入（当前仅：版本不一致）
   | {
-      /** 断线重连：重进方按持久化身份请求重回房间；房内有对局的一方回 `snapshot` */
+      /** 加入房间。`key`＝本机身份 key（localStorage 持久随机串；与星杯 `onlineKey` 同款）——
+       *  房主用它做**黑名单**判定与"只认本人"的重连校验。 */
+      t: 'room:join';
+      from: string;
+      roomId: string;
+      name: string;
+      role: Role;
+      version: string;
+      key?: string;
+    }
+  | { t: 'room:leave'; from: string; roomId: string }
+  | {
+      /** 拒绝加入：`version`＝构建版本不一致（必分叉）；`banned`＝命中房主本机黑名单；
+       *  `spectate`＝现在不能旁观（未开局 / 还在选战术牌 / 房主关闭了旁观）。
+       *  ⚠️ 这是**房间级广播**（房里所有人都会收到）→ **必须带 `target`（收件人 peerId）**，
+       *  收件方才执行"离开+重置"；其他人忽略。（否则"别人被拒"会把来客也踢出房间。） */
+      t: 'room:denied';
+      from: string;
+      roomId: string;
+      reason: 'version' | 'banned' | 'spectate';
+      target?: string;
+    }
+  | {
+      /** 断线重连：重进方按持久化身份请求重回房间；房内有对局的一方回 `snapshot`。
+       *  `key`＝本机身份 key（房主据此核对"是不是原来那位"）。 */
       t: 'rejoin';
       from: string;
       roomId: string;
       name: string;
       role: Role;
+      key?: string;
     }
   | {
-      /** 状态快照（断线重连用）：把完整对局（可 JSON 序列化）+ 名单 + 房间配置回发给重连方 */
+      /** 状态快照（断线重连用）：把完整对局（可 JSON 序列化）+ 名单 + 房间配置回发给重连方。
+       *  `hostKey`：房主的身份 key（房客据此核对房主的 `rejoin` 是否为本人）。 */
       t: 'snapshot';
       from: string;
       roomId: string;
       game: GameState;
       members: Member[];
       config: RoomConfig;
+      hostKey?: string;
     }
   | { t: 'presence'; from: string; roomId: string; members: Member[] } // 房主广播在场名单
-  | { t: 'chat'; from: string; roomId: string; name: string; text: string; at: number }
-  | { t: 'start'; from: string; roomId: string; seed: number; setup: StartSetup }
+  | {
+      /** 聊天。`sys: true`＝**系统行**（无发言人，如"「XX」进来旁观"）。 */
+      t: 'chat';
+      from: string;
+      roomId: string;
+      name: string;
+      text: string;
+      at: number;
+      sys?: boolean;
+    }
+  | {
+      /** 开局。`hostKey`：房主身份 key（房客保存，用于将来核对房主的 `rejoin`）。 */
+      t: 'start';
+      from: string;
+      roomId: string;
+      seed: number;
+      setup: StartSetup;
+      hostKey?: string;
+    }
+  | {
+      /** 房主踢人（房间类消息）：`target`＝被踢成员的 peerId。被踢方回大厅；座位随之空出。 */
+      t: 'room:kick';
+      from: string;
+      roomId: string;
+      target: string;
+    }
   | { t: 'action'; from: string; roomId: string; action: Action }
   | {
       /** 选择阶段同步：`merge`＝只同步"发送方那一侧"（预设/构筑各自选自己）；`whole`＝整份状态（轮选轮到谁谁选） */

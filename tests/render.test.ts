@@ -1878,8 +1878,8 @@ describe('renderGame (interaction)', () => {
     const imgs = root.querySelectorAll<HTMLImageElement>('img.card-art-img');
     expect(imgs.length).toBe(6);
     const srcs = Array.from(imgs).map((i) => i.getAttribute('src'));
-    expect(srcs).toContain('/cards/001.jpg');
-    expect(srcs).toContain('/cards/006.jpg');
+    expect(srcs).toContain('./cards/001.jpg');
+    expect(srcs).toContain('./cards/006.jpg');
   });
 
   it('opens the 007 chooser with an option step and completes 震荡斩击 with explicit params', () => {

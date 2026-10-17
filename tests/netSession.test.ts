@@ -20,10 +20,10 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
   it('建房 / 加入 / 在场 / 聊天 / 开局 / 动作 → 两端引擎状态完全一致', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
 
-    // 建房 → 来客能看到房间
+    // 建房 → 访客能看到房间
     const roomId = host.createRoom(config);
     await flush();
     expect(guest.listRooms().map((r) => r.id)).toContain(roomId);
@@ -32,13 +32,13 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     // 加入 → 两端在场名单都变成 2 人
     guest.joinRoom(roomId);
     await flush();
-    expect(host.state.members.map((m) => m.name)).toEqual(['房主', '来客']);
-    expect(guest.state.members.map((m) => m.name)).toEqual(['房主', '来客']);
+    expect(host.state.members.map((m) => m.name)).toEqual(['房主', '访客']);
+    expect(guest.state.members.map((m) => m.name)).toEqual(['房主', '访客']);
     expect(guest.state.role).toBe('guest');
     expect(guest.state.myPlayer).toBe('B');
     expect(host.state.myPlayer).toBe('A');
 
-    // 聊天（来客 → 房主）
+    // 聊天（访客 → 房主）
     guest.chat('你好');
     await flush();
     expect(host.state.chat.map((c) => c.text)).toContain('你好');
@@ -51,7 +51,7 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     expect(JSON.stringify(guest.state.game)).toBe(JSON.stringify(host.state.game));
 
     // 开局写一条普通战报「谁是谁」（昵称），两端都写
-    expect(host.state.game!.log.some((l) => l.text === '房主 = 玩家A；来客 = 玩家B')).toBe(true);
+    expect(host.state.game!.log.some((l) => l.text === '房主 = 玩家A；访客 = 玩家B')).toBe(true);
 
     // 发一个动作（房主）→ 对方回放 → 状态仍一致
     host.dispatch({ t: 'advance' });
@@ -62,10 +62,10 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     guest.close();
   });
 
-  it('退出房间：房主关房 → 来客列表移除、并退出该房', async () => {
+  it('退出房间：房主关房 → 访客列表移除、并退出该房', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
 
     const roomId = host.createRoom(config);
@@ -104,7 +104,7 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
   it('断线重连：重进的新会话凭身份取回完整状态快照', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(config);
     await flush();
@@ -117,10 +117,10 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     const before = JSON.stringify(host.state.game);
     expect(before).not.toBe('null');
 
-    // "来客掉线并刷新"：旧会话关闭；写入"本标签页上次在房"的身份（真实由 sessionStorage 维持）
+    // "访客掉线并刷新"：旧会话关闭；写入"本标签页上次在房"的身份（真实由 sessionStorage 维持）
     guest.close();
     sessionStorage.setItem('dust.room.v1', JSON.stringify({ roomId, role: 'guest' }));
-    const guest2 = new NetSession(bus.connect(), '来客');
+    const guest2 = new NetSession(bus.connect(), '访客');
     guest2.tryReconnect();
     await flush();
 
@@ -132,10 +132,10 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     guest2.close();
   });
 
-  it('断线重连：房主刷新也能接回（由来客回快照）', async () => {
+  it('断线重连：房主刷新也能接回（由访客回快照）', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(config);
     await flush();
@@ -148,7 +148,7 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     const before = JSON.stringify(guest.state.game);
     expect(before).not.toBe('null');
 
-    host.close(); // "房主刷新"（旧会话关闭；来客仍在房里、持有对局）
+    host.close(); // "房主刷新"（旧会话关闭；访客仍在房里、持有对局）
     sessionStorage.setItem('dust.room.v1', JSON.stringify({ roomId, role: 'host' }));
     const host2 = new NetSession(bus.connect(), '房主');
     host2.tryReconnect();
@@ -162,10 +162,10 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     host2.close();
   });
 
-  it('对局中来客主动退出 → 房主 peerLeft=true（供战斗界面弹「对方已退出对局」）', async () => {
+  it('对局中访客主动退出 → 房主 peerLeft=true（供战斗界面弹「对方已退出对局」）', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(config);
     await flush();
@@ -174,16 +174,16 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     host.startGame({ firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['004', '005', '006'] });
     await flush();
     expect(host.state.peerLeft).toBe(false);
-    guest.leaveRoom(); // 来客主动退出
+    guest.leaveRoom(); // 访客主动退出
     await flush();
     expect(host.state.peerLeft).toBe(true);
     host.close();
   });
 
-  it('对局中房主关房 → 来客 peerLeft=true', async () => {
+  it('对局中房主关房 → 访客 peerLeft=true', async () => {
     const bus = new InMemoryBus();
     const host = new NetSession(bus.connect(), '房主');
-    const guest = new NetSession(bus.connect(), '来客');
+    const guest = new NetSession(bus.connect(), '访客');
     await flush();
     const roomId = host.createRoom(config);
     await flush();
@@ -205,7 +205,7 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
     try {
       const bus = new InMemoryBus();
       const host = new NetSession(bus.connect(), '房主');
-      const guest = new NetSession(bus.connect(), '来客');
+      const guest = new NetSession(bus.connect(), '访客');
       await settle();
       const roomId = host.createRoom(config);
       await settle();
@@ -218,7 +218,7 @@ describe('联机 · NetSession（内存插头 = 两端锁步同步）', () => {
       await vi.advanceTimersByTimeAsync(6000);
       expect(host.state.peerOnline).toBe(true);
 
-      // 来客"掉线"（非正常：直接关网络，不发 room:leave）→ 房主 12s+ 收不到任何消息
+      // 访客"掉线"（非正常：直接关网络，不发 room:leave）→ 房主 12s+ 收不到任何消息
       guest.close();
       await vi.advanceTimersByTimeAsync(13000);
       expect(host.state.peerOnline).toBe(false);
