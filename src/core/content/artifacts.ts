@@ -428,6 +428,12 @@ export const ALT_OF: Record<string, string> = { '009': 'A01', '010': 'A02', '034
 export const BASE_OF: Record<string, string> = { A01: '009', A02: '010', A03: '034', A04: '020', A05: '028', A06: '016', A07: '006', A08: '013', C01: '001' };
 export const isAltArtifact = (id: string): boolean => id in BASE_OF;
 
+/**
+ * 「特典」神器（`Artifact.special === true`）的技能描述列表**最后**追加的一行提示。
+ * **唯一来源**：`render.ts`（战斗卡面 + 右键详情浮窗）与 `ui/setupScreen.ts`（选择界面右键卡图弹窗）都从这里取——禁止各写一份。
+ */
+export const SPECIAL_ARTIFACT_NOTE = '仅供娱乐，本神器不能在正式比赛中使用';
+
 export function makeArtifact(id: string): Artifact {
   const base = ARTIFACTS[id];
   if (!base) throw new Error(`unknown artifact: ${id}`);

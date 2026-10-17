@@ -73,7 +73,11 @@ const onlineUi = () => {
     names: { A: host?.name ?? '玩家A', B: guest?.name ?? '玩家B' } as Record<PlayerId, string>,
     peerOnline: online.state.peerOnline,
     onLeaveLobby: leaveOnlineToLobby,
-    onChat: () => battleShell?.toggleChat(),
+    onChat: () => {
+      battleShell?.toggleChat();
+      render(); // 打开聊天＝已读 → 立刻重绘、把未读药丸去掉
+    },
+    unread: battleShell?.unreadCount() ?? 0,
   };
 };
 
@@ -176,6 +180,10 @@ else showSetup();
     },
     onPrefsChange: (p) => savePrefs(p),
     onAction: (a) => dispatchAction(a),
+    // 「相同配置快速重开」：同配置、**新 seed**（骰子全新）；只在左右互搏提供（弹窗另有 !online 门禁）
+    onRestartSame: () => {
+      if (lastLocalOpts) startLocal(lastLocalOpts);
+    },
   });
   scheduleChallengeStep();
   scheduleLegendBlock();
@@ -200,8 +208,11 @@ const timeoutDispatch = (a: Action): void => {
   render();
 };
 
-/** 本地对局开局（左右互搏；联机大厅进入的选择页也用它兜底） */
+/** 本地对局开局（左右互搏；联机大厅进入的选择页也用它兜底）——同时记下配置供「相同配置快速重开」。 */
+let lastLocalOpts: SetupOptions | null = null;
 const startLocal = (opts: SetupOptions): void => {
+  // 记一份浅拷贝（数组也复制：界面后续可能改自己的对象）
+  lastLocalOpts = { ...opts, heroA: [...opts.heroA] as SetupOptions['heroA'], heroB: [...opts.heroB] as SetupOptions['heroB'] };
   if (opts.challengeCardId) {
     // 单人挑战：对手＝挑战卡自动机；固定视角＝挑战者恒在下方（本模式**不做 A/B 换位**）
     state = createChallengeGame({

@@ -254,6 +254,9 @@ export class NetSession {
     if (!this.st.roomId || !text.trim()) return;
     const at = Date.now();
     this.net.send({ t: 'chat', from: this.net.peerId, roomId: this.st.roomId, name: this.st.name, text, at });
+    // **自己发的这条永远不算未读**（未读＝"别人说的、我还没看"）。
+    // ⚠️ 必须在 `pushChat`（内部会 emit）**之前**改读标，否则那一帧会先冒出一个红气球再等下次重绘才消失。
+    this.chatReadCount = this.st.chat.length + 1;
     this.pushChat({ peerId: this.net.peerId, name: this.st.name, text, at });
   }
 
@@ -320,12 +323,27 @@ export class NetSession {
     this.emit();
   }
 
+  /** 「聊天已读」标记（**本机 UI 态**：不进 `st`、不广播、不参与快照）——聊天未读药丸用。
+   *  放在 session 上（而不是某个界面外壳）→ **选择页 → 战斗界面换外壳时不会丢**。 */
+  private chatReadCount = 0;
+
+  /** 未读聊天条数（本机视角）。 */
+  get unreadChat(): number {
+    return Math.max(0, this.st.chat.length - this.chatReadCount);
+  }
+
+  /** 把当前全部聊天标记为已读（打开聊天浮层 / 战斗界面点聊天时调用）。 */
+  markChatRead(): void {
+    this.chatReadCount = this.st.chat.length;
+  }
+
   private resetRoom(): void {
     this.st.roomId = null;
     this.st.role = null;
     this.st.config = null;
     this.st.members = [];
     this.st.chat = [];
+    this.chatReadCount = 0;
     this.st.sel = null;
     this.st.timer = null;
     this.st.game = null;

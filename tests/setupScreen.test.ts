@@ -12,6 +12,7 @@ import {
 import { NetSession } from '../src/net/session';
 import { InMemoryBus } from '../src/net/memory';
 import type { RoomConfig } from '../src/net/protocol';
+import { SPECIAL_ARTIFACT_NOTE } from '../src/core/content/artifacts';
 
 type El = HTMLElement;
 const q = <T extends El = El>(root: El, sel: string): T | null => root.querySelector<T>(sel);
@@ -632,7 +633,7 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect((q(root, '.pick-start') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('使用战术牌（挑战者）：确认列下方出「挑战者 战术牌」；点选后右上角显示卡图', () => {
+  it('使用战术牌（挑战者）：确认列下方出「挑战者 战术牌」；点选后右上角显示卡图（先机＝调整 → 带「调整」徽标）', () => {
     renderChallengeSetup(root, () => {});
     const tacticSwitch = qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!;
     clickEl(tacticSwitch);
@@ -642,6 +643,28 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     const chip = q(root, '.pick-col.confirm .pick-tactic-chip') as HTMLElement;
     expect(chip.dataset.cardId).toBe('T02');
     expect(chip.querySelector('img')!.getAttribute('src')).toBe('./tactics/T02.jpg');
+    // 「先机」在挑战模式的调整名单里 → 卡图左上角有红底「调整」徽标（与神器同一款）
+    expect(chip.querySelector('.pick-adjust-badge')?.textContent).toBe('调整');
+  });
+
+  it('战术「调整」徽标只在挑战模式、且只打在名单内的战术上', () => {
+    // ① 挑战：先机（T02）有；② 挑战：谨慎（T01，不在名单）没有
+    renderChallengeSetup(root, () => {});
+    clickEl(qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!);
+    clickEl(qa(root, '.pick-col.confirm .pick-tactic-name').find((n) => n.textContent === '谨慎')!);
+    const chip1 = q(root, '.pick-col.confirm .pick-tactic-chip') as HTMLElement;
+    expect(chip1.dataset.cardId).toBe('T01');
+    expect(chip1.querySelector('.pick-adjust-badge')).toBeNull();
+
+    // ③ 构筑（非挑战）：先机也不打徽标
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    renderBuildSetup(root, () => {});
+    clickEl(qa(root, '.pick-sw .pick-swlab').find((n) => n.textContent === '使用战术牌')!.parentElement!);
+    clickEl(qa(root, '.pick-col.confirm.A .pick-tactic-name').find((n) => n.textContent === '先机')!);
+    const chip2 = q(root, '.pick-col.confirm.A .pick-tactic-chip') as HTMLElement;
+    expect(chip2.dataset.cardId).toBe('T02');
+    expect(chip2.querySelector('.pick-adjust-badge')).toBeNull();
   });
 
   it('传 Z06（漆黑死神）：已转写 → 显示生命 45 / 防御骰上限 4（不是"待转写"）', () => {
@@ -706,6 +729,14 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     expect(q(root, '.pick-legend-info')!.textContent).toContain('生命 50');
     expect(q(root, '.pick-legend-info')!.textContent).toContain('防御骰上限 无');
     expect(q(root, '.pick-legend-info')!.textContent).not.toContain('待转写');
+  });
+
+  it('挑战选择界面：unordered 技能（如 Z09「威压」）序号显示为 x', () => {
+    renderChallengeSetup(root, () => {});
+    abOf('lifeng', 'legend').click(); // Z09 天殇的战鬼
+    modalOpen();
+    const ts = qa(root, '.pick-modal .pick-sk-t').map((n) => n.textContent ?? '');
+    expect(ts.some((t) => t.startsWith('x) 威压'))).toBe(true);
   });
 
   it('传 Z03（孤塔之王）：已转写且无上限 → 显示「防御骰上限 无」（不是"待转写"）', () => {
@@ -919,5 +950,47 @@ describe('异相（A01–A03）· 选择界面', () => {
     clickEl(q(root, '.pick-rand.A'));
     spy.mockRestore();
     expect(q(root, '.pick-col.confirm.A .pick-slot[data-col="3"] img')!.getAttribute('src')).toBe('./cards/A01.jpg');
+  });
+});
+
+describe('特典神器（C01 雨切·武士刀）· 选择界面·卡图弹窗说明行', () => {
+  /** 右键卡图弹窗靠 `document.elementFromPoint` 命中卡槽；jsdom 没有它 → 打桩。 */
+  const withHit = (el: El, fn: () => void): void => {
+    const doc = document as unknown as { elementFromPoint?: (x: number, y: number) => Element | null };
+    const orig = doc.elementFromPoint;
+    doc.elementFromPoint = () => el;
+    try {
+      fn();
+    } finally {
+      if (orig) doc.elementFromPoint = orig;
+      else delete doc.elementFromPoint;
+    }
+  };
+  const heroOf001 = (): string =>
+    String((Object.keys(HEROES) as Array<keyof typeof HEROES>).find((k) => (HEROES[k] as string[]).includes('001')));
+
+  it('切到特典 C01：弹窗最后一个技能描述下面有说明行', () => {
+    renderBuildSetup(root, () => {});
+    qa(root, '.pick-sw').find((w) => w.querySelector('.pick-swlab')?.textContent === '使用异相神器')!.click();
+    ab(root, heroOf001(), 'A').click();
+    (candSlotBySrc(root, 'A', '001')!.querySelector('.pick-alt-switch') as HTMLElement).click(); // 001 → C01
+    const c01 = candSlotBySrc(root, 'A', 'C01')!;
+    withHit(c01, () => {
+      root.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+    });
+    const modal = q(root, '.pick-modal.on');
+    expect(modal).not.toBeNull();
+    expect(modal!.querySelector('.pick-special-note')?.textContent).toBe(SPECIAL_ARTIFACT_NOTE);
+  });
+
+  it('普通神器（001）：弹窗没有说明行', () => {
+    renderBuildSetup(root, () => {});
+    ab(root, heroOf001(), 'A').click();
+    const slot = candSlotBySrc(root, 'A', '001')!;
+    withHit(slot, () => {
+      root.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+    });
+    expect(q(root, '.pick-modal.on')).not.toBeNull();
+    expect(q(root, '.pick-modal.on .pick-special-note')).toBeNull();
   });
 });

@@ -180,6 +180,7 @@ describe('挑战模式 · Z04 效果', () => {
 describe('挑战模式 · Z04 D1（开局选骰）', () => {
   it('情形 1：梦醒可吃的同点 ≥2 种 → 选项＝各点值（kind dream）；顿悟必断', () => {
     const g = make();
+    g.challenge!.turn = 1; // 非首回合（首回合不弹 D1）
     g.challenge!.driven = [
       die('a1', 2), die('a2', 2), die('a3', 2), die('a4', 2),
       die('b1', 5), die('b2', 5), die('b3', 5), die('b4', 5), die('c1', 1), die('c2', 3),
@@ -193,6 +194,7 @@ describe('挑战模式 · Z04 D1（开局选骰）', () => {
 
   it('情形 2：梦醒仅 1 种、顿悟 ≥2 个顺点窗口 → 选项＝各窗口（kind straight）', () => {
     const g = make();
+    g.challenge!.turn = 1; // 非首回合（首回合不弹 D1）
     g.challenge!.driven = [
       die('a1', 2), die('a2', 2), die('a3', 2), die('a4', 2), die('a5', 2),
       die('b', 1), die('c', 3), die('d', 4), die('e', 5), die('f', 6),
@@ -206,12 +208,26 @@ describe('挑战模式 · Z04 D1（开局选骰）', () => {
 
   it('没得选：既无 ≥2 种同点、也无 ≥2 个顺点窗口 → null', () => {
     const g = make();
+    g.challenge!.turn = 1;
     g.challenge!.driven = [die('a', 1), die('b', 2), die('c', 3), die('d', 5), die('e', 6)];
     expect(legendAssignNeeded(g)).toBeNull();
   });
 
+  it('传奇第 1 回合：即便有 ≥2 种分法也不弹 D1（怜悯* 必跳过）；第 2 回合恢复', () => {
+    const g = make();
+    g.challenge!.turn = 0; // 传奇第 1 回合（怜悯* 会跳过 z04-2/z04-3）
+    g.challenge!.driven = [
+      die('a1', 2), die('a2', 2), die('a3', 2), die('a4', 2),
+      die('b1', 5), die('b2', 5), die('b3', 5), die('b4', 5), die('c1', 1), die('c2', 3),
+    ];
+    expect(legendAssignNeeded(g)).toBeNull(); // 首回合不弹
+    g.challenge!.turn = 1;
+    expect(legendAssignNeeded(g)).not.toBeNull(); // 第 2 回合照常弹
+  });
+
   it('自动：有利＝取大、不利＝取小', () => {
     const g = make();
+    g.challenge!.turn = 1; // 非首回合（首回合不弹 D1）
     g.challenge!.driven = [
       die('a1', 2), die('a2', 2), die('a3', 2), die('a4', 2),
       die('b1', 5), die('b2', 5), die('b3', 5), die('b4', 5), die('c1', 1), die('c2', 3),

@@ -368,10 +368,10 @@ export function slotPhrase(slots: ChallengeSlot[] | null, perGroup = false): str
   return '（必检）';
 }
 
-/** 挑战模式「特殊规则（技能削弱）」单条。**浮窗与引擎共用这一份**，禁止另写文案。 */
+/** 挑战模式「规则调整（技能削弱）」单条。**浮窗与引擎共用这一份**，禁止另写文案。 */
 export interface ChallengeRuleNote {
   id: string;
-  /** 浮窗显示名（带神器编号更好认，如「013 鸣雷·雷暴（持续）」） */
+  /** 浮窗显示名（**不带神器编号**，如「鸣雷·雷暴（持续）」） */
   title: string;
   /** 一句话说明（照 FAQ 结论写，别自己发挥） */
   text: string;
@@ -382,35 +382,73 @@ export interface ChallengeRuleNote {
   inertSkills?: string[];
 }
 
-/** 出处：`尘起时刻FAQ_v2.6文本.md`（13.2.5 / 17.1.5 / 28.1.2 / 41.1.1 / 23.2.3 / 20.1.4）。 */
+/** 出处：`尘起时刻FAQ_v2.6文本.md`（13.2.5 / 17.1.5 / 28.1.2 / 20.1.4 / 23.2.3 / 26? / 27.1.2 / 33.1.x）。
+ *  **标题格式**：`神器·技能名（类型）`；异相条目写作 `神器「异相」·技能名`（兽魂不写技能名）。
+ *  顺序＝按神器编号（013→033），战术牌排在最后。 */
 export const CHALLENGE_RULE_NOTES: ChallengeRuleNote[] = [
   {
     id: 'leibao',
-    title: '013 鸣雷·雷暴（持续）',
+    title: '鸣雷·雷暴（持续）',
     text: '单人挑战中没有任何效果——「昔日传奇」没有重掷阶段。',
     inertSkills: ['minglei.leibao.continuous'],
   },
   {
     id: 'weimu',
-    title: '017 幽冥·帷幕',
+    title: '幽冥·帷幕（触发）',
     text: '单人挑战中没有任何效果——「昔日传奇」没有重掷阶段。',
     inertSkills: ['youming.weimu'],
   },
   {
-    id: 'tianfa-bairi',
-    title: '028 天罚·白昼之火（含异相 A05）',
-    text: '单人挑战中没有任何效果——用于降低「天罚」对「昔日传奇」的压制。',
-    inertSkills: ['tianfa.bairi', 'tianfa.alt.shenkong'],
+    id: 'shouhun',
+    title: '兽魂',
+    text: '「扣减你的计数」这类选择，由挑战者决定。',
   },
   {
     id: 'shexie-gongzhen',
-    title: '023 蛇蝎·共振',
+    title: '蛇蝎·共振（启动）',
     text: '选「双方各获得冥想骰」时，跳过给「昔日传奇」的那份；你照常获得。',
   },
   {
-    id: 'shouhun',
-    title: '020 兽魂',
-    text: '「扣减你的计数」这类选择，由挑战者决定。',
+    id: 'shexie-weiju',
+    title: '蛇蝎·畏惧（启动）',
+    text: '需要对手选择使用/消耗/弃置骰子的这类选择，由挑战者决定。',
+  },
+  {
+    id: 'kuangwu-ultimate',
+    title: '狂舞·凶弹业舞（必杀）',
+    text: '只按 5 个区域结算（跳过「昔日传奇」没有的冥想骰区）：我冥想→我攻击→我防御→对方攻击→对方防御。',
+  },
+  {
+    id: 'aige-xianzhen',
+    title: '哀歌·陷阵（持续）',
+    text: '需要对手选择使用/消耗/弃置骰子的这类选择，由挑战者决定。',
+  },
+  {
+    id: 'hanguang-linglie',
+    title: '寒光·凛冽之音（充能）',
+    text: '单人挑战中无法作用于「昔日传奇」——它没有重掷阶段，本技能只在你自己重掷能力骰时结算。',
+  },
+  {
+    id: 'tianfa-bairi',
+    title: '天罚·白昼之火（激活）',
+    text: '单人挑战中没有任何效果——但依然可以激活。用于降低「天罚」对「昔日传奇」的压制。',
+    inertSkills: ['tianfa.bairi'],
+  },
+  {
+    id: 'tianfa-alt-shenkong',
+    title: '天罚「异相」·深空之火',
+    text: '单人挑战中没有任何效果——但依然可以激活。用于降低「天罚」对「昔日传奇」的压制。',
+    inertSkills: ['tianfa.alt.shenkong'],
+  },
+  {
+    id: 'diaoling-siwang',
+    title: '凋零·死亡亦逝（持续）',
+    text: '轮到「昔日传奇」的回合结束时，由挑战者决定选择一项执行，但不允许故意多弃骰子。',
+  },
+  {
+    id: 'xianji',
+    title: '先机（战术牌）',
+    text: '本模式下「定先手」没有任何效果（挑战永远从「昔日传奇」的回合开始）。',
   },
 ];
 
@@ -418,6 +456,18 @@ export const CHALLENGE_RULE_NOTES: ChallengeRuleNote[] = [
 export function challengeInertSkills(): Set<string> {
   return new Set(CHALLENGE_RULE_NOTES.flatMap((n) => n.inertSkills ?? []));
 }
+
+/**
+ * 挑战模式「调整」徽标要标的**神器 id**（选择界面 + 战斗界面共用这一份；名单可增删）。
+ * 覆盖 `CHALLENGE_RULE_NOTES` 里涉及的神器：013 鸣雷 / 017 幽冥 / 020 兽魂 / 023 蛇蝎 /
+ * 024 狂舞 / 026 哀歌 / 027 寒光 / 028 天罚 / A05 天罚「异相」 / 033 凋零。
+ * ⚠️ **不含 A04（兽魂「异相」）**：020 的判定人是「攻击方」（挑战下永远是昔日 → 由挑战者代决＝属调整），
+ *    而 A04 的判定人是「持有者」（＝挑战者自己，永远自选）→ **不属调整**（`combat.ts` 的 `shouhunInfo`）。
+ */
+export const ADJUSTED_ARTIFACTS: string[] = ['013', '017', '020', '023', '024', '026', '027', '028', 'A05', '033'];
+
+/** 挑战模式「调整」徽标要标的**战术牌 id**（当前仅 T02「先机」）。 */
+export const ADJUSTED_TACTICS: string[] = ['T02'];
 
 /**
  * 挑战模式下**效果失效**的战斗牌（战术牌）key 集合——**生命修正不受影响，照吃**。

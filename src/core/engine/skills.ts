@@ -161,6 +161,18 @@ export function consumeDiceByKind(
 }
 
 /**
+ * 023「畏惧」能否发动：**对方必须至少有 1 颗能力骰**。
+ * 口径＝对方**三个骰区**的合计（**不含 034 破障的存放骰**，与 `shexie.weiju` 处理器里的校验逐字一致）。
+ * **引擎（`dustRiseActions` 不生成"畏惧"侧候选）与界面（`dustSideStep` 不渲染该按钮）共用这一份**——
+ * 全模式生效（这是规则常识的可用性，不是挑战模式削弱）。
+ */
+export function weijuAvailable(g: GameState, owner: PlayerId): boolean {
+  const opp: PlayerId = owner === 'A' ? 'B' : 'A';
+  const o = g.players[opp];
+  return o.areas.attack.length + o.areas.defense.length + o.areas.meditation.length > 0;
+}
+
+/**
  * 回合开始时的触发式持续效果（在重置回合标记之后、补充能力骰之前调用）。
  * FAQ 8.1.1：008「战车」在此时间点检查防御骰，获得的攻击骰计入能力骰总数，
  * 因此可能减少随后的正常补充数量。
@@ -1134,13 +1146,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const opp: PlayerId = player === 'A' ? 'B' : 'A';
       const groups = (params.groups as string[][] | undefined) ?? [];
       const dir = params.direction === 'ccw' ? 'ccw' : 'cw';
-      if (groups.length !== 6) throw new Error('需要为 6 个区域各提供一组选择');
+      // 挑战模式：「昔日传奇」**没有冥想骰区** → 只 **5 个区域**（跳过"对方冥想"这一格）
+      const challenge = g.mode === 'challenge';
+      const n = challenge ? 5 : 6;
+      if (groups.length !== n) throw new Error(`需要为 ${n} 个区域各提供一组选择`);
       // 顺时针（FAQ 24.1.1）：我冥想→我攻击→我防御→对方冥想→对方攻击→对方防御；逆时针取反
       const cw: { player: PlayerId; kind: DiceKind }[] = [
         { player, kind: 'meditation' },
         { player, kind: 'attack' },
         { player, kind: 'defense' },
-        { player: opp, kind: 'meditation' },
+        ...(challenge ? [] : [{ player: opp, kind: 'meditation' as DiceKind }]),
         { player: opp, kind: 'attack' },
         { player: opp, kind: 'defense' },
       ];
@@ -1160,7 +1175,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       // 快照后再整体移动，避免连锁移动
       let moved = 0;
       picked.forEach((ids, i) => {
-        const dest = cycle[(i + 1) % 6];
+        const dest = cycle[(i + 1) % cycle.length];
         for (const id of ids) {
           transferDice(g, cycle[i].player, [id], dest.player, dest.kind);
           moved += 1;
@@ -1168,7 +1183,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       });
       logLine(
         g,
-        `${pname(player)} 发动必杀「凶弹业舞」：双方 6 个区域各选最多 3 颗，按${dir === 'cw' ? '顺时针' : '逆时针'}移动到下一区域（共移动 ${moved} 颗）`,
+        `${pname(player)} 发动必杀「凶弹业舞」：双方 ${n} 个区域各选最多 3 颗，按${dir === 'cw' ? '顺时针' : '逆时针'}移动到下一区域（共移动 ${moved} 颗）`,
       );
     },
   },

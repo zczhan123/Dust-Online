@@ -26,6 +26,8 @@ export interface OnlineShell {
   bar: (top: HTMLElement, modeLabel: string, opts?: { onStart?: () => void; canStart?: boolean }) => void;
   /** 开/关聊天浮层（战斗界面用一个独立按钮调它） */
   toggleChat: () => void;
+  /** 未读聊天条数（战斗界面的红色药丸读它） */
+  unreadCount: () => number;
   /** 移除浮层（离开选择页时调用） */
   dispose: () => void;
 }
@@ -111,11 +113,36 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
       line.append(who, txt);
       chatList.appendChild(line);
     }
+    // **微信式**：永远优先显示**最底下一条**（最新），看历史往上滚
     chatList.scrollTop = chatList.scrollHeight;
+    // **浮层开着＝正在看** → 一律视为已读（自己发的、对方刚发的都不该冒红气球）。
+    //   两个入口（选择页顶栏 / 战斗界面右槽）打开的是同一个浮层、走同一个 `renderChat` → 一处即覆盖两处。
+    if (!chatPop.hidden) session.markChatRead();
+  };
+
+  // ── 未读药丸（红底白字）：选择界面顶栏「聊天」按钮上 ──
+  //    只改**已存在**的徽标元素、**不触发整页重绘**（否则"来消息"会把已打开的技能弹窗关掉）。
+  let chatBadge: HTMLElement | null = null;
+  let prevUnread = 0;
+  const refreshChatBadge = (): void => {
+    const n = session.unreadChat;
+    if (chatBadge) {
+      chatBadge.hidden = n === 0;
+      chatBadge.textContent = n > 9 ? '9+' : String(n);
+      // 新消息到达 → 一次性 pop（不循环闪）
+      if (n > 0 && n !== prevUnread) {
+        chatBadge.classList.remove('chat-badge--pop');
+        void chatBadge.offsetWidth; // 强制重排以重播动画
+        chatBadge.classList.add('chat-badge--pop');
+      }
+    }
+    prevUnread = n;
   };
   const renderSettings = (): void => {
     setPop.innerHTML = '';
-    const t = el('div', 'online-pop-title');
+    // ⚠️ 行草字体是"首页专用子集"，本句里的「设」不在子集 → 会逐字回退、整句混排 → 这一句改用 UI 字体
+    //    （`.online-pop-title--ui`；「聊天」保持原样）
+    const t = el('div', 'online-pop-title online-pop-title--ui');
     t.textContent = '房间设置（只读）';
     setPop.appendChild(t);
     const cfg = session.state.config;
@@ -173,6 +200,7 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
     renderChat();
     renderSettings();
     renderDrop();
+    refreshChatBadge();
   });
   renderChat();
   renderSettings();
@@ -182,7 +210,16 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
     const open = pop.hidden;
     chatPop.hidden = true;
     setPop.hidden = true;
-    if (open) pop.hidden = false;
+    if (open) {
+      pop.hidden = false;
+      // 打开聊天＝已读；并**在显示之后**重绘一次（浮层 hidden 时 scrollHeight=0 → 贴底会失效）
+      if (pop === chatPop) {
+        session.markChatRead();
+        renderChat();
+        refreshChatBadge();
+        chatInput.focus();
+      }
+    }
   };
 
   const bar = (top: HTMLElement, modeLabel: string, opts?: { onStart?: () => void; canStart?: boolean }): void => {
@@ -207,7 +244,12 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
     wait.textContent = guest
       ? '双方已到位 · 可以开始选择'
       : '等待来客加入 · 双方到齐后即可开始选择';
-    const chat = btn('pick-back online-btn', '聊天');
+    const chat = btn('pick-back online-btn online-chat-btn', '聊天');
+    // 未读药丸：**始终创建**（0 时隐藏）→ 新消息来时只需改它，无需整页重绘
+    chatBadge = el('span', 'chat-badge');
+    chatBadge.hidden = true;
+    chat.appendChild(chatBadge);
+    refreshChatBadge();
     chat.addEventListener('click', () => toggle(chatPop));
     const set = btn('pick-back online-btn', '房间设置');
     set.addEventListener('click', () => toggle(setPop));
@@ -226,6 +268,7 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
   return {
     bar,
     toggleChat: () => toggle(chatPop),
+    unreadCount: () => session.unreadChat,
     dispose: () => {
       unsub();
       chatPop.remove();

@@ -244,8 +244,10 @@ export type Pending =
   | { kind: 'quanzhiAssign'; player: PlayerId }
   /** 032 梦魇·低语（持续）：持有者**主要阶段结束时**，宣称 1 个能力骰类型（获得 1 随机骰并移入该区） */
   | { kind: 'kuyu'; player: PlayerId }
-  /** 033 凋零·死亡亦逝（持续）：某玩家**回合结束时**，亲自择①全相同/②全不同并弃自己的能力骰 */
-  | { kind: 'tiaolingPick'; player: PlayerId }
+  /** 033 凋零·死亡亦逝（持续）：某玩家**回合结束时**，择①全相同/②全不同并弃自己的能力骰。
+   *  `owner` ＝**被弃骰的归属方**（缺省＝`player`）。挑战模式下轮到传奇结束时＝**挑战者(A)代决**（`player:'A'`、`owner:'B'`），
+   *  且代决传奇时**只能弃"最少颗数"**（不许故意多弃）。 */
+  | { kind: 'tiaolingPick'; player: PlayerId; owner?: PlayerId }
   /** 结束阶段：能力骰总数超过「意志」上限时，由**当前回合玩家自行选择**弃置哪几颗（说明书 page_09） */
   | { kind: 'endDiscard'; player: PlayerId }
   /** 035 千劫·万丈明光（持续）：持有者**主要阶段开始时**，弃置 2 个能力骰 */
@@ -477,6 +479,9 @@ export interface GameState {
     /** Z10「救赎」：**下一个传奇回合的覆盖参数**（该回合投 `rollDice` 个驱动骰、攻击伤害 `atkBonus`）。
      *  `救赎` 生效时置位 → 本回合照常结束 → `beginTurn` → `runLegendTurn` **读取并消费**（消费后清空）。 */
     nextTurnOverride?: { rollDice: number; atkBonus: number };
+    /** Z10「救赎」：本回合「回合结束」（033 等）**尚未结算完** → 新回合要**延后**到它解完再开。
+     *  `救赎` 生效且该回合需要结算 033 时置位 → `case 'challengeStep'` 里执行 `startNextLegendTurn` 并清空。 */
+    startNextTurnAfterPending?: boolean;
     /** Z11「血祭」（**本技能发起的这批攻击**期间）：每次攻击后计数 +1（≤`countCap`）、每次造成伤害后自伤 =计数。
      *  `血祭` 排队攻击时置位 → 该批 `virtualQueue` 走空时清除（之后其它技能的攻击不计入）。 */
     xueji?: boolean;

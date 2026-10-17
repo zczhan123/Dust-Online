@@ -1,10 +1,10 @@
 import type { PlayerId } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { LEGEND_TEXT } from '../core/content/legendText';
-import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact } from '../core/content/artifacts';
+import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact, SPECIAL_ARTIFACT_NOTE } from '../core/content/artifacts';
 import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/legends';
 import { TACTICS, TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
-import { CHALLENGES, slotPhrase, type ChallengeCard } from '../core/content/challenges';
+import { CHALLENGES, slotPhrase, ADJUSTED_ARTIFACTS, ADJUSTED_TACTICS, type ChallengeCard } from '../core/content/challenges';
 import { APP_VERSION_LABEL } from '../version';
 import { renderLobby } from './lobby';
 import { createOnlineShell, type OnlineCtx, type OnlineShell } from './online';
@@ -92,6 +92,12 @@ function addSpecialBadge(slot: HTMLElement): void {
   const b = el('span', 'pick-special-badge');
   b.textContent = '特典';
   b.title = '特典神器：不能在正式比赛中使用';
+  slot.appendChild(b);
+}
+/** 挑战模式「调整」徽标（红底白字；**仅挑战模式的选择界面**用）。`below`＝该卡已有「异相」→ 排在其下。 */
+function addAdjustBadge(slot: HTMLElement, below: boolean): void {
+  const b = el('span', `pick-adjust-badge${below ? ' pick-adjust-badge--below' : ''}`);
+  b.textContent = '调整';
   slot.appendChild(b);
 }
 /** 「切换」按钮（卡槽右上角）＝ 原版 ↔ 异相。`disabled` 时保留按钮但不可点（用于"另一版已被对方选走、已自动切版"）。 */
@@ -278,6 +284,12 @@ function createCardInspector(
         row.appendChild(d);
         box.appendChild(row);
       }
+    }
+    // 特典神器（`special`）：技能描述**之后**追加一行提示
+    if (!isLegend && !isTactic && ARTIFACTS[id]?.special) {
+      const note = el('div', 'pick-special-note');
+      note.textContent = SPECIAL_ARTIFACT_NOTE;
+      box.appendChild(note);
     }
     modal.classList.add('on');
     box.classList.toggle('soft', soft);
@@ -472,6 +484,8 @@ function tacticSection(opts: {
   inspector: { consumeLp: () => boolean };
   onPick: (id: string | null) => void;
   onRandom: (id: string) => void;
+  /** 挑战模式：已选战术若在 `ADJUSTED_TACTICS` 名单里 → 卡图左上角打「调整」徽标（其它模式不传） */
+  challenge?: boolean;
 }): HTMLElement {
   const taken = opts.taken ?? [];
   const wrap = el('div', 'pick-tactic');
@@ -498,6 +512,12 @@ function tacticSection(opts: {
     img.alt = '';
     img.draggable = false;
     chip.appendChild(img);
+    // 挑战模式：「调整」名单里的战术（如 T02「先机」）→ 与神器同一款红底白字徽标
+    if (opts.challenge && ADJUSTED_TACTICS.includes(cur)) {
+      const adj = el('span', 'pick-adjust-badge');
+      adj.textContent = '调整';
+      chip.appendChild(adj);
+    }
   }
   wrap.appendChild(chip);
   for (const t of TACTICS) {
@@ -1733,6 +1753,8 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     inner.appendChild(im); art.appendChild(inner); s.appendChild(art);
     if (isAltArtifact(id)) addAltBadge(inner);
       if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
+    // 挑战模式：「规则调整」涉及的神器 → 红底白字「调整」徽标
+    if (ADJUSTED_ARTIFACTS.includes(id)) addAdjustBadge(inner, isAltArtifact(id));
     if (altSwitch) addAltSwitch(inner, altSwitch);
     return s;
   }
@@ -1803,6 +1825,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
         inspector,
         onPick: (id) => { tacticPick = id; render(); },
         onRandom: (id) => { tacticPick = id; render(); },
+        challenge: true, // 「先机」等调整过的战术要打「调整」徽标
       }));
     }
     if (confirmed) {
@@ -1952,7 +1975,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
       card.skills.forEach((sk, i) => {
         const row = el('div', 'pick-sk');
         const t = el('div', 'pick-sk-t');
-        t.textContent = `${i}) ${sk.name}`;
+        t.textContent = `${sk.unordered ? 'x' : i}) ${sk.name}`; // `unordered`（不占顺序步，如死即新生/围攻/威压）序号位显示 `x`
         let phraseText = slotPhrase(sk.slots, sk.perGroup);
         if (sk.marker === '怜悯*') phraseText = phraseText.replace(/）$/, '；怜悯*：第一回合跳过检查）');
         const phrase = el('span', 'pick-chal-phrase');

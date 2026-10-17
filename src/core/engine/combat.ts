@@ -557,7 +557,10 @@ export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
   const sh = shouhunInfo(g, defenderId);
   if (sh && g.pending === null) {
     g.pendingAttack = null;
-    const decider: PlayerId = sh.decider === 'owner' ? defenderId : pa.attacker;
+    const natural: PlayerId = sh.decider === 'owner' ? defenderId : pa.attacker;
+    // 挑战模式：决策人若落在**传奇(B)** → 由**挑战者代决**（FAQ 20.1.4："扣减你的计数"的选择由挑战者决定；
+    //   与 Z 卡代决的 settleMode 有利/不利**无关** → 三种结算模式下都弹面板）。`owner` 仍是"骰子归谁"。
+    const decider: PlayerId = g.mode === 'challenge' && natural === 'B' ? 'A' : natural;
     queuePending(g, { kind: 'shouhunCancel', player: decider, owner: defenderId, attack: pa, minCount: sh.minCount });
     pumpPending(g);
     return;

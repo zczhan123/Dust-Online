@@ -89,17 +89,27 @@ describe('挑战卡 · slotPhrase（文本记法）', () => {
 });
 
 describe('挑战模式特殊规则（技能削弱）· 唯一数据来源', () => {
-  it('5 条规则、顺序与 id 精确', () => {
+  it('规则调整：12 条、顺序与 id 精确', () => {
     expect(CHALLENGE_RULE_NOTES.map((n) => n.id)).toEqual([
       'leibao',
       'weimu',
-      'tianfa-bairi',
-      'shexie-gongzhen',
       'shouhun',
+      'shexie-gongzhen',
+      'shexie-weiju',
+      'kuangwu-ultimate',
+      'aige-xianzhen',
+      'hanguang-linglie',
+      'tianfa-bairi',
+      'tianfa-alt-shenkong',
+      'diaoling-siwang',
+      'xianji',
     ]);
     for (const n of CHALLENGE_RULE_NOTES) {
       expect(n.title.length).toBeGreaterThan(0);
       expect(n.text.length).toBeGreaterThan(0);
+      expect(/^\d/.test(n.title)).toBe(false); // 标题**不带编号**
+      expect(n.title).not.toContain('**'); // 不留 Markdown 强调标记
+      expect(n.text).not.toContain('**');
     }
   });
 

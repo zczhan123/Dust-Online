@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createGame, createChallengeGame, skipInitialReroll, applyAction, getLegalActions } from '../src/core/engine/game';
-import { renderGame, type RenderHooks, type UiState } from '../src/ui/render';
+import { renderGame, setLocalViewPlayer, type RenderHooks, type UiState } from '../src/ui/render';
 import type { GameState } from '../src/core/model/types';
 
 const freshUi = (): UiState => ({
@@ -60,15 +60,17 @@ describe('挑战模式 · 战斗界面「特殊规则」入口', () => {
     expect(root.querySelector('[data-act="challengeRulesOpen"]')).toBeNull();
   });
 
-  it('点开后浮窗列出 5 条削弱（数据来自 CHALLENGE_RULE_NOTES）', () => {
+  it('点开后浮窗列出全部「规则调整」条目（数据来自 CHALLENGE_RULE_NOTES；标题**不带编号**）', () => {
     const state = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
     const { root, ui } = mount(state);
     (root.querySelector('[data-act="challengeRulesOpen"]') as HTMLElement).click();
     expect(ui.challengeRulesOpen).toBe(true);
     const text = root.textContent ?? '';
-    for (const t of ['013 鸣雷·雷暴（持续）', '017 幽冥·帷幕', '028 天罚·白昼之火（含异相 A05）', '023 蛇蝎·共振', '020 兽魂']) {
+    for (const t of ['鸣雷·雷暴（持续）', '幽冥·帷幕（触发）', '天罚·白昼之火（激活）', '天罚「异相」·深空之火', '蛇蝎·共振（启动）', '兽魂', '狂舞·凶弹业舞（必杀）', '凋零·死亡亦逝（持续）', '先机（战术牌）']) {
       expect(text).toContain(t);
     }
+    expect(text).not.toContain('兽魂「异相」'); // A04 不由昔日决策 → 不在调整清单
+    expect(text).not.toContain('013 鸣雷'); // 不再带编号（标题由 challenges.test.ts 锁"无编号"）
     // 关闭
     (root.querySelector('[data-act="challengeRulesClose"]') as HTMLElement).click();
     expect(ui.challengeRulesOpen).toBe(false);
@@ -680,5 +682,52 @@ describe('挑战模式 · Z12「不动菩提」封锁提示（全局常驻）', 
     expect(table).not.toBeNull();
     expect(table!.textContent).toContain('不动菩提');
     expect(table!.textContent).toContain('生效中');
+  });
+});
+
+describe('挑战模式 · 「调整」红底徽标', () => {
+  it('只出现在名单内的神器上；标准模式不出现', () => {
+    // 挑战模式本机视角固定为挑战者(A) → 卡面才会渲染挑战者的神器（否则渲染"正在操作方"的）
+    setLocalViewPlayer('A');
+    try {
+      const ch = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['020', 'A04', '026'] });
+      const { root } = mount(ch);
+      for (const id of ['020', '026']) {
+        expect(root.querySelector(`[data-artifact="${id}"] .card-adjust-badge`)?.textContent).toBe('调整');
+      }
+      // A04（兽魂「异相」）＝判定人是持有者（永远挑战者自选）→ **不属调整**、不打徽标
+      expect(root.querySelector('[data-artifact="A04"] .card-adjust-badge')).toBeNull();
+      expect(root.querySelector('[data-artifact="001"] .card-adjust-badge')).toBeNull();
+
+      const ch2 = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['027', '001', '002'] });
+      const { root: r2 } = mount(ch2);
+      expect(r2.querySelector('[data-artifact="027"] .card-adjust-badge')?.textContent).toBe('调整');
+    } finally {
+      setLocalViewPlayer(null);
+    }
+
+    const std = createGame({ seed: 1, firstPlayer: 'A', heroA: ['028', '001', '002'], heroB: ['004', '005', '006'] });
+    const { root: r3 } = mount(std);
+    expect(r3.querySelector('[data-artifact="028"] .card-adjust-badge')).toBeNull();
+  });
+});
+
+describe('挑战模式 · 临时驱动骰区域（升序显示）', () => {
+  it('驱动骰按点数升序显示（同点按 id 稳定）；**仅显示层**、存储顺序不变', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    g.challenge!.driven = [
+      { id: 'd5', value: 5, kind: 'meditation' },
+      { id: 'd1', value: 1, kind: 'meditation' },
+      { id: 'd3a', value: 3, kind: 'meditation' },
+      { id: 'd3b', value: 3, kind: 'meditation' },
+      { id: 'd6', value: 6, kind: 'meditation' },
+    ];
+    const { root } = mount(g);
+    const shown = Array.from(root.querySelectorAll('.challenge-staging .die')).map((el) =>
+      Number((el as HTMLElement).dataset.value),
+    );
+    expect(shown).toEqual([1, 3, 3, 5, 6]);
+    // 存储顺序不变（引擎侧不受影响）
+    expect(g.challenge!.driven.map((d) => d.value)).toEqual([5, 1, 3, 3, 6]);
   });
 });

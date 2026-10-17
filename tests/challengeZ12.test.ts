@@ -286,3 +286,44 @@ describe('挑战模式 · Z12 不动菩提（封锁）', () => {
     expect(g.challenge!.lockValue).toBeUndefined(); // runLegendTurn 清除
   });
 });
+
+describe('挑战模式 · Z12 超度 · 区域并列 → 代决', () => {
+  const setup = (mode: 'manual' | 'favor' | 'against'): GameState => {
+    const g = make(mode);
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.challenge!.turn = 2;
+    g.challenge!.resumeAt = 3; // 超度
+    g.challenge!.driven = [die('k1', 1), die('k2', 3), die('k3', 5)]; // 满足 {1,2}/{3,4}/{5,6} 各一 → 单个候选
+    g.pending = null;
+    g.pendingAttack = null;
+    g.virtualQueue = null;
+    g.attackQueue = null;
+    g.challenge!.deferred = undefined;
+    setA(g, {
+      attack: [die('a1', 1, 'attack'), die('a2', 2, 'attack'), die('a3', 3, 'attack')],
+      meditation: [die('m1', 1, 'meditation'), die('m2', 2, 'meditation'), die('m3', 3, 'meditation')],
+    }); // 攻 3 / 冥 3 并列最多
+    return g;
+  };
+
+  it('并列 → 自选弹面板（选项按 攻→防→冥）', () => {
+    const g = setup('manual');
+    applyAction(g, { t: 'challengeStep' });
+    const pd = g.pending as { kind?: string; options?: { id: string }[] } | null;
+    expect(pd?.kind).toBe('challengePick');
+    expect(pd!.options!.map((o) => o.id)).toEqual(['attack', 'meditation']);
+  });
+
+  it('有利＝取首（攻）；不利＝取尾（冥）', () => {
+    // 重掷会换值/换区（随机）→ 用**战报**断言"被重掷的是哪个区域"（确定性）
+    const gf = setup('favor');
+    applyAction(gf, { t: 'challengeStep' });
+    expect(gf.log.map((l) => l.text).join('\n')).toContain('重掷挑战者攻骰区');
+
+    const ga = setup('against');
+    applyAction(ga, { t: 'challengeStep' });
+    expect(ga.log.map((l) => l.text).join('\n')).toContain('重掷挑战者冥骰区');
+  });
+});

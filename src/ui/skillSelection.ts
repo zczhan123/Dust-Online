@@ -2,6 +2,7 @@ import type { DiceKind, Die, GameState, PlayerId } from '../core/model/types';
 import { hasActiveSkill } from '../core/engine/skill-state';
 import { abilityDicePool, abilityDieInfo } from '../core/engine/effects';
 import { effectiveWill } from '../core/engine/derive';
+import { siwangMinDiscard } from '../core/engine/game';
 
 export type SelectStep =
   | {
@@ -1018,16 +1019,19 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       toKind: options[2],
     }),
   },
-  // 024 狂舞·凶弹业舞（必杀）：先选方向，再为（按该方向排序的）6 个区域各选 ≤3 颗
+  // 024 狂舞·凶弹业舞（必杀）：先选方向，再为（按该方向排序的）各区域各选 ≤3 颗；挑战模式只 5 个区域
   'kuangwu.ultimate': {
     steps: ({ state, player, options }) => {
       const CN: Record<string, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
       const dir = options[0] === 'ccw' ? 'ccw' : 'cw';
+      const challenge = state.mode === 'challenge'; // 昔日传奇没有冥想骰区 → 跳过"对方冥想"
       const base: { owner: 'self' | 'opponent'; kind: DiceKind }[] = [
         { owner: 'self', kind: 'meditation' },
         { owner: 'self', kind: 'attack' },
         { owner: 'self', kind: 'defense' },
-        { owner: 'opponent', kind: 'meditation' },
+        ...(challenge
+          ? []
+          : [{ owner: 'opponent' as const, kind: 'meditation' as DiceKind }]),
         { owner: 'opponent', kind: 'attack' },
         { owner: 'opponent', kind: 'defense' },
       ];
@@ -1057,9 +1061,9 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
       }
       return steps;
     },
-    buildParams: ({ chosenDice, options }) => ({
+    buildParams: ({ state, chosenDice, options }) => ({
       direction: options[0] === 'ccw' ? 'ccw' : 'cw',
-      groups: chosenDice.slice(1, 7).map((g) => [...g]),
+      groups: chosenDice.slice(1, state.mode === 'challenge' ? 6 : 7).map((g) => [...g]),
     }),
   },
   // 026 哀歌·威压（待决策）：先选变哪一方 → 选 1 颗能力骰点数改为固定值（保留原区域）
@@ -1401,14 +1405,18 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     ],
     buildParams: ({ options }) => ({ area: options[0] ?? 'attack' }),
   },
-  // 033 凋零·死亡亦逝（待决策）：择①全相同/②全不同 + 弃自己的能力骰（可弃 0 或多弃）
+  // 033 凋零·死亡亦逝（待决策）：择①全相同/②全不同 + 弃能力骰
+  //   · 挑战模式下**代决传奇**（`player:'A'`、`owner:'B'`）时：不允许"故意多弃" → 只能弃**最少颗数**
   '@tiaolingPick': {
     steps: ({ state, options }) => {
       const pd = state.pending;
-      const player: PlayerId = pd && pd.kind === 'tiaolingPick' ? pd.player : state.activePlayer;
-      const p = state.players[player];
+      const ownerId: PlayerId = pd && pd.kind === 'tiaolingPick' ? pd.owner ?? pd.player : state.activePlayer;
+      const decider: PlayerId = pd && pd.kind === 'tiaolingPick' ? pd.player : state.activePlayer;
+      const p = state.players[ownerId];
       const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
       const pick = options[0] === 'same' ? 'same' : 'diff';
+      const legendDuty = state.mode === 'challenge' && ownerId !== decider; // 挑战者替传奇代决
+      const minDiscard = siwangMinDiscard(all, pick === 'same');
       return [
         {
           kind: 'option',
@@ -1420,8 +1428,10 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         },
         {
           kind: 'dice',
-          label: '选择要弃置的能力骰（可弃 0 颗，也可多弃）',
-          owner: 'self',
+          label: legendDuty
+            ? '选择要弃置的能力骰（代决「昔日传奇」：只能弃最少的颗数）'
+            : '选择要弃置的能力骰（可弃 0 颗，也可多弃）',
+          owner: ownerId === decider ? 'self' : 'opponent',
           areas: KINDS,
           min: 0,
           max: all.length,
@@ -1429,11 +1439,13 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
             const discard = new Set(picked.map((d) => d.id));
             const remaining = all.filter((d) => !discard.has(d.id)).map((d) => d.value);
             const ok = pick === 'same' ? new Set(remaining).size <= 1 : new Set(remaining).size === remaining.length;
-            if (ok) return { ok: true, hint: pick === 'same' ? '剩余已全部相同 ✓' : '剩余已全部不同 ✓' };
-            return {
-              ok: false,
-              hint: pick === 'same' ? '需弃到剩余全部点数相同' : '需弃到剩余全部点数不同',
-            };
+            if (!ok) {
+              return { ok: false, hint: pick === 'same' ? '需弃到剩余全部点数相同' : '需弃到剩余全部点数不同' };
+            }
+            if (legendDuty && picked.length !== minDiscard) {
+              return { ok: false, hint: `代决「昔日传奇」时只能弃最少的颗数（${minDiscard} 颗）` };
+            }
+            return { ok: true, hint: pick === 'same' ? '剩余已全部相同 ✓' : '剩余已全部不同 ✓' };
           },
         },
       ];

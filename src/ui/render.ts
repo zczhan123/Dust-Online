@@ -12,11 +12,11 @@ import type {
   SkillDef,
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
-import { isAltArtifact } from '../core/content/artifacts';
+import { isAltArtifact, SPECIAL_ARTIFACT_NOTE } from '../core/content/artifacts';
 import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
-import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase } from '../core/content/challenges';
+import { CHALLENGES, CHALLENGE_RULE_NOTES, slotPhrase, ADJUSTED_ARTIFACTS, ADJUSTED_TACTICS } from '../core/content/challenges';
 import { legendAttackBonus, isValueLocked, legendLockValue } from '../core/engine/challenge';
 import { LEGEND_DISPLAY_NAME } from '../core/engine/log';
 import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarState } from '../core/engine/game';
@@ -25,7 +25,7 @@ import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus, attackPointNote } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
-import { lidichengfoRegions } from '../core/engine/skills';
+import { lidichengfoRegions, weijuAvailable } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
@@ -223,6 +223,8 @@ export interface OnlineUi {
   onLeaveLobby: () => void;
   /** 开/关聊天浮层（战斗界面用；由宿主持有 shell） */
   onChat?: () => void;
+  /** 未读聊天条数（>0 时「聊天」按钮右上角显示红色药丸） */
+  unread?: number;
   /** 对端是否在线（心跳判定）→ 在**对方**生命条名字旁显示状态点（在线绿 / 掉线红） */
   peerOnline?: boolean;
 }
@@ -234,6 +236,9 @@ export interface RenderHooks {
   ui: UiState;
   requestRender: () => void;
   onRestart: () => void;
+  /** 「相同配置快速重开」（**仅左右互搏**；宿主在 `startLocal` 记下配置后提供）。
+   *  语义＝**配置相同、骰子全新**（宿主用 `newSeed()` 重建）；联机不提供（两个真人可能各点各的）。 */
+  onRestartSame?: () => void;
   /** 偏好变化时回调（宿主负责写入 localStorage） */
   onPrefsChange?: (p: Prefs) => void;
   /** 联机对局的 UI 上下文（**缺省＝左右互搏**；联机的选择/战斗增强一律以它是否存在为条件） */
@@ -874,6 +879,12 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
     sp.textContent = '特典';
     art.appendChild(sp);
   }
+  // 挑战模式「调整」徽标（红底白字）：仅挑战模式 + 仅名单内的神器；无「异相」占异相位置、有则排其下
+  if (ctx.state.mode === 'challenge' && ADJUSTED_ARTIFACTS.includes(a.id)) {
+    const adj = el('span', `card-adjust-badge${isAltArtifact(a.id) ? ' card-adjust-badge--below' : ''}`);
+    adj.textContent = '调整';
+    art.appendChild(adj);
+  }
   card.appendChild(art);
 
   const text = ARTIFACT_TEXT[a.id];
@@ -966,6 +977,12 @@ function artifactCard(a: Artifact, ctx: Ctx, player: PlayerState): HTMLElement {
       if (hasOnly) skills.classList.add('skills--inline--only');
     }
     card.appendChild(skills);
+    // 特典神器（`special`）：**有技能描述时**在技能区**下方**追加一行提示（隐藏描述的紧凑视图不加）
+    if (a.special && showText) {
+      const note = el('div', 'card-special-note');
+      note.textContent = SPECIAL_ARTIFACT_NOTE;
+      card.appendChild(note);
+    }
   }
 
   return card;
@@ -1357,6 +1374,12 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
   name.addEventListener('pointerleave', clearLp);
   name.addEventListener('pointercancel', clearLp);
   bar.appendChild(name);
+  // 挑战模式「调整」徽标（红底白字，行内）：仅挑战模式 + 仅名单内的战术牌（当前 T02「先机」）
+  if (ctx.state.mode === 'challenge' && ADJUSTED_TACTICS.includes(id)) {
+    const adj = el('span', 'card-adjust-badge card-adjust-badge--inline');
+    adj.textContent = '调整';
+    bar.appendChild(adj);
+  }
   // 「战术」标签：做成小药丸（复用 .skill-type 外观，如「启动」那样）；位于名字之后、存放骰/猜测之前
   const kind = el('span', 'skill-type tactic-bar-kind');
   kind.textContent = '战术';
@@ -1528,7 +1551,12 @@ function challengePanel(player: PlayerState, ctx: Ctx): HTMLElement {
   slab.textContent = '临时驱动骰区域';
   staging.appendChild(slab);
   const sdice = el('div', 'dice');
-  for (const d of state.challenge?.driven ?? []) {
+  // 驱动骰**按点数升序（同点按 id 稳定）显示**——**仅显示层**：不改 `challenge.driven` 的存储顺序
+  //（引擎槽匹配用 `sortedDice` 副本，与显示顺序无关；重掷/追加后每帧重排会自动跟上）
+  const drivenSorted = [...(state.challenge?.driven ?? [])].sort(
+    (a, b) => a.value - b.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  for (const d of drivenSorted) {
     const chip = el('span', 'die die-B');
     chip.dataset.id = d.id;
     chip.dataset.value = String(d.value);
@@ -4824,6 +4852,16 @@ function gameOverModal(ctx: Ctx): HTMLElement {
   btn.textContent = '重新开始游戏';
   btn.addEventListener('click', () => hooks.onRestart());
   foot.appendChild(btn);
+  // 「相同配置快速重开」：**仅左右互搏**（联机有两个真人 → 不提供，避免各点各的）
+  if (hooks.onRestartSame && !hooks.online) {
+    const same = document.createElement('button');
+    same.type = 'button';
+    same.className = 'btn gameover-restart-same';
+    same.textContent = '相同配置快速重开';
+    same.title = '用同样的配置（双方神器/战术牌/结算模式）重开一局，骰子重新随机';
+    same.addEventListener('click', () => hooks.onRestartSame!());
+    foot.appendChild(same);
+  }
   if (hooks.online) {
     const lobby = document.createElement('button');
     lobby.type = 'button';
@@ -4938,16 +4976,17 @@ function resetPrefs(ctx: Ctx): void {
 }
 
 /** 设置面板（左上角「设置」按钮打开） */
-/** 挑战模式「特殊规则（技能削弱）」浮窗：数据唯一来源 `CHALLENGE_RULE_NOTES`。 */
+/** 挑战模式「规则调整（技能削弱）」浮窗：数据唯一来源 `CHALLENGE_RULE_NOTES`。**居中**显示。
+ *  版式＝**一个共享网格**（列1 神器+技能名 / 列2 调整说明）→ 各条说明的**第一个字必然左对齐**。 */
 function challengeRulesPanel(ctx: Ctx): HTMLElement {
   const ui = ctx.hooks.ui;
-  const overlay = el('div', 'settings-overlay');
+  const overlay = el('div', 'settings-overlay challenge-rules-overlay');
   overlay.dataset.act = 'challengeRulesOverlay';
-  const box = el('div', 'settings-panel');
+  const box = el('div', 'challenge-rules-panel');
 
   const head = el('div', 'settings-head');
-  const title = el('div', 'settings-title');
-  title.textContent = '挑战模式特殊规则';
+  const title = el('div', 'challenge-rules-title');
+  title.textContent = '挑战模式规则调整';
   head.appendChild(title);
   const close = document.createElement('button');
   close.type = 'button';
@@ -4961,20 +5000,21 @@ function challengeRulesPanel(ctx: Ctx): HTMLElement {
   head.appendChild(close);
   box.appendChild(head);
 
-  const lead = el('div', 'confirm-hint');
+  const lead = el('div', 'challenge-rules-lead');
   lead.textContent = '本模式下以下技能按 FAQ 特殊处理（点设置旁的按钮随时可看）。';
   box.appendChild(lead);
 
+  // 共享网格：每条 = 两个格子（列1 / 列2），分隔线由两格各自的 border-top 接成一条
+  const body = el('div', 'challenge-rules-body');
   for (const note of CHALLENGE_RULE_NOTES) {
-    const row = el('div', 'settings-row');
-    const lab = el('span', 'settings-label');
-    lab.textContent = note.title;
-    row.appendChild(lab);
-    const txt = el('div', 'hint-notes');
-    txt.textContent = note.text;
-    row.appendChild(txt);
-    box.appendChild(row);
+    const k = el('div', 'challenge-rules-key');
+    k.textContent = note.title;
+    const v = el('div', 'challenge-rules-text');
+    v.textContent = note.text;
+    body.appendChild(k);
+    body.appendChild(v);
   }
+  box.appendChild(body);
   overlay.appendChild(box);
   return overlay;
 }
@@ -5192,6 +5232,12 @@ function detailSkillList(ctx: Ctx, art: Artifact, owner: PlayerId): HTMLElement 
       wrap.appendChild(part);
     }
     box.appendChild(wrap);
+  }
+  // 特典神器：技能描述**之后**追加一行提示（浮窗本来就带描述 → 恒显示）
+  if (art.special) {
+    const note = el('div', 'card-special-note');
+    note.textContent = SPECIAL_ARTIFACT_NOTE;
+    box.appendChild(note);
   }
   return box;
 }
@@ -5915,7 +5961,13 @@ function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
   const hint = el('span', 'dustflow-hint');
   hint.textContent = '选择启动的一侧：';
   wrap.appendChild(hint);
+  let rendered = 0;
+  const owner = ownerIdOfArtifact(ctx.state, art) ?? actorOf(ctx.state);
   for (const side of ['left', 'right'] as const) {
+    // 023「畏惧」（左侧）：**对方没有能力骰时不生成该按钮**——判定与引擎 `dustRiseActions` 同一份
+    //   （`weijuAvailable`）→ 不会出现"按钮在、点了才报错"。全模式生效。
+    if (art.id === '023' && side === 'left' && !weijuAvailable(ctx.state, owner)) continue;
+    rendered += 1;
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn dustflow-side-btn';
@@ -5941,6 +5993,7 @@ function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
     });
     wrap.appendChild(b);
   }
+  if (rendered === 0) wrap.appendChild(dustCancelButton(ctx)); // 兜底：一侧都不可选时给"取消"，避免死路
   return wrap;
 }
 
@@ -6470,7 +6523,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     rulesBtn.type = 'button';
     rulesBtn.className = 'btn btn-settings';
     rulesBtn.dataset.act = 'challengeRulesOpen';
-    rulesBtn.textContent = '挑战模式特殊规则';
+    rulesBtn.textContent = '挑战模式规则调整';
     rulesBtn.addEventListener('click', () => {
       hooks.ui.challengeRulesOpen = true;
       hooks.requestRender();
@@ -6481,9 +6534,15 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   if (hooks.online && hooks.online.onChat) {
     const chatBtn = document.createElement('button');
     chatBtn.type = 'button';
-    chatBtn.className = 'btn btn-settings';
+    chatBtn.className = 'btn btn-settings online-chat-btn';
     chatBtn.dataset.act = 'onlineChat';
     chatBtn.textContent = '聊天';
+    const unread = hooks.online.unread ?? 0;
+    if (unread > 0) {
+      const badge = el('span', 'chat-badge');
+      badge.textContent = unread > 9 ? '9+' : String(unread);
+      chatBtn.appendChild(badge);
+    }
     chatBtn.addEventListener('click', () => hooks.online!.onChat!());
     right.appendChild(chatBtn);
   }

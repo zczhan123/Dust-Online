@@ -37,6 +37,49 @@ describe('挑战模式 · Z03 孤塔之王 · 数据/元数据', () => {
   });
 });
 
+describe('挑战模式 · Z03 震荡斩击 · 区域并列 → 代决', () => {
+  const setup = (mode: 'manual' | 'favor' | 'against'): GameState => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z03', challenger: ['001', '002', '003'], settleMode: mode });
+    skipInitialReroll(g);
+    g.phase = 'main';
+    g.activePlayer = 'B';
+    g.challenge!.turn = 2;
+    g.challenge!.resumeAt = 2; // z03-2 震荡斩击
+    g.challenge!.driven = [die('k1', 3), die('k2', 3), die('k3', 3)]; // 3 同点 → 槽满足
+    // 清掉建局时 Legend 回合可能留下的东西，构造干净状态
+    g.pending = null;
+    g.pendingAttack = null;
+    g.virtualQueue = null;
+    g.attackQueue = null;
+    g.challenge!.deferred = undefined;
+    setA(g, {
+      attack: [die('a1', 1, 'attack'), die('a2', 2, 'attack'), die('a3', 3, 'attack')],
+      defense: [die('d1', 1, 'defense'), die('d2', 2, 'defense'), die('d3', 3, 'defense')],
+    }); // 攻 3 / 防 3 并列最多
+    return g;
+  };
+
+  it('并列 → 自选弹面板（选项按 攻→防→冥）', () => {
+    const g = setup('manual');
+    applyAction(g, { t: 'challengeStep' });
+    const pd = g.pending as { kind?: string; options?: { id: string }[] } | null;
+    expect(pd?.kind).toBe('challengePick');
+    expect(pd!.options!.map((o) => o.id)).toEqual(['attack', 'defense']);
+  });
+
+  it('有利＝取首（攻）；不利＝取尾（防）', () => {
+    const gf = setup('favor');
+    applyAction(gf, { t: 'challengeStep' });
+    expect(gf.players.A.areas.attack).toHaveLength(0); // 攻 3 颗被弃
+    expect(gf.players.A.areas.defense).toHaveLength(3);
+
+    const ga = setup('against');
+    applyAction(ga, { t: 'challengeStep' });
+    expect(ga.players.A.areas.defense).toHaveLength(0); // 防 3 颗被弃
+    expect(ga.players.A.areas.attack).toHaveLength(3);
+  });
+});
+
 describe('挑战模式 · Z03 效果', () => {
   it('统御战场：挑战者**所有攻击骰**点数变更为 1（原地改点、不动区域）', () => {
     const g = make();

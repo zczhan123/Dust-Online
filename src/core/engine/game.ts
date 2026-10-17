@@ -10,7 +10,7 @@ import { areaOf, createDie, newDieId, placeDieByDistribution } from '../model/di
 import { pumpPending, queuePending, queueRerollEndTriggers } from './pending';
 import { fxPush, fxReset, fxTacticFired, fxSkillFired, fxSetSource, fxTrueLine } from './fx';
 import { runChargeSkill } from './charge';
-import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill } from './skills';
+import { SKILL_HANDLERS, skillActive, consumeDice, consumeDiceByKind, applyTurnStartEffects, hasActiveSkill, weijuAvailable } from './skills';
 import { skillUseKey } from './skill-state';
 import { logLine, pname, sideCn, vals, valsSorted } from './log';
 import { LEGEND_DUSTFALL_REQ } from '../content/legends';
@@ -115,11 +115,14 @@ function queueXianzhen(g: GameState, owner: PlayerId, reason: 'rerollEnd' | 'mai
   const aLife = g.players.A.life;
   const bLife = g.players.B.life;
   const chooser: PlayerId = aLife < bLife ? 'A' : bLife < aLife ? 'B' : owner;
-  queuePending(g, { kind: 'xianzhenPick', player: chooser, owner });
+  // 挑战模式：决策人若落在**传奇(B)** → 由**挑战者代决**（§19「神器引发的选择」；卡面/设计里的这类选择一律由挑战者做，
+  //   与 Z 卡代决的 settleMode 有利/不利**无关** → 三种结算模式下都弹面板）。
+  const decider: PlayerId = g.mode === 'challenge' && chooser === 'B' ? 'A' : chooser;
+  queuePending(g, { kind: 'xianzhenPick', player: decider, owner });
   logLine(
     g,
     `「陷阵」：${reason === 'mainEnd' ? '主要阶段结束（「鏖战」）' : '重掷阶段结束'}时，生命最低的一方（${pname(
-      chooser,
+      decider,
     )}）选择弃置 ${pname(owner)} 的 1 个能力骰`,
   );
   return true;
@@ -285,10 +288,43 @@ function legendDefNote(cap: number, spawn: { value: number }[], attempted: numbe
   return `（${spawn.length} 颗：${valsSorted(spawn)}）`;
 }
 
-/** 挑战者(A)**能力骰数量最多**的区域（并列取 KINDS_ORDER 靠前者，确定性）。供 Z03「震荡斩击」。 */
+/** 挑战者(A)**能力骰数量最多**的区域（**确定性兜底**：并列取 KINDS_ORDER 靠前者）。并列改由 `tiedBusiestAreas` 走代决。 */
 function busiestAreaOfChallenger(g: GameState): DiceKind {
   const p = g.players.A;
   return KINDS_ORDER.reduce((best, k) => (p.areas[k].length > p.areas[best].length ? k : best), KINDS_ORDER[0]);
+}
+
+/** 挑战者(A)**并列最多**的能力骰区域（按 `KINDS_ORDER`＝攻→防→冥 排列；仅当"最多 > 0 且 ≥2 个"时非空）。供 Z03「震荡斩击」/ Z12「超度」的区域代决（有利＝取首〔攻〕、不利＝取尾〔冥〕）。 */
+function tiedBusiestAreas(g: GameState): DiceKind[] {
+  const p = g.players.A;
+  const maxN = Math.max(...KINDS_ORDER.map((k) => p.areas[k].length));
+  if (maxN <= 0) return [];
+  const tied = KINDS_ORDER.filter((k) => p.areas[k].length === maxN);
+  return tied.length >= 2 ? tied : [];
+}
+
+/** 「死亡亦逝」在**"只弃最少"**口径下的弃置颗数：全都相同＝保留"最多的那个点数"、其余全弃；全都不同＝每个点数留 1 颗、弃掉重复的。（引擎校验与界面提示**共用**这一份。） */
+export function siwangMinDiscard(all: Die[], same: boolean): number {
+  const cnt = new Map<number, number>();
+  for (const d of all) cnt.set(d.value, (cnt.get(d.value) ?? 0) + 1);
+  if (same) return all.length - Math.max(...cnt.values());
+  return all.length - cnt.size;
+}
+
+/** 033「凋零·死亡亦逝（持续）」在某玩家手里是否**生效**（＝该玩家真的装填了这条持续技能）。
+ *  ⚠️ **挑战模式不例外**：昔日传奇**从不使用神器的效果**（它那 3 件卡面预设只为取分布/生命；且它从不装填）
+ *  → 挑战里 033 只可能来自**挑战者**。曾经的"传奇预设 033 当生效"例外是**错误立论**，已于 2026-10-15 移除。 */
+function siwangActive(g: GameState, id: PlayerId): boolean {
+  return hasActiveSkill(g.players[id], 'diaoling.siwang');
+}
+
+/**
+ * 「死亡亦逝」在**某个玩家的回合结束时**是否要执行（两条回合结束路径的**唯一判定**，禁止各写一份）。
+ * 卡面：「双方在各自的回合结束时，如果满足条件则选择 1 项执行，随后弃置自己的能力骰」——
+ * 故**任一方**装填生效时，**双方各自回合结束时都要执行**；该回合玩家**区域为空**则无事可做（不弹面板）。
+ */
+export function siwangShouldFire(g: GameState, activePlayer: PlayerId): boolean {
+  return (['A', 'B'] as PlayerId[]).some((id) => siwangActive(g, id)) && totalDice(g.players[activePlayer]) > 0;
 }
 
 // ————————————————— Z04「D1：开局选骰」—————————————————
@@ -372,6 +408,9 @@ export function legendAssignNeeded(g: GameState): AssignPlan[] | null {
   const card = CHALLENGES.find((c) => c.id === g.challenge?.cardId);
   const has = (id: string): boolean => (card?.skills ?? []).some((s) => s.id === id);
   if (!has('z04-2') || !has('z04-3')) return null;
+  // 传奇**第 1 回合**：z04-2/z04-3 均带「怜悯*」会被跳过（见 `continueLegendTurn` 的怜悯* 判定，同一个 `turn` 字段）
+  //   → 这回合分配不可能生效，**不做分配**（否则＝白问一次、还给玩家造成"选了没反应"的误解）。
+  if (g.challenge?.turn === 0) return null;
   const plans = assignPlans(g);
   return plans.length >= 2 ? plans : null;
 }
@@ -995,7 +1034,7 @@ function challengeDecisions(
   g: GameState,
   skill: ChallengeSkill,
   atDeferred = false,
-): { prompt: string; options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc'; pick?: { pool: { id: string; value: number; kind: DiceKind }[]; n: number; owner?: PlayerId }; alwaysManual?: boolean }[] {
+): { prompt: string; options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' | 'order'; pick?: { pool: { id: string; value: number; kind: DiceKind }[]; n: number; owner?: PlayerId }; alwaysManual?: boolean }[] {
   const A = g.players.A;
   const B = g.players.B;
   const defOpts = (): { id: string; label: string }[] =>
@@ -1051,12 +1090,23 @@ function challengeDecisions(
           ]
         : [];
     case 'z03-2': {
-      // 震荡斩击：弃"骰最多的区域"里的至多 4 颗；仅当该区域 > 4 颗才有得挑 → 问"弃哪 4 颗"
-      const busiest = busiestAreaOfChallenger(g);
+      // 震荡斩击：① 区域**并列最多** → 先代决"哪个区域"（有利＝攻→防→冥 取首、不利取尾）；
+      //   ② 该区域 > 4 颗 → 再问"弃哪 4 颗"（两个 want **按序**收集进 decisions[skill.id]）
+      const wants: { prompt: string; options: { id: string; label: string }[]; prefer?: 'smaller' | 'order'; pick?: { pool: { id: string; value: number; kind: DiceKind }[]; n: number } }[] = [];
+      const tied = tiedBusiestAreas(g);
+      if (tied.length >= 2) {
+        const n = A.areas[tied[0]].length;
+        wants.push({
+          prompt: `「震荡斩击」：多个区域骰数并列最多（各 ${n} 颗），选哪个区域？`,
+          options: tied.map((k) => ({ id: k, label: `${KIND_CN[k]}（${n} 颗）` })),
+          prefer: 'order',
+        });
+      }
+      const chosen = (g.challenge!.decisions?.[skill.id] ?? [])[0];
+      const busiest = chosen && KINDS_ORDER.includes(chosen as DiceKind) ? (chosen as DiceKind) : busiestAreaOfChallenger(g);
       const pool = A.areas[busiest];
-      if (pool.length <= 4) return [];
-      return [
-        {
+      if (pool.length > 4) {
+        wants.push({
           prompt: `「震荡斩击」：弃置【${KIND_CN[busiest]}】里最多的 4 颗`,
           options: combinations(pool.length, 4).map((c) => ({
             id: c.map((i) => pool[i].id).join(','),
@@ -1064,8 +1114,9 @@ function challengeDecisions(
           })),
           prefer: 'smaller',
           pick: { pool: pool.map((d) => ({ id: d.id, value: d.value, kind: busiest })), n: 4 },
-        },
-      ];
+        });
+      }
+      return wants;
     }
     case 'z03-3': {
       // 战争横扫：每种类型各弃 1 颗；仅当某类型 > 1 颗才有得挑 → 每类型各一个 want（按 KINDS_ORDER）
@@ -1233,6 +1284,19 @@ function challengeDecisions(
         },
       ];
     }
+    case 'z12-3': {
+      // 超度：区域**并列最多** → 代决"重掷哪个区域"（有利＝攻→防→冥 取首、不利取尾）
+      const tied = tiedBusiestAreas(g);
+      if (tied.length < 2) return [];
+      const n = A.areas[tied[0]].length;
+      return [
+        {
+          prompt: `「超度」：多个区域骰数并列最多（各 ${n} 颗），重掷哪个区域？`,
+          options: tied.map((k) => ({ id: k, label: `${KIND_CN[k]}（${n} 颗）` })),
+          prefer: 'order',
+        },
+      ];
+    }
     case 'z12-4':
       // 破障：「攻击区有攻击骰则用其全部逐个攻击」→ >1 颗时定顺序（骰子已在攻击区，故前置问）
       return B.areas.attack.length > 1
@@ -1259,12 +1323,14 @@ function challengeDecisions(
  * 只从引擎给的**合法 options** 里选 → 天然守约束（如死亡亦逝不能多弃）。
  */
 function autoPick(
-  want: { options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' },
+  want: { options: { id: string; label: string }[]; prefer?: 'larger' | 'smaller' | 'asc' | 'desc' | 'order' },
   mode: 'favor' | 'against',
 ): string | undefined {
   const opts = want.options;
   if (opts.length === 0) return undefined;
   const prefer = want.prefer;
+  // `'order'`：选项**已按"有利优先级"排好**（如区域并列＝攻→防→冥）→ 有利取首、不利取尾
+  if (prefer === 'order') return (mode === 'against' ? opts[opts.length - 1] : opts[0]).id;
   if (prefer === 'asc' || prefer === 'desc') {
     const wantId = mode === 'favor' ? prefer : prefer === 'desc' ? 'asc' : 'desc';
     return (opts.find((o) => o.id === wantId) ?? opts[0]).id;
@@ -1449,13 +1515,16 @@ export function applyChallengeSkill(
     }
     case 'z03-2': {
       // 震荡斩击：弃"挑战者骰最多的区域"里的至多 4 颗；**弃置不足 4 颗 → 1 次 5 点攻击**
-      const busiest = busiestAreaOfChallenger(g);
+      //   ⚠️ 区域**并列最多**时先由挑战者代决区域（`decisions[0]`＝区域 kind）→ 其后的 `decisions[1]`＝"弃哪 4 颗"
+      const dec32 = g.challenge!.decisions?.[skill.id] ?? [];
+      const areaChoice = KINDS_ORDER.includes(dec32[0] as DiceKind) ? (dec32[0] as DiceKind) : undefined;
+      const busiest = areaChoice ?? busiestAreaOfChallenger(g);
+      const diceChoice = dec32[areaChoice ? 1 : 0];
       const pool = A.areas[busiest];
       const n = Math.min(4, pool.length);
-      const chosen = (g.challenge!.decisions?.[skill.id] ?? [])[0];
       let ids: string[];
-      if (chosen) {
-        ids = chosen.split(',').filter((id) => pool.some((d) => d.id === id));
+      if (diceChoice) {
+        ids = diceChoice.split(',').filter((id) => pool.some((d) => d.id === id));
       } else {
         const sorted = [...pool].sort((a, b) => a.value - b.value || (a.id < b.id ? -1 : 1));
         const mode = g.challenge!.settleMode;
@@ -2124,8 +2193,9 @@ export function applyChallengeSkill(
     }
     case 'z12-3': {
       // 超度：挑战者"能力骰数量最多的区域"的全部能力骰**重掷**（按新点数回到挑战者对应区域）→ 5 点真实伤害
-      // （重掷走统一入口 `doReroll`：联动 027 寒光惩罚；区域并列暂按 攻→防→冥 取靠前＝确定性，待议）
-      const busiest = busiestAreaOfChallenger(g);
+      // （重掷走统一入口 `doReroll`：联动 027 寒光惩罚；区域**并列最多**时由代决选区域 `decisions[0]`）
+      const dec123 = g.challenge!.decisions?.[skill.id] ?? [];
+      const busiest = KINDS_ORDER.includes(dec123[0] as DiceKind) ? (dec123[0] as DiceKind) : busiestAreaOfChallenger(g);
       const ids = A.areas[busiest].map((d) => d.id);
       if (ids.length > 0) {
         withRng(g, (rng) => doReroll(g, 'A', ids, rng));
@@ -3154,6 +3224,10 @@ function continueLegendTurn(g: GameState, once = false): void {
   g.challenge.slot = [];
   g.challenge.resumeAt = null;
   g.challenge.activeSkill = null;
+  // 挑战模式：传奇的**"回合结束"时点** —— 033「死亡亦逝」（**挑战者**装填生效，任一方生效即双方各自回合结束都要执行）
+  //   → 由**挑战者(A)代决**弃置传奇的能力骰（只能弃最少）。判定与常规路径**共用** `siwangShouldFire`。
+  //   ⚠️ 必须在**交还/开新回合之后**再挂（`beginTurn` 会 `g.pending = null` / 清 `pendingQueue`，挂早了会被清掉）。
+  const needSiwang = siwangShouldFire(g, 'B');
   // Z06「漆黑死神」：**回合结束时翻面**黑白指示物（并弹「无光领域」技能名）
   if (card.token) {
     const prev: 'black' | 'white' = g.challenge.token === 'white' ? 'white' : 'black';
@@ -3176,13 +3250,28 @@ function continueLegendTurn(g: GameState, once = false): void {
   // Z10「救赎」：设了"下一回合 override" → **同一玩家开真·新回合**（`turnIndex++`、清本回合 buff、不再算首回合），
   //   不交还挑战者；`beginTurn` 见 activePlayer 仍是传奇 → 再走 `runLegendTurn`（消费 override：投 5 + 攻击 +1）。
   if (g.challenge.nextTurnOverride) {
-    g.players.B.buffs = g.players.B.buffs.filter((b) => b.duration !== 'thisTurn');
-    g.firstRound.B = false;
-    g.turnIndex += 1;
-    beginTurn(g);
+    // ⚠️「救赎」只说"再次开始 1 个回合"，**没说跳过本回合的「回合结束」** → 先把本回合的结束结算（033）交出去，
+    //    **解完之后**才开新回合（否则 `beginTurn` 会把刚挂的 pending/pendingQueue 清掉）。
+    //    由界面按节奏派发 `challengeStep` → `case 'challengeStep'` 里执行 `startNextLegendTurn`。
+    if (needSiwang) {
+      g.challenge.startNextTurnAfterPending = true;
+      queuePending(g, { kind: 'tiaolingPick', player: 'A', owner: 'B' });
+      return;
+    }
+    startNextLegendTurn(g);
     return;
   }
   endTurn(g); // 交回合给挑战者（其 beginTurn 走正常流程）
+  // 挑战模式：传奇回合结束 → 033 代决（挂在这里才不会被挑战者 `beginTurn` 的 `g.pending = null` 清掉）
+  if (needSiwang) queuePending(g, { kind: 'tiaolingPick', player: 'A', owner: 'B' });
+}
+
+/** Z10「救赎」等"同一玩家再开一个回合"：清本回合 buff、不再算首回合、`turnIndex+1` → 回到传奇（消费 `nextTurnOverride`）。 */
+function startNextLegendTurn(g: GameState): void {
+  g.players.B.buffs = g.players.B.buffs.filter((b) => b.duration !== 'thisTurn');
+  g.firstRound.B = false;
+  g.turnIndex += 1;
+  beginTurn(g);
 }
 
 export function beginTurn(g: GameState): void {
@@ -3446,12 +3535,13 @@ export function advancePhase(g: GameState): void {
       }
       // 邪灵序曲若把对手打死 → 直接结束（不再走 033 / 意志上限）
       if ((g.phase as string) === 'gameOver') break;
-      // 033 凋零·死亡亦逝（持续）：任一方生效时，双方各自回合结束时都要执行；区域为空则自动通过
-      if (
-        (['A', 'B'] as PlayerId[]).some((id) => hasActiveSkill(g.players[id], 'diaoling.siwang')) &&
-        totalDice(g.players[g.activePlayer]) > 0
-      ) {
-        queuePending(g, { kind: 'tiaolingPick', player: g.activePlayer });
+      // 033 凋零·死亡亦逝（持续）：任一方"生效"时，双方各自回合结束时都要执行；区域为空则自动通过。
+      //   判定**唯一来源** `siwangShouldFire`（与挑战模式"传奇回合结束"路径共用，勿各写一份）。
+      if (siwangShouldFire(g, g.activePlayer)) {
+        const owner = g.activePlayer;
+        // 挑战模式：轮到传奇（B）结束时 → 由**挑战者(A)代决**（骰子仍属传奇）
+        const decider: PlayerId = g.mode === 'challenge' && owner === 'B' ? 'A' : owner;
+        queuePending(g, { kind: 'tiaolingPick', player: decider, owner });
       }
       // 结束阶段：超出意志上限时，由当前回合玩家**自行选择**弃置哪几颗（说明书 page_09；排在 032/033 之后）
       if (totalDice(g.players[g.activePlayer]) > effectiveWill(g.players[g.activePlayer])) {
@@ -3825,11 +3915,17 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       : undefined;
   // 019 尘起赠予的「无需冥想骰的额外尘起行动」（不占每回合 1 次、不耗尘印）
   const canFree = g.freeNoCostRise > 0;
+  // 023「畏惧」（左侧）＝"对方必须消耗 1 颗能力骰"→ **对方没有能力骰时不生成该侧候选**（全模式）。
+  //   判定唯一来源 `weijuAvailable`（界面 `dustSideStep` 用同一份 → 不会出现"按钮在但做不完"）。
+  const sideOk = (a: Artifact, side: 'left' | 'right' | undefined): boolean =>
+    !(a.id === '023' && side === 'left') || weijuAvailable(g, player);
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (canFree) {
-      const sides = a.column === 3 ? [undefined] : a.activeMarkerSide == null ? ['left', 'right'] : [a.activeMarkerSide === 'left' ? 'right' : 'left'];
+      const sides: ('left' | 'right' | undefined)[] =
+        a.column === 3 ? [undefined] : a.activeMarkerSide == null ? ['left', 'right'] : [a.activeMarkerSide === 'left' ? 'right' : 'left'];
       for (const side of sides) {
+        if (!sideOk(a, side)) continue;
         acts.push({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side: side as 'left' | 'right' } : {}) });
       }
     }
@@ -3839,17 +3935,17 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
       if (canNormal && medSlot) {
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', costSlots: medSlot });
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', costSlots: medSlot });
+        if (sideOk(a, 'left')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', costSlots: medSlot });
+        if (sideOk(a, 'right')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', costSlots: medSlot });
       }
       if (p.hasDustSeal) {
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
-        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', useSeal: true });
+        if (sideOk(a, 'left')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
+        if (sideOk(a, 'right')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', useSeal: true });
       }
     } else {
       const other = a.activeMarkerSide === 'left' ? 'right' : 'left';
-      if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, side: other, costSlots: medSlot });
-      if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
+      if (canNormal && medSlot && sideOk(a, other)) acts.push({ t: 'dustRise', artifactId: a.id, side: other, costSlots: medSlot });
+      if (p.hasDustSeal && sideOk(a, other)) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
     }
   }
   return acts;
@@ -4756,8 +4852,8 @@ export function getLegalActions(g: GameState): Action[] {
       ];
     }
     if (g.pending.kind === 'tiaolingPick') {
-      // 默认（AI/测试）：选「全不同」，弃掉重复点数（每点数留 1 颗）
-      const p = g.players[g.pending.player];
+      // 默认（AI/测试）：选择全部不同、弃掉重复项（每点数留 1 颗）——也是"最少弃"的那一档
+      const p = g.players[g.pending.owner ?? g.pending.player];
       const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
       const seen = new Set<number>();
       const discard: string[] = [];
@@ -4933,7 +5029,7 @@ export function getLegalActions(g: GameState): Action[] {
     !g.pendingAttack &&
     !g.attackQueue &&
     !g.virtualQueue &&
-    g.challenge?.resumeAt != null
+    (g.challenge?.resumeAt != null || g.challenge?.startNextTurnAfterPending)
   ) {
     return [{ t: 'challengeStep' }];
   }
@@ -6186,6 +6282,12 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (g.mode !== 'challenge') throw new Error('not challenge mode');
       if (g.activePlayer !== 'B') throw new Error('not legend turn');
       if (g.pending || g.pendingAttack || g.attackQueue || g.virtualQueue) throw new Error('legend turn busy');
+      // Z10「救赎」：本回合的「回合结束」（033）已结算完 → 现在才开新回合（见 `continueLegendTurn` 收尾）
+      if (g.challenge?.startNextTurnAfterPending) {
+        g.challenge.startNextTurnAfterPending = false;
+        startNextLegendTurn(g);
+        break;
+      }
       if (g.challenge?.resumeAt == null) throw new Error('no challenge step pending');
       continueLegendTurn(g, true);
       break;
@@ -6441,7 +6543,8 @@ function applyActionCore(g: GameState, action: Action): GameState {
     case 'tiaolingResolve': {
       const pd = g.pending;
       if (!pd || pd.kind !== 'tiaolingPick') throw new Error('no tiaolingPick pending');
-      const p = g.players[pd.player];
+      const ownerId: PlayerId = pd.owner ?? pd.player; // 被弃骰的归属方（挑战模式下代决传奇时＝B）
+      const p = g.players[ownerId];
       const ids = action.dieIds ?? [];
       if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
       const all = [...p.areas.attack, ...p.areas.defense, ...p.areas.meditation];
@@ -6455,16 +6558,20 @@ function applyActionCore(g: GameState, action: Action): GameState {
           action.pick === 'same' ? '「死亡亦逝」：弃置后须全部点数相同' : '「死亡亦逝」：弃置后须全部点数不同',
         );
       }
+      // 挑战模式：**代决传奇**时只能"弃最少"（不许故意多弃）；挑战者弃**自己的**不受此限
+      if (g.mode === 'challenge' && ownerId === 'B' && ids.length !== siwangMinDiscard(all, action.pick === 'same')) {
+        throw new Error('「死亡亦逝」：挑战模式下代决「昔日传奇」时只能弃置最少的颗数');
+      }
       for (const id of ids) {
-        const found = findDieOf(g, pd.player, id);
+        const found = findDieOf(g, ownerId, id);
         if (found) consumeDice(g, p, found.kind, [id]);
       }
       g.pending = null;
       logLine(
         g,
-        `${pname(pd.player)} 「死亡亦逝」：选择「${action.pick === 'same' ? '全部相同' : '全部不同'}」，弃置 ${ids.length} 颗能力骰`,
+        `${pname(ownerId)} 「死亡亦逝」：选择「${action.pick === 'same' ? '全部相同' : '全部不同'}」，弃置 ${ids.length} 颗能力骰${pd.player !== ownerId ? `（由 ${pname(pd.player)} 代决）` : ''}`,
       );
-      fxSkillFired(g, pd.player, 'diaoling.siwang');
+      fxSkillFired(g, ownerId, 'diaoling.siwang');
       break;
     }
     case 'endDiscardResolve': {
