@@ -7,9 +7,9 @@ import {
   setDiagEnabled,
   isDiagEnabled,
   missingDiceInDom,
-  challengeSnapshot,
+  gameSnapshot,
 } from '../src/ui/diag';
-import { createChallengeGame } from '../src/core/engine/game';
+import { createGame, createChallengeGame } from '../src/core/engine/game';
 
 beforeEach(() => setDiagEnabled(true));
 afterEach(() => setDiagEnabled(false));
@@ -47,15 +47,28 @@ describe('排查用诊断日志（?diag=1）', () => {
     expect(missingDiceInDom(['a', 'b'], ['a', 'b', 'zz'])).toEqual([]);
   });
 
-  it('challengeSnapshot：含双方三区（id:点数）、传奇卡、待决策/攻击队列', () => {
+  it('gameSnapshot：含双方三区（id:点数）、传奇卡、待决策/攻击队列', () => {
     const g = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['001', '002', '003'] });
     g.players.B.areas.attack = [{ id: 'bx', value: 3, kind: 'attack' }];
     g.pending = { kind: 'tiaolingPick', player: 'A', owner: 'B' };
-    const s = challengeSnapshot(g) as Record<string, unknown>;
+    const s = gameSnapshot(g) as Record<string, unknown>;
     expect(s.mode).toBe('challenge');
     expect(s.card).toBe('Z09');
     expect((s.B as { attack: string[] }).attack).toEqual(['bx:3']);
     expect(s.pending).toBe('tiaolingPick');
     expect(s.pendingPlayer).toBe('A');
+  });
+
+  it('gameSnapshot（标准模式）：挑战专属字段为 null，双方区域骰照常记录', () => {
+    const g = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['004', '005', '006'] });
+    g.players.A.areas.attack = [{ id: 'a1', value: 4, kind: 'attack' }];
+    g.players.B.areas.defense = [{ id: 'b1', value: 2, kind: 'defense' }];
+    const s = gameSnapshot(g) as Record<string, unknown>;
+    expect(s.mode).toBe('standard');
+    expect(s.card).toBeNull();
+    expect(s.driven).toBeNull();
+    expect(s.legendTurn).toBeNull();
+    expect((s.A as { attack: string[] }).attack).toEqual(['a1:4']);
+    expect((s.B as { defense: string[] }).defense).toEqual(['b1:2']);
   });
 });

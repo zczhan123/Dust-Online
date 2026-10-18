@@ -30,7 +30,7 @@ import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skil
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
-import { diag, isDiagEnabled, missingDiceInDom, challengeSnapshot, diagDump, diagClear, diagCount } from './diag';
+import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, diagDump, diagClear, diagCount } from './diag';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
 
@@ -7151,9 +7151,9 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 本帧动效总时长（含阶段横幅）——`main.ts` 用它给"挑战模式自动推进"配速（每步播完再走下一步）
   lastFrameMs = frameEnd;
 
-  // 【排查·?diag=1，只挑战模式】数据里有、画面上没有的骰子（＝"隐形骰子"）→ 记一条 DOM-MISSING。
-  // 刻意隐藏的（在 legendGoneIds 里）属正常，不报。
-  if (isDiagEnabled() && state.mode === 'challenge') {
+  // 【排查·?diag=1，全模式】数据里有、画面上没有的骰子（＝"隐形骰子"）→ 记一条 DOM-MISSING。
+  // 刻意隐藏的（挑战模式的 legendGoneIds）属正常，不报。
+  if (isDiagEnabled()) {
     const dataIds = [
       ...state.players.A.areas.attack,
       ...state.players.A.areas.defense,
@@ -7166,7 +7166,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     );
     const missing = missingDiceInDom(dataIds, domIds).filter((id) => !legendGoneIds.has(id));
     if (missing.length > 0) {
-      diag('DOM-MISSING', { missing, gone: [...legendGoneIds], snap: challengeSnapshot(state) });
+      diag('DOM-MISSING', { missing, gone: [...legendGoneIds], snap: gameSnapshot(state) });
     }
   }
 

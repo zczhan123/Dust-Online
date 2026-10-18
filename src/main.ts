@@ -9,7 +9,7 @@ import { loadPrefs, savePrefs } from './ui/prefs';
 import type { Action, GameState, PlayerId } from './core/model/types';
 import { bindTurnTimer, unbindTurnTimer, setTurnTimerPaused } from './ui/turnTimer';
 import { hasSavedRoom, type NetSession } from './net/session';
-import { diag, isDiagEnabled, challengeSnapshot } from './ui/diag';
+import { diag, isDiagEnabled, gameSnapshot } from './ui/diag';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
@@ -95,7 +95,7 @@ const dispatchAction = (a: Action): void => {
   // 联机·对方掉线/退出（暂停中）→ 忽略本地动作（锁步下防分叉）
   if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
   // 【排查·?diag=1】只记挑战模式：动作 + 动作后的状态快照（"隐形骰子"排查用）
-  if (isDiagEnabled() && state.mode === 'challenge') diag('action', { t: a.t, a });
+  if (isDiagEnabled()) diag('action', { t: a.t, a });
   try {
     if (online) online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
     else applyAction(state, a);
@@ -104,7 +104,7 @@ const dispatchAction = (a: Action): void => {
   } catch (e) {
     ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
   }
-  if (isDiagEnabled() && state.mode === 'challenge') diag('state', challengeSnapshot(state));
+  if (isDiagEnabled()) diag('state', gameSnapshot(state));
   render();
 };
 

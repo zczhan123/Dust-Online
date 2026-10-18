@@ -52,8 +52,8 @@ export function missingDiceInDom(dataIds: string[], domIds: string[]): string[] 
   return [...new Set(dataIds)].filter((id) => !dom.has(id));
 }
 
-/** 挑战模式的状态快照（只取排查需要的字段；骰子写成 `id:点数`）。 */
-export function challengeSnapshot(g: GameState): Record<string, unknown> {
+/** 整局状态快照（**全模式**；挑战专属字段有才带、没有为 null）。骰子写成 `id:点数`。 */
+export function gameSnapshot(g: GameState): Record<string, unknown> {
   const areas = (p: PlayerState) => ({
     attack: p.areas.attack.map((d) => `${d.id}:${d.value}`),
     defense: p.areas.defense.map((d) => `${d.id}:${d.value}`),
