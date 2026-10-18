@@ -1,6 +1,6 @@
 import './ui/styles.css';
 import { createGame, createChallengeGame, applyAction, getLegalActions } from './core/engine/game';
-import { renderGame, setLocalViewPlayer, actorOf, lastFrameDurationMs, type UiState } from './ui/render';
+import { renderGame, setLocalViewPlayer, actorOf, lastFrameDurationMs, legendGoneList, type UiState } from './ui/render';
 import { renderSetup, type SetupOptions } from './ui/setupScreen';
 import { renderLobby } from './ui/lobby';
 import { createOnlineShell, type OnlineShell } from './ui/online';
@@ -104,7 +104,7 @@ const dispatchAction = (a: Action): void => {
   } catch (e) {
     ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
   }
-  if (isDiagEnabled()) diag('state', gameSnapshot(state));
+  if (isDiagEnabled()) diag('state', gameSnapshot(state, legendGoneList()));
   render();
 };
 

@@ -31,7 +31,7 @@ import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './p
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
 import { showSettleTip, hideSettleTip } from './settleTip';
-import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, diagDump, diagClear, diagCount } from './diag';
+import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, staleDice, diagDump, diagClear, diagCount } from './diag';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
 
@@ -81,6 +81,11 @@ let legendPickHoldUntil = 0;
  * 自清理：只保留"此刻还在攻击骰区里"的 id。
  */
 const legendGoneIds = new Set<string>();
+
+/** 排查用：当前隐藏名单快照（供 `main.ts` 的 `state` 日志与测试读取）。 */
+export function legendGoneList(): string[] {
+  return [...legendGoneIds];
+}
 
 /**
  * 挑战模式：把"已飞出去"的骰子从**数据层**去掉（幂等）。**唯一入口**——开飞定时器与"每次渲染"都调它，缺一都会坏：
@@ -6407,7 +6412,12 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   for (const e of fxEvents) {
     if (e.kind === 'block') blockIds.push(...e.dieIds);
     else if (e.kind === 'move') {
-      for (const id of e.dieIds) moveIds.add(id);
+      for (const id of e.dieIds) {
+        moveIds.add(id);
+        // 挑战模式：被**搬回区域**的传奇骰子（如 Z01「裁雨流」把飞出去的源骰移入防御区）
+        // 必须解除隐藏——否则骰子留在区域里却永远不可见（真实事故 2026-10-18）。
+        legendGoneIds.delete(id);
+      }
       for (const id of e.fromCard ?? []) fromCard.add(id);
     } else if (e.kind === 'hanguang') {
       hanguangs.push({ player: e.player, mode: e.mode, heldId: e.heldId, ...(e.opponentId ? { opponentId: e.opponentId } : {}) });
@@ -6941,7 +6951,13 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       const id = pa!.sourceDieId;
       // 与 attackStart 的"开飞时刻"完全一致（costDur 到点）
       const at = resolveDur + costDur + legendAttackDelay;
-      window.setTimeout(() => hideLegendFlownDie(root, id), Math.max(0, at));
+      window.setTimeout(() => {
+        // 定时器真正触发时校验：只有"这颗仍是**当前待抵挡**的源骰"才隐藏。
+        // 若攻击已结算（`pendingAttack` 清空——尤其 Z01「裁雨流」把源骰搬回防御区），
+        // 迟到的隐藏会把已经回到区域/被揭出的骰子重新藏起来（2026-10-18 真实事故）。
+        if (state.pendingAttack?.sourceDieId !== id) return;
+        hideLegendFlownDie(root, id);
+      }, Math.max(0, at));
     }
   } else if (prevResolved && !hasAttackJoin) {
     attackDur = resolveDur;
@@ -7172,19 +7188,45 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 【排查·?diag=1，全模式】数据里有、画面上没有的骰子（＝"隐形骰子"）→ 记一条 DOM-MISSING。
   // 刻意隐藏的（挑战模式的 legendGoneIds）属正常，不报。
   if (isDiagEnabled()) {
-    const dataIds = [
+    const areas = [
       ...state.players.A.areas.attack,
       ...state.players.A.areas.defense,
       ...state.players.A.areas.meditation,
       ...state.players.B.areas.attack,
       ...state.players.B.areas.defense,
-    ].map((d) => d.id);
-    const domIds = Array.from(root.querySelectorAll<HTMLElement>('.die[data-id]')).map(
-      (e) => e.dataset.id ?? '',
-    );
+    ];
+    const dataIds = areas.map((d) => d.id);
+    const dataVals: Record<string, number> = {};
+    for (const d of areas) dataVals[d.id] = d.value;
+    const dieEls = Array.from(root.querySelectorAll<HTMLElement>('.die[data-id]'));
+    const domIds = dieEls.map((e) => e.dataset.id ?? '');
     const missing = missingDiceInDom(dataIds, domIds).filter((id) => !legendGoneIds.has(id));
     if (missing.length > 0) {
-      diag('DOM-MISSING', { missing, gone: [...legendGoneIds], snap: gameSnapshot(state) });
+      diag('DOM-MISSING', { missing, gone: [...legendGoneIds], snap: gameSnapshot(state, [...legendGoneIds]) });
+    }
+    // 元素在 DOM 里、但**被 CSS 藏了**（visibility/display/opacity）—— DOM-MISSING 抓不到
+    const invisible: string[] = [];
+    const domVals: Record<string, string> = {};
+    for (const el of dieEls) {
+      const id = el.dataset.id ?? '';
+      if (el.dataset.value != null) domVals[id] = el.dataset.value;
+      const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+      if (cs && (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0')) invisible.push(id);
+    }
+    if (invisible.length > 0) {
+      diag('DOM-INVISIBLE', {
+        ids: invisible,
+        gone: [...legendGoneIds],
+        inline: invisible.map((id) => {
+          const el = dieEls.find((e) => e.dataset.id === id);
+          return `${id}@${el ? el.getAttribute('style') ?? '' : ''}`;
+        }),
+      });
+    }
+    // 画面值 ≠ 数据值（"显示的是过时骰子"）—— 用户报的 4/5 就是这一类
+    const stale = staleDice(dataVals, domVals);
+    if (stale.length > 0) {
+      diag('DOM-STALE', { stale, gone: [...legendGoneIds], snap: gameSnapshot(state, [...legendGoneIds]) });
     }
   }
 

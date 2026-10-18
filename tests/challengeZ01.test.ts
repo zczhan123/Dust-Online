@@ -1,13 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import { createChallengeGame, applyAction, skipInitialReroll } from '../src/core/engine/game';
+import { removeLegendSourceDie } from '../src/core/engine/combat';
 import { CHALLENGES, slotPhrase } from '../src/core/content/challenges';
-import type { Die, DiceKind } from '../src/core/model/types';
+import type { Die, DiceKind, PendingAttack } from '../src/core/model/types';
 
 const die = (id: string, value: number, kind: DiceKind = 'meditation'): Die => ({ id, value, kind });
 const make = (mode: 'manual' | 'favor' | 'against' = 'manual') =>
   createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'], settleMode: mode });
 
 describe('挑战模式 · Z01 雨中剑圣（批1：数据 / 龙游万象 / 雨落狂流）', () => {
+  it('裁雨流（前 3 次造成伤害）：传奇的源骰被**移入防御区**（不是弃掉）', () => {
+    const g = make();
+    g.players.B.areas.attack = [die('bx', 5, 'attack')];
+    g.players.B.areas.defense = [];
+    const pa = {
+      attacker: 'B',
+      value: 5,
+      baseValue: 5,
+      unblockable: false,
+      physical: false,
+      sourceDieId: 'bx',
+      sourceSkill: '裁雨流',
+    } as PendingAttack;
+    removeLegendSourceDie(g, pa, 5);
+    expect(g.players.B.areas.attack).toHaveLength(0);
+    expect(g.players.B.areas.defense.map((d) => d.id)).toContain('bx');
+  });
   it('数据：投 7 驱动骰；裁雨流＝无限 3/4 点槽', () => {
     const z1 = CHALLENGES.find((c) => c.id === 'Z01')!;
     expect(z1.rollDice).toBe(7);

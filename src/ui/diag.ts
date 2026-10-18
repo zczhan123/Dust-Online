@@ -53,7 +53,7 @@ export function missingDiceInDom(dataIds: string[], domIds: string[]): string[] 
 }
 
 /** 整局状态快照（**全模式**；挑战专属字段有才带、没有为 null）。骰子写成 `id:点数`。 */
-export function gameSnapshot(g: GameState): Record<string, unknown> {
+export function gameSnapshot(g: GameState, gone: string[] = []): Record<string, unknown> {
   const areas = (p: PlayerState) => ({
     attack: p.areas.attack.map((d) => `${d.id}:${d.value}`),
     defense: p.areas.defense.map((d) => `${d.id}:${d.value}`),
@@ -76,5 +76,20 @@ export function gameSnapshot(g: GameState): Record<string, unknown> {
     pa: pa ? { attacker: pa.attacker, value: pa.value, sourceDieId: pa.sourceDieId ?? null } : null,
     attackQueue: g.attackQueue ? (g.attackQueue.values?.length ?? 0) : null,
     virtualQueue: g.virtualQueue?.map((q) => `${q.dieId ?? '-'}:${q.value}`) ?? null,
+    gone,
   };
+}
+
+/** 纯函数：数据值 vs 画面值（`data-value`）不一致的骰子（"显示的是过时骰子"的证据）。 */
+export function staleDice(
+  dataVals: Record<string, number>,
+  domVals: Record<string, string>,
+): { id: string; data: number; dom: string }[] {
+  const out: { id: string; data: number; dom: string }[] = [];
+  for (const [id, dv] of Object.entries(dataVals)) {
+    const dom = domVals[id];
+    if (dom == null) continue;
+    if (dom !== String(dv)) out.push({ id, data: dv, dom });
+  }
+  return out;
 }

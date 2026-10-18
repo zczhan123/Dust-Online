@@ -1,4 +1,5 @@
 import type { GameState, PlayerId } from '../core/model/types';
+import { diag } from './diag';
 
 /**
  * 战斗界面动效。
@@ -384,6 +385,22 @@ function makeFlyingDie(kind: 'held' | 'virtual' | 'solid', player: PlayerId, val
  * 真骰先隐藏、动画收尾再揭出。若 `el` 已在 fx 层（如 027 已自建影子）→ 原样返回、不重复包装。
  * 返回 `{ 可动画的元素, 收尾揭出真骰 }`。无布局（jsdom）时退回真骰。
  */
+/**
+ * 清除骰子元素上的内联 `visibility`（"揭出"的**唯一入口**）。
+ * 只作用于**当前 DOM 里存在**的元素；已使用/消耗/弃置的骰子没有元素 → **安全无操作**（不会复活）。
+ */
+export function revealDieEls(root: HTMLElement, ids: string[]): void {
+  let found = 0;
+  for (const id of ids) {
+    const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
+    if (el) {
+      el.style.visibility = '';
+      found += 1;
+    }
+  }
+  diag('reveal', { ids, found });
+}
+
 function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
   if (el.closest('#fx-layer')) return { el, reveal: () => {} };
   const r = el.getBoundingClientRect();
@@ -396,10 +413,12 @@ function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
   const layer = ensureFxLayer();
   (layer ?? document.body).appendChild(g);
   el.style.visibility = 'hidden';
+  diag('hide-viz', { src: 'ghost', ids: [el.dataset.id ?? '?'] });
   return {
     el: g,
     reveal: () => {
       el.style.visibility = '';
+      diag('reveal-viz', { src: 'ghost', ids: [el.dataset.id ?? '?'] });
       g.remove();
     },
   };
@@ -1258,10 +1277,13 @@ export function runBoardMotions(
   }
   const exAll = new Set<string>([...excludeIds, ...movedIds, ...hanguangIds]);
 
-  // 0) 上次"持有视角"时把"获得"延后了 → 现在（已切换）补播
+  // 0) 上次"持有视角"时把"获得"延后了 → 现在补播
+  //    ⚠️ 先把内联 `visibility` 清掉（`deferIds` 只藏、`playAdds` 不负责揭）——
+  //    否则骰子永远隐身（2026-10-18 真实事故：挑战/联机固定视角下大批骰子不可见）。
   if (pendingAddIds) {
     const ids = pendingAddIds;
     pendingAddIds = null;
+    revealDieEls(root, ids);
     return playAdds(root, ids, pool0);
   }
 
@@ -1375,6 +1397,7 @@ export function runBoardMotions(
         const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
         if (el) el.style.visibility = 'hidden';
       }
+      diag('defer-hide', { ids: deferIds });
     }
   }
 
@@ -2523,6 +2546,7 @@ export function playLegendSpawn(
         tcX = rr.left + rr.width / 2;
         tcY = rr.top + rr.height / 2;
         realEl.style.visibility = 'hidden';
+        diag('hide-viz', { src: 'spawn', ids: [ids[i] ?? realEl.dataset.id ?? '?'] });
       }
     }
     if (tcX === null) {
@@ -2560,7 +2584,8 @@ export function playLegendSpawn(
       );
     }
     window.setTimeout(() => {
-      if (realEl) realEl.style.visibility = ''; // 落位 → 揭出真骰
+      if (realEl) realEl.style.visibility = '';
+      diag('reveal-viz', { src: 'spawn', ids: [ids[i] ?? '?'] }); // 落位 → 揭出真骰
       el.remove();
     }, delay + total + 90);
   });

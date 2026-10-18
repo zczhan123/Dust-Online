@@ -8,6 +8,7 @@ import {
   isDiagEnabled,
   missingDiceInDom,
   gameSnapshot,
+  staleDice,
 } from '../src/ui/diag';
 import { createGame, createChallengeGame } from '../src/core/engine/game';
 
@@ -70,5 +71,14 @@ describe('排查用诊断日志（?diag=1）', () => {
     expect(s.legendTurn).toBeNull();
     expect((s.A as { attack: string[] }).attack).toEqual(['a1:4']);
     expect((s.B as { defense: string[] }).defense).toEqual(['b1:2']);
+  });
+
+  it('gameSnapshot 带 gone（隐藏名单快照）', () => {
+    const g = createChallengeGame({ seed: 1, cardId: 'Z09', challenger: ['001', '002', '003'] });
+    expect((gameSnapshot(g, ['x1']) as Record<string, unknown>).gone).toEqual(['x1']);
+  });
+
+  it('staleDice：画面值与数据值不一致（过时骰子）', () => {
+    expect(staleDice({ a: 4, b: 5 }, { a: '5', b: '5', c: '3' })).toEqual([{ id: 'a', data: 4, dom: '5' }]);
   });
 });
