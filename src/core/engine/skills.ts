@@ -161,10 +161,12 @@ export function consumeDiceByKind(
 }
 
 /**
- * 023「畏惧」能否发动：**对方必须至少有 1 颗能力骰**。
+ * 023「畏惧」能否**使用**：**对方必须至少有 1 颗能力骰**。
  * 口径＝对方**三个骰区**的合计（**不含 034 破障的存放骰**，与 `shexie.weiju` 处理器里的校验逐字一致）。
- * **引擎（`dustRiseActions` 不生成"畏惧"侧候选）与界面（`dustSideStep` 不渲染该按钮）共用这一份**——
- * 全模式生效（这是规则常识的可用性，不是挑战模式削弱）。
+ * **只限「使用」**：`activateSkillActions`（以及 L08 赏金的 `shangjin` 候选）在对手无骰时**不生成该动作**
+ * → 界面自然没有"使用"按钮。
+ * ⚠️ **尘起/激活（切到「畏惧」这一侧）不受限**——2026-10-18 修正：之前误把判定加在了尘起侧，
+ *    导致"对手没骰时连激活按钮都消失"（用户报的 bug）。全模式生效。
  */
 export function weijuAvailable(g: GameState, owner: PlayerId): boolean {
   const opp: PlayerId = owner === 'A' ? 'B' : 'A';

@@ -3920,17 +3920,14 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       : undefined;
   // 019 尘起赠予的「无需冥想骰的额外尘起行动」（不占每回合 1 次、不耗尘印）
   const canFree = g.freeNoCostRise > 0;
-  // 023「畏惧」（左侧）＝"对方必须消耗 1 颗能力骰"→ **对方没有能力骰时不生成该侧候选**（全模式）。
-  //   判定唯一来源 `weijuAvailable`（界面 `dustSideStep` 用同一份 → 不会出现"按钮在但做不完"）。
-  const sideOk = (a: Artifact, side: 'left' | 'right' | undefined): boolean =>
-    !(a.id === '023' && side === 'left') || weijuAvailable(g, player);
+  // 023「畏惧」：**尘起/激活不受限**（对手没骰也能先把这一侧装填/切过来，只是暂时用不了）。
+  //   真正受限的是**「启动」的使用**：见 `activateSkillActions` 的 `weijuAvailable` 过滤（按钮不出现）。
   for (const a of p.artifacts) {
     if (!canTargetForDustRise(a)) continue;
     if (canFree) {
       const sides: ('left' | 'right' | undefined)[] =
         a.column === 3 ? [undefined] : a.activeMarkerSide == null ? ['left', 'right'] : [a.activeMarkerSide === 'left' ? 'right' : 'left'];
       for (const side of sides) {
-        if (!sideOk(a, side)) continue;
         acts.push({ t: 'dustRise', artifactId: a.id, free: true, ...(side ? { side: side as 'left' | 'right' } : {}) });
       }
     }
@@ -3940,17 +3937,17 @@ function dustRiseActions(g: GameState, player: PlayerId): Action[] {
       if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, useSeal: true });
     } else if (a.activeMarkerSide == null) {
       if (canNormal && medSlot) {
-        if (sideOk(a, 'left')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', costSlots: medSlot });
-        if (sideOk(a, 'right')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', costSlots: medSlot });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', costSlots: medSlot });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', costSlots: medSlot });
       }
       if (p.hasDustSeal) {
-        if (sideOk(a, 'left')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
-        if (sideOk(a, 'right')) acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', useSeal: true });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'left', useSeal: true });
+        acts.push({ t: 'dustRise', artifactId: a.id, side: 'right', useSeal: true });
       }
     } else {
       const other = a.activeMarkerSide === 'left' ? 'right' : 'left';
-      if (canNormal && medSlot && sideOk(a, other)) acts.push({ t: 'dustRise', artifactId: a.id, side: other, costSlots: medSlot });
-      if (p.hasDustSeal && sideOk(a, other)) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
+      if (canNormal && medSlot) acts.push({ t: 'dustRise', artifactId: a.id, side: other, costSlots: medSlot });
+      if (p.hasDustSeal) acts.push({ t: 'dustRise', artifactId: a.id, side: other, useSeal: true });
     }
   }
   return acts;
@@ -4177,6 +4174,9 @@ function activateSkillActions(g: GameState, p: PlayerState): Action[] {
         skillPerTurnLimit(p, s.key)
       )
         continue;
+      // 023「畏惧」：**对手没有能力骰 → 不生成"使用"动作**（使用按钮因此消失；
+      //   尘起/激活（把这一侧切过来）**不受限**——见 `dustRiseActions` 注释）
+      if (s.key === 'shexie.weiju' && !weijuAvailable(g, p.id)) continue;
       if (s.key === 'buxiang.cuilian') {
         if (a.count >= 3) continue;
         const held = heldForSlotsSkill(p);
@@ -4651,6 +4651,8 @@ export function getLegalActions(g: GameState): Action[] {
         for (const s of a.skills) {
           if (s.kind !== 'activate') continue;
           if (!skillActive(a, s)) continue;
+          // 023「畏惧」：对手没有能力骰 → 赏金面板里也不给这一项（与 `activateSkillActions` 同口径）
+          if (s.key === 'shexie.weiju' && !weijuAvailable(g, p.id)) continue;
           acts.push({ t: 'shangjin', artifactId: a.id, side: s.side, skillKey: s.key });
         }
       }

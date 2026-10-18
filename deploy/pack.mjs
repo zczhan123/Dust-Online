@@ -8,6 +8,7 @@
 // - **不改任何源码**；deploy/ 与 delivery/ 都是独立目录
 // - 打包前请先确认三绿（tsc / vitest / vite build）并已提交版本
 import { build } from 'vite';
+import fs from 'node:fs';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -26,7 +27,22 @@ rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
 const copy = (from, to) => {
-  cpSync(from, to, { recursive: true });
+  // 注意：Windows + Node 24 上 `fs.cpSync` 偶发进程级崩溃（0xC0000409）→ 手写递归复制
+  const walk = (src, dst) => {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+      const s = path.join(src, ent.name);
+      const d = path.join(dst, ent.name);
+      if (ent.isDirectory()) walk(s, d);
+      else fs.copyFileSync(s, d);
+    }
+  };
+  const st = fs.statSync(from);
+  if (st.isDirectory()) walk(from, to);
+  else {
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+  }
   console.log(`[pack] + ${path.relative(root, from)}  →  ${path.relative(stage, to) || '.'}`);
 };
 

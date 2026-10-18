@@ -25,7 +25,7 @@ import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
 import { artifactWithSkill, attackDamageBonus, attackPointNote } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
-import { lidichengfoRegions, weijuAvailable } from '../core/engine/skills';
+import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
@@ -6091,11 +6091,8 @@ function dustSideStep(ctx: Ctx, art: Artifact): HTMLElement {
   hint.textContent = '选择启动的一侧：';
   wrap.appendChild(hint);
   let rendered = 0;
-  const owner = ownerIdOfArtifact(ctx.state, art) ?? actorOf(ctx.state);
   for (const side of ['left', 'right'] as const) {
-    // 023「畏惧」（左侧）：**对方没有能力骰时不生成该按钮**——判定与引擎 `dustRiseActions` 同一份
-    //   （`weijuAvailable`）→ 不会出现"按钮在、点了才报错"。全模式生效。
-    if (art.id === '023' && side === 'left' && !weijuAvailable(ctx.state, owner)) continue;
+    // 023「畏惧」：**尘起/激活不限制**（对手没骰也能把这一侧切过来）——限制在"使用"（由 `legal` 过滤掉）
     rendered += 1;
     const b = document.createElement('button');
     b.type = 'button';
