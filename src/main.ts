@@ -8,7 +8,7 @@ import { setOnlineBattleHandler } from './ui/onlineMode';
 import { loadPrefs, savePrefs } from './ui/prefs';
 import type { Action, GameState, PlayerId } from './core/model/types';
 import { bindTurnTimer, unbindTurnTimer, setTurnTimerPaused } from './ui/turnTimer';
-import { hasSavedRoom, loadRejoinRecord, type NetSession } from './net/session';
+import { hasSavedRoom, type NetSession } from './net/session';
 import { diag, isDiagEnabled, challengeSnapshot } from './ui/diag';
 
 const root = document.getElementById('app');
@@ -180,7 +180,7 @@ const render = (): void => {
       battleShell = null;
       setLocalViewPlayer(null);
 // 刷新后若本标签页"上次还在房里" → 直接进联机大厅（会自动尝试重连，拿到状态快照即回战斗）
-if (hasSavedRoom() || loadRejoinRecord()) goLobby();
+if (hasSavedRoom()) goLobby();
 else showSetup();
     },
     onPrefsChange: (p) => savePrefs(p),
@@ -296,5 +296,5 @@ setOnlineBattleHandler((session) => {
 });
 // 首次进入：若上次还有"未完成的联机对局" → 直达联机大厅（那里会弹「继续上一局」）；
 // 否则回首页菜单。（刷新后直接回到可续局的位置，不用先点"联机"再进大厅。）
-if (hasSavedRoom() || loadRejoinRecord()) goLobby();
+if (hasSavedRoom()) goLobby();
 else showSetup();
