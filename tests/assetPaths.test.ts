@@ -49,7 +49,7 @@ describe('资源路径门禁（禁止站点绝对路径）', () => {
     const urls = [...css.matchAll(/url\((['"]?)([^)'"]+)\1\)/g)].map((m) => m[2]);
     const bad = urls.filter(
       (u) =>
-        !/^(\.|data:|#)/.test(u) && !/^\/fonts\/zhimangxing-subset\.woff2$/.test(u),
+        !/^(\.|data:|#)/.test(u) && !/^\/fonts\/zhimangxing-subset(-\d+)?\.woff2$/.test(u),
     );
     expect(bad).toEqual([]);
   });

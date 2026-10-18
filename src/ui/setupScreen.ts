@@ -5,7 +5,7 @@ import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact, SPECIAL_ARTIFACT_NOTE } from
 import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/legends';
 import { TACTICS, TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { CHALLENGES, slotPhrase, ADJUSTED_ARTIFACTS, ADJUSTED_TACTICS, type ChallengeCard } from '../core/content/challenges';
-import { APP_VERSION_LABEL, APP_BUILD } from '../version';
+import { APP_VERSION_LABEL } from '../version';
 import { renderLobby } from './lobby';
 import { createOnlineShell, type OnlineCtx, type OnlineShell } from './online';
 import { enterOnlineBattle } from './onlineMode';
@@ -347,7 +347,7 @@ function createCardInspector(
 
 /** 「关于游戏」弹窗：主创 / 开发方式 / 版本 / 版权声明（以后的更新与打赏信息也写在这里）。 */
 function openAboutModal(): void {
-  const overlay = el('div', 'settings-overlay');
+  const overlay = el('div', 'settings-overlay about-overlay');
   const box = el('div', 'settings-panel about-panel');
   const head = el('div', 'settings-head');
   const title = el('div', 'settings-title');
@@ -375,7 +375,7 @@ function openAboutModal(): void {
   line('《尘起时刻》线上版', 'about-title');
   line('策划与实现：群友「无言的双子龙」');
   line('开发方式：OpenCode + DeepSeek V4.1 Flash 协作开发');
-  line(`当前版本：${APP_VERSION_LABEL}（构建 ${APP_BUILD}）`, 'about-meta');
+  line(`当前版本：${APP_VERSION_LABEL}`, 'about-meta');
   line('原作《尘起时刻》的卡牌、规则与美术版权归原作者所有；本作为非商业同人实现，仅供交流与娱乐。', 'about-note');
   box.appendChild(body);
 

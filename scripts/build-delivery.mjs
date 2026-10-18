@@ -6,7 +6,7 @@
 //
 // 运行：node scripts/build-delivery.mjs
 import { build } from 'vite';
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,11 +48,15 @@ html = html.replace(/<link\b[^>]*>/g, (tag) => {
 for (const d of ['cards', 'legend', 'tactics']) html = html.split(`/${d}/`).join(`./${d}/`);
 html = html.split('/cover.jpg').join('./cover.jpg');
 
-// 4) 字体内联成 data URI（file:// 下浏览器常拦字体加载 → 内联最稳）
-const fontPath = path.join(root, 'public', 'fonts', 'zhimangxing-subset.woff2');
-if (existsSync(fontPath)) {
-  const b64 = readFileSync(fontPath).toString('base64');
-  html = html.replace(/url\((['"]?)[^)'"]*zhimangxing-subset\.woff2\1\)/g, `url(data:font/woff2;base64,${b64})`);
+// 4) 字体内联成 data URI（file:// 下浏览器常拦字体加载 → 内联最稳；**可能有多批子集**）
+const fontDir = path.join(root, 'public', 'fonts');
+if (existsSync(fontDir)) {
+  for (const f of readdirSync(fontDir)) {
+    if (!/^zhimangxing-subset.*\.woff2$/.test(f)) continue;
+    const b64 = readFileSync(path.join(fontDir, f)).toString('base64');
+    const esc = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    html = html.replace(new RegExp(`url\\((?:'|")?[^)'"]*${esc}(?:'|")?\\)`, 'g'), `url(data:font/woff2;base64,${b64})`);
+  }
 }
 
 // 4b) **图片也内联**（CSS 里 `url(./封面-hash.jpg)` 这类相对引用）：
