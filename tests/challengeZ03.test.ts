@@ -12,7 +12,7 @@ import type { Die, DiceKind, GameState } from '../src/core/model/types';
 const die = (id: string, value: number, kind: DiceKind = 'meditation'): Die => ({ id, value, kind });
 const Z03 = CHALLENGES.find((c) => c.id === 'Z03')!;
 const SK = (id: string) => Z03.skills!.find((s) => s.id === id)!;
-const make = () => createChallengeGame({ seed: 1, cardId: 'Z03', challenger: ['001', '002', '003'] });
+const make = () => createChallengeGame({ seed: 1, cardId: 'Z03', challenger: ['001', '002', '003'], settleMode: 'manual' });
 /** 直接铺好挑战者(A)的能力骰区（建局时它自带初始骰，必须覆盖）。 */
 const setA = (g: GameState, areas: { attack?: Die[]; defense?: Die[]; meditation?: Die[] }): void => {
   g.players.A.areas.attack = areas.attack ?? [];

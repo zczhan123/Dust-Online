@@ -20,7 +20,7 @@ import type { Die, DiceKind, GameState } from '../src/core/model/types';
  */
 
 const CHAL = (): GameState =>
-  createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+  createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'manual' });
 const STD = (): GameState =>
   createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'], heroB: ['001', '002', '003'] });
 
@@ -94,7 +94,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
 
   it('∞（无骰条件）：有 1/6 驱动骰才"发动"（弹名）；没有则跳过、不弹名', () => {
     // 有 1/6 → 发动（announce=true）
-    const g1 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
+    const g1 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'], settleMode: 'manual' });
     skipInitialReroll(g1);
     fxTake();
     g1.challenge!.resumeAt = 1; // z01-1 龙游万象（∞）
@@ -108,7 +108,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
     expect(ev!.announce).toBe(true);
 
     // 没有 1/6 → 无效果 → 跳过（z01-1 不推 legendSkill、不弹名）
-    const g2 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'] });
+    const g2 = createChallengeGame({ seed: 1, cardId: 'Z01', challenger: ['001', '002', '003'], settleMode: 'manual' });
     skipInitialReroll(g2);
     fxTake();
     g2.challenge!.resumeAt = 1;
@@ -234,7 +234,7 @@ describe('挑战模式 · 传奇回合 fx 事件', () => {
   });
 
   it('Z07 蛮王之牙「再次发动」：真实 challengeStep 流程里 **每组都报一次 announce**（≥2 次弹名）', () => {
-    const g = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'] });
+    const g = createChallengeGame({ seed: 1, cardId: 'Z07', challenger: ['001', '002', '003'], settleMode: 'manual' });
     skipInitialReroll(g);
     g.phase = 'main';
     g.activePlayer = 'B';

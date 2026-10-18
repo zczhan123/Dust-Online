@@ -30,6 +30,7 @@ import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skil
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
 import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
+import { showSettleTip, hideSettleTip } from './settleTip';
 import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, diagDump, diagClear, diagCount } from './diag';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
@@ -6637,12 +6638,32 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   // 中段右侧槽：保留原先"双方生命"的占地（留空），放置「设置」按钮；高度随 stretch 与操作栏齐平
   const right = el('div', 'centerband-right');
   right.appendChild(settingsBtn);
-  // 挑战模式：设置旁显示当前「结算模式」（自选/有利/不利）
+  // 挑战模式：设置旁显示当前「结算模式」（有利/不利/自选）——悬浮显示说明、点击切换显隐（只读，不改模式）
   if (state.mode === 'challenge') {
-    const sm = state.challenge?.settleMode ?? 'manual';
+    const sm = state.challenge?.settleMode ?? 'favor';
     const badge = el('span', 'settle-mode-badge');
     badge.dataset.settle = sm;
     badge.textContent = `结算：${sm === 'manual' ? '自选' : sm === 'favor' ? '有利' : '不利'}`;
+    const modeId: 'favor' | 'against' | 'manual' = sm;
+    let tipOn = false;
+    const showTip = (): void => {
+      showSettleTip(badge, modeId);
+      tipOn = true;
+    };
+    const hideTip = (): void => {
+      hideSettleTip();
+      tipOn = false;
+    };
+    badge.addEventListener('mouseenter', showTip);
+    badge.addEventListener('mouseleave', hideTip);
+    badge.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showTip();
+    });
+    badge.addEventListener('click', () => {
+      if (tipOn) hideTip();
+      else showTip();
+    });
     right.appendChild(badge);
   }
   // 挑战模式：设置旁加「挑战模式特殊规则」（浮窗＝本模式技能削弱清单）

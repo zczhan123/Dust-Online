@@ -5,10 +5,11 @@ import { ALT_OF, ARTIFACTS, BASE_OF, isAltArtifact, SPECIAL_ARTIFACT_NOTE } from
 import { LEGEND_OF_HERO, legendImageUrl, legendOfTrio } from '../core/content/legends';
 import { TACTICS, TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { CHALLENGES, slotPhrase, ADJUSTED_ARTIFACTS, ADJUSTED_TACTICS, type ChallengeCard } from '../core/content/challenges';
-import { APP_VERSION_LABEL } from '../version';
+import { APP_VERSION_LABEL, APP_BUILD } from '../version';
 import { renderLobby } from './lobby';
 import { createOnlineShell, type OnlineCtx, type OnlineShell } from './online';
 import { enterOnlineBattle } from './onlineMode';
+import { attachSettleTip, hideSettleTip } from './settleTip';
 
 export const HEROES = {
   kong: ['001', '002', '003'] as [string, string, string], // 雨中剑圣 空
@@ -344,6 +345,47 @@ function createCardInspector(
   return { modal, consumeLp, open };
 }
 
+/** 「关于游戏」弹窗：主创 / 开发方式 / 版本 / 版权声明（以后的更新与打赏信息也写在这里）。 */
+function openAboutModal(): void {
+  const overlay = el('div', 'settings-overlay');
+  const box = el('div', 'settings-panel about-panel');
+  const head = el('div', 'settings-head');
+  const title = el('div', 'settings-title');
+  title.textContent = '关于游戏';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn btn-cancel settings-close';
+  close.dataset.act = 'aboutClose';
+  close.textContent = '✕';
+  const bye = (): void => {
+    hideSettleTip();
+    overlay.remove();
+  };
+  close.addEventListener('click', bye);
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const body = el('div', 'about-body');
+  const line = (text: string, cls = ''): void => {
+    const p = el('div', `about-line${cls ? ` ${cls}` : ''}`);
+    p.textContent = text;
+    body.appendChild(p);
+  };
+  line('《尘起时刻》线上版', 'about-title');
+  line('策划与实现：群友「无言的双子龙」');
+  line('开发方式：OpenCode + DeepSeek V4.1 Flash 协作开发');
+  line(`当前版本：${APP_VERSION_LABEL}（构建 ${APP_BUILD}）`, 'about-meta');
+  line('原作《尘起时刻》的卡牌、规则与美术版权归原作者所有；本作为非商业同人实现，仅供交流与娱乐。', 'about-note');
+  box.appendChild(body);
+
+  overlay.appendChild(box);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) bye();
+  });
+  document.body.appendChild(overlay);
+}
+
 /** 首页（同页多级）：第一层＝模式菜单；第二层＝「左右互搏」的 3 个玩法 */
 export function renderSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
   renderMenu(root, onStart, 'home');
@@ -401,16 +443,6 @@ function renderMenu(
       menu.appendChild(item);
     }
   } else {
-    const dead = (label: string, tag: string): void => {
-      const node = el('div', 'menu-item is-disabled');
-      const word = el('span', 'word');
-      word.textContent = label;
-      const t = el('span', 'tag');
-      t.textContent = tag;
-      node.appendChild(word);
-      node.appendChild(t);
-      menu.appendChild(node);
-    };
     const live = (label: string): void => {
       const item = button('menu-item', '');
       item.dataset.act = 'jubai';
@@ -425,9 +457,6 @@ function renderMenu(
     const onlineWord = el('span', 'word');
     onlineWord.textContent = '联机游戏';
     online.appendChild(onlineWord);
-    const onlineTag = el('span', 'tag');
-    onlineTag.textContent = '同机测试';
-    online.appendChild(onlineTag);
     online.addEventListener('click', () => renderLobby(root, () => renderMenu(root, onStart, 'home'), onStart));
     menu.appendChild(online);
     live('左右互搏');
@@ -447,7 +476,14 @@ function renderMenu(
     lw.textContent = '图鉴查询';
     link.appendChild(lw);
     menu.appendChild(link);
-    dead('人机对战', '未规划');
+    // 「关于游戏」：主创 / 开发方式 / 版本 / 版权声明（以后的更新与打赏信息也写在这个弹窗里）
+    const about = button('menu-item', '');
+    about.dataset.act = 'about';
+    const aw = el('span', 'word');
+    aw.textContent = '关于游戏';
+    about.appendChild(aw);
+    about.addEventListener('click', () => openAboutModal());
+    menu.appendChild(about);
   }
 
   wrap.appendChild(menu);
@@ -1717,7 +1753,7 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
 
   let legendIdx = 0;
   let pickHeroIdx = 0;
-  let settleMode: 'manual' | 'favor' | 'against' = 'manual'; // 默认自选（测试方便）
+  let settleMode: 'manual' | 'favor' | 'against' = 'favor'; // 默认「有利」（规则书标准规则）
   let anomaly = false; // 「使用异相神器」开关
   let tacticOn = false; // 「使用战术牌」开关（挑战者；昔日传奇不配战术牌）
   let tacticPick: string | null = null; // 挑战者已选战斗牌 id
@@ -1908,11 +1944,12 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
         settleMode = val;
         render();
       });
+      attachSettleTip(b, val); // 悬浮 / 右键（长按）→ 小弹框说明（文案唯一来源 SETTLE_MODE_TEXT）
       seg.appendChild(b);
     };
-    segBtn('favor', '结算玩家有利');
+    segBtn('favor', '结算玩家有利'); // 默认
     segBtn('against', '结算玩家不利');
-    segBtn('manual', '结算玩家自选'); // 最右、默认
+    segBtn('manual', '结算玩家自选');
     head.appendChild(seg);
     col.appendChild(head);
 

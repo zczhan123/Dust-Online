@@ -42,7 +42,7 @@ describe('挑战模式 · 建局与状态', () => {
 
   it('挑战运行时初始值', () => {
     const g = make();
-    expect(g.challenge).toEqual({ cardId: 'Z02', count: 0, driven: [], slot: [], turn: 0, settleMode: 'manual' });
+    expect(g.challenge).toEqual({ cardId: 'Z02', count: 0, driven: [], slot: [], turn: 0, settleMode: 'favor' });
   });
 
   it('传奇没有初始重掷可做 → 初始重掷直接轮到挑战者', () => {

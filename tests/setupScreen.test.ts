@@ -379,6 +379,22 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
 });
 
 describe('渲染入口 / 菜单', () => {
+  it('首页：没有「同机测试」标签；「关于游戏」可点并弹出说明（含版本与版权）', () => {
+    renderSetup(root, () => {});
+    const tags = qa(root, '.menu-item .tag').map((t) => t.textContent ?? '');
+    expect(tags).not.toContain('同机测试'); // 「联机游戏」旁的标签已删
+    expect(tags).not.toContain('未规划'); // 「人机对战·未规划」已换成「关于游戏」
+    const about = q(root, '.menu-item[data-act="about"]');
+    expect(about).not.toBeNull();
+    clickEl(about!);
+    const panel = document.body.querySelector('.settings-overlay .about-panel') as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.textContent).toContain('无言的双子龙');
+    expect(panel.textContent).toContain('OpenCode + DeepSeek V4.1 Flash');
+    expect(panel.textContent).toContain('当前版本：');
+    expect(panel.textContent).toContain('版权归原作者所有');
+  });
+
   it('renderSetup 第二层：「构筑模式」进入构筑界面', () => {
     renderSetup(root, () => {});
     clickEl(q(root, '.menu-item[data-act="jubai"]'));
@@ -826,19 +842,30 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
     }
   });
 
-  it('结算模式：三选一（有利/不利/自选）、默认「自选」、必填单选、点击切换', () => {
+  it('结算模式：三选一（有利/不利/自选）、默认「有利」、必填单选、点击切换', () => {
     renderChallengeSetup(root, () => {});
     const seg = (val: string): HTMLElement => qa(root, '.pick-seg-btn').find((b) => b.dataset.settle === val)!;
     const labels = qa(root, '.pick-seg-btn').map((b) => b.textContent);
     expect(labels).toEqual(['结算玩家有利', '结算玩家不利', '结算玩家自选']);
     expect(labels[labels.length - 1]).toBe('结算玩家自选'); // 自选在最右
-    expect(seg('manual').classList.contains('on')).toBe(true); // 默认自选
-    expect(seg('favor').classList.contains('on')).toBe(false);
-    seg('against').click();
+    expect(seg('favor').classList.contains('on')).toBe(true); // 默认有利（规则书标准）
     expect(seg('manual').classList.contains('on')).toBe(false);
+    seg('against').click();
+    expect(seg('favor').classList.contains('on')).toBe(false);
     expect(seg('against').classList.contains('on')).toBe(true);
     seg('against').click(); // 必填：点当前项不取消
     expect(seg('against').classList.contains('on')).toBe(true);
+  });
+
+  it('结算模式药丸：悬浮显示说明（文案唯一来源＝SETTLE_MODE_TEXT）', () => {
+    renderChallengeSetup(root, () => {});
+    const b = qa(root, '.pick-seg-btn').find((x) => x.dataset.settle === 'favor')!;
+    b.dispatchEvent(new MouseEvent('mouseenter'));
+    const tip = document.body.querySelector('.settle-tip') as HTMLElement;
+    expect(tip.textContent).toBe('替昔日传奇做的决定，都会自动选择对玩家有利——标准规则');
+    expect(tip.hidden).toBe(false);
+    b.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(tip.hidden).toBe(true);
   });
 });
 

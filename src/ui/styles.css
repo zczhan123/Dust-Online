@@ -2837,6 +2837,37 @@ html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; bac
 }
 .settle-mode-badge[data-settle="favor"] { background: #e9f2ec; color: #1d6b43; }
 .settle-mode-badge[data-settle="against"] { background: #fadfd0; color: #a33a12; }
+.settle-mode-badge { cursor: help; }
+
+/* 挑战「结算模式」小弹框（选择界面药丸 / 战斗徽标共用；暗底亮字，与 online-modal 同族） */
+.settle-tip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: #1b1a1d;
+  color: #e8e4da;
+  border: 1px solid #3a3a40;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.settle-tip--on { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .settle-tip { transition: none; transform: none; }
+}
+
+/* 「关于游戏」弹窗 */
+.about-panel { max-width: 460px; }
+.about-body { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+.about-line { font-size: 13.5px; line-height: 1.7; color: #3a3a3a; }
+.about-line.about-title { font-size: 17px; font-weight: 700; color: #171717; letter-spacing: .02em; }
+.about-line.about-meta { color: #6b6b6b; font-size: 12.5px; }
+.about-line.about-note { margin-top: 6px; padding-top: 8px; border-top: 1px solid #e2ded4; color: #6b6b6b; font-size: 12px; }
 .challenge-legacy-info {
   display: flex;
   align-items: center;

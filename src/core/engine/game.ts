@@ -3630,7 +3630,7 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   // 传奇没有初始能力骰（它的骰是每回合投的"驱动骰"），也没有冥想骰区
   g.players.B.areas = { attack: [], defense: [], meditation: [] };
   if (card.life != null) g.players.B.life = g.players.B.lifeMax = card.life;
-  g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0, settleMode: opts.settleMode ?? 'manual' };
+  g.challenge = { cardId: card.id, count: 0, driven: [], slot: [], turn: 0, settleMode: opts.settleMode ?? 'favor' };
   // Z06「漆黑死神」：黑白指示物，战斗开始＝**黑面朝上**（回合结束翻面）
   if (card.token) g.challenge.token = 'black';
   logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」· 生命 ${g.players.B.life}`);

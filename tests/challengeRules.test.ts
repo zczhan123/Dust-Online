@@ -18,7 +18,7 @@ const Z02 = CHALLENGES.find((c) => c.id === 'Z02')!;
 
 /** 建局并把传奇的首个回合驱动跑完，回到挑战者的主要阶段 */
 const toChallengerMain = (challenger: [string, string, string]) => {
-  const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger });
+  const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger, settleMode: 'manual' });
   skipInitialReroll(g);
   driveLegendTurn(g);
   toMain(g);
@@ -34,7 +34,7 @@ describe('挑战模式 · 规则与削弱', () => {
   });
 
   it('isInertSkill：按玩家分侧（不是按模式一刀切）；标准模式一律 false', () => {
-    const chal = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const chal = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'manual' });
     // 028 白昼之火 / A05 深空之火：只废"打向传奇"的那一份（挑战者 A）；传奇 B 照常
     expect(isInertSkill(chal, 'A', 'tianfa.bairi')).toBe(true);
     expect(isInertSkill(chal, 'A', 'tianfa.alt.shenkong')).toBe(true);
@@ -73,7 +73,7 @@ describe('挑战模式 · 规则与削弱', () => {
   });
 
   it('028「白昼之火」在挑战模式下没有任何效果（激活时）', () => {
-    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['028', '002', '003'] });
+    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['028', '002', '003'], settleMode: 'manual' });
     // 造尘起阶段，把 028 装填到左侧（左＝「白昼之火」，激活类技能此即强制结算）
     g.phase = 'dustRise';
     g.activePlayer = 'A';
@@ -110,7 +110,7 @@ describe('挑战模式 · 规则与削弱', () => {
   });
 
   it('代决：「枭首」攻击顺序交给挑战者选（asc→先小后大）', () => {
-    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+    const g = createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'manual' });
     g.players.B.areas.attack = [die('b1', 5, 'attack'), die('b2', 2, 'attack')];
     g.players.A.areas.defense = [];
     g.challenge!.decisions = { 'z02-4': ['asc'] };

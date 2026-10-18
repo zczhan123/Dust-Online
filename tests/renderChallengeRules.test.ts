@@ -554,8 +554,17 @@ describe('挑战模式 · 面板细节（尘落徽标 / 锋芒常亮）', () => 
     const badge = fav.root.querySelector('.settle-mode-badge') as HTMLElement;
     expect(badge.textContent).toBe('结算：有利');
     expect(badge.dataset.settle).toBe('favor');
+    // 悬浮 → 小弹框（文案唯一来源）；移开 → 隐藏
+    badge.dispatchEvent(new MouseEvent('mouseenter'));
+    const tip = document.body.querySelector('.settle-tip') as HTMLElement;
+    expect(tip.textContent).toBe('替昔日传奇做的决定，都会自动选择对玩家有利——标准规则');
+    expect(tip.hidden).toBe(false);
+    badge.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(tip.hidden).toBe(true);
 
-    const man = mount(createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] }));
+    const man = mount(
+      createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'manual' }),
+    );
     expect((man.root.querySelector('.settle-mode-badge') as HTMLElement).textContent).toBe('结算：自选');
   });
 });

@@ -8,7 +8,7 @@ import type { Die, DiceKind } from '../src/core/model/types';
 const CARD = CHALLENGES.find((c) => c.id === 'Z02')!;
 const SK = (id: string) => CARD.skills!.find((s) => s.id === id)!;
 const die = (id: string, value: number, kind: DiceKind): Die => ({ id, value, kind });
-const make = () => createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'] });
+const make = () => createChallengeGame({ seed: 1, cardId: 'Z02', challenger: ['001', '002', '003'], settleMode: 'manual' });
 
 describe('挑战模式 · Z02 非攻击类效果', () => {
   it('葬敌的完杀：挑战者防御骰弃至剩 1；传奇获得 1/2/3/4 点攻击骰各 1', () => {
