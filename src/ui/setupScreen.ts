@@ -377,6 +377,8 @@ function openAboutModal(): void {
   line('开发方式：OpenCode + DeepSeek V4.1 Flash 协作开发');
   line(`当前版本：${APP_VERSION_LABEL}`, 'about-meta');
   line('原作《尘起时刻》的卡牌、规则与美术版权归原作者所有；本作为非商业同人实现，仅供交流与娱乐。', 'about-note');
+  line('遇到 Bug 或结算逻辑异常，欢迎到玩家群 684573027 反馈；附上战报或截图，更容易定位问题。', 'about-note');
+  line('2vs2 团队模式短期内暂不列入开发计划。');
   box.appendChild(body);
 
   overlay.appendChild(box);

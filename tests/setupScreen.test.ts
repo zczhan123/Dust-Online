@@ -393,6 +393,8 @@ describe('渲染入口 / 菜单', () => {
     expect(panel.textContent).toContain('OpenCode + DeepSeek V4.1 Flash');
     expect(panel.textContent).toContain('当前版本：');
     expect(panel.textContent).toContain('版权归原作者所有');
+    expect(panel.textContent).toContain('684573027'); // 问题反馈群
+    expect(panel.textContent).toContain('2vs2 团队模式短期内暂不列入开发计划');
   });
 
   it('renderSetup 第二层：「构筑模式」进入构筑界面', () => {
