@@ -78,6 +78,9 @@ html = html.replace(/url\((['"]?)\.\/([^)'"]+\.(?:png|jpe?g|webp|svg))\1\)/g, (m
   return `url(data:${MIME[ext] ?? 'application/octet-stream'};base64,${readFileSync(p).toString('base64')})`;
 });
 
+// 3b) 兜底：任何顺序/转义漏改都在这里补齐（../cards|legend|tactics → ./...）
+for (const d of ['cards', 'legend', 'tactics']) html = html.split('../' + d + '/').join('./' + d + '/');
+
 writeFileSync(htmlPath, html, 'utf8');
 
 // 5) 清理已内联的 assets/（内容都在 html 里了）
