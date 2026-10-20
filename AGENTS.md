@@ -559,3 +559,9 @@
       2. **与 `settleMode`（有利/不利）无关**：**三种结算模式下都弹面板**——⚠️ 现状**本来就没有**任何 `settleMode` 自动结算这些 pending（全仓 `settleMode`/`autoPick` 只出现在 **Z 卡**路径）→ 属"锁行为"而非"改行为"。回归：`tests/challengeAdjust.test.ts`（`xianzhenPick` 在 manual/favor/against 三模式下都挂 pending 且 `player==='A'`）。
       3. **026 陷阵＝"选人可变"，但判定只问持有者（2026-10-15 备忘）**：触发条件是 `hasActiveSkill(players[**owner**], 'aige.xianzhen')`（`game.ts` 的 `queueXianzhen`）——**只问持有者**，**没有**任何传奇侧条件；而**"谁弃"＝生命最少方**（`chooser`，会变）→ 三种现实：① chooser＝挑战者且 026 在挑战者手里（自选）；② chooser＝昔日、026 在挑战者手里（**挑战者代昔日选**，`player:'A'`、`owner:持有者`）；③ **昔日没有重掷阶段**（走 `runLegendTurn`，不经 `advancePhase`）→ 不存在"昔日的 026"→ 陷阵**不可能**从传奇回合触发（这是设计，不是漏判）。⚠️ 别照 033 的错路子给它加"传奇例外"。两条时点（普通重掷 `:3468` / 额外重掷 `:3456`）都要接（§19③ 曾漏过额外重掷那条）。
       4. **A04（兽魂「异相」）不属调整，020 才是**：判据＝`combat.ts` 的 `shouhunInfo` —— **020＝`decider:'attacker'`**（挑战下"攻击你的人"永远是昔日 → 昔日本该自己决定 → **由挑战者代决** ⟹ 打「调整」徽标 ＋ 规则条目）；**A04＝`decider:'owner'`**（＝**持有者**，也就是挑战者自己 → **自始至终自己选** ⟹ **不打徽标、不进规则面板**）。`ADJUSTED_ARTIFACTS` 已去掉 `A04`（规则面板 13→12 条）。
+## 触屏/移动端口径（2026-10-18）
+- 所有卡图/战术名标题等触发点：-webkit-touch-callout:none; user-select:none; -webkit-user-drag:none + contextmenu.preventDefault()，避免长按带出浏览器原生菜单/选中/存图。
+- 战斗界面（卡不可选）：**单击 = 看技能**；选择界面（单击=选定）：**长按 = 看技能**。
+- 技能详情弹框 .detail-popover：**深色统一**（#1b1a18 / 标题 #e8e4da / 正文 #b9b3a6 / 边框 #3a3834），右上角悬浮 .detail-close（40px 触控区，不占行）。
+- 详情弹框定位 layoutDetailBox：下方放不下→向上展开，最后 clamp 到视口内（与选择界面一致），高度限制在视口内、内部滚动。
+- 默认预设：电脑＝技能显示/缩略卡图/紧凑/镜像/战报显示/整屏自动；触屏＝技能缩略/缩略卡图/紧凑/镜像/战报缩略/整屏自动。整屏自动＝按高度缩放（pplyZoom 的 h/h，下限 0.8）。回归：	ests/prefs.test.ts。

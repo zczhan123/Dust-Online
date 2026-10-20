@@ -300,6 +300,34 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
     } else {
       for (const r of s.rooms) list.appendChild(roomRow(r, s.roomId));
     }
+    // **独立续局入口**：上次那间房已不在列表（房主掉线后没人广播房间）→ 仍可一键重连
+    const rec = loadRejoinRecord();
+    if (rec && !s.roomId && !s.rooms.some((r) => r.id === rec.roomId)) {
+      const label = rec.role === 'spectator' ? '继续旁观' : '继续对局';
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'lobby-row lobby-row--resume';
+      const main = el('div', 'lobby-row-main');
+      const chipEl = el('span', 'lobby-chip');
+      chipEl.textContent = `${label}（上次的房间已失联，尝试重连）`;
+      main.appendChild(chipEl);
+      const side = el('div', 'lobby-row-side');
+      const pillState = el('span', 'lobby-state lobby-state--join');
+      pillState.textContent = label;
+      side.appendChild(pillState);
+      row.append(main, side);
+      row.addEventListener('click', () => {
+        let off = (): void => {};
+        off = session.subscribe((st2) => {
+          if (st2.game) {
+            off();
+            enterOnlineBattle(session);
+          }
+        });
+        session.rejoinRoom(rec.roomId);
+      });
+      list.appendChild(row);
+    }
 
     createBtn.className = `lobby-btn ${s.roomId ? 'lobby-leave' : 'lobby-create'}`;
     createBtn.textContent = s.roomId ? (s.role === 'host' ? '关闭房间' : '退出房间') : '创建房间';

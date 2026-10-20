@@ -281,9 +281,14 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
     const off = s.peerLeft || dropped;
     if (off) {
       dropTitle.textContent = s.peerLeft ? '对方已退出对局' : '对方已掉线';
+      const graceLeft = s.peerOfflineAt != null
+        ? Math.max(0, 60 - Math.floor((Date.now() - s.peerOfflineAt) / 1000))
+        : 60;
       dropText.textContent = s.peerLeft
         ? '对方已离开本局（本局作废）。可退回大厅。'
-        : '可尝试等待对方重连…（等不及可退回大厅）';
+        : graceLeft > 0
+          ? `可等待对方重连（剩余约 ${graceLeft} 秒）；等不及可退回大厅`
+          : '已超过等待时间，可退回大厅重新开局。';
       dropText.classList.add('online-modal-text--warn');
     }
     dropOverlay.hidden = !off;
@@ -298,6 +303,11 @@ export function createOnlineShell(ctx: OnlineCtx, host: HTMLElement): OnlineShel
   renderChat();
   renderSettings();
   renderDrop();
+  // 「等待对方重连」倒计时：弹框可见时每秒刷新一次；元素被移出 DOM 即自停
+  const dropTicker = window.setInterval(() => {
+    if (!dropOverlay.isConnected) { window.clearInterval(dropTicker); return; }
+    if (!dropOverlay.hidden) renderDrop();
+  }, 1000);
 
   const toggle = (pop: HTMLElement): void => {
     const open = pop.hidden;

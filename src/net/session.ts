@@ -39,6 +39,8 @@ export interface SessionState {
   myPlayer: PlayerId | null;
   /** 对端是否在线（心跳判定；**仅房内有效**，无对端时恒 true）。战斗界面据此暂停 + 弹"掉线"框 */
   peerOnline: boolean;
+  /** 对端**从在线变离线**的时刻（毫秒）；在线时 null。用于"等待重连"宽限倒计时 */
+  peerOfflineAt: number | null;
   /** 对端**主动退出/关房**（对局进行中）→ 明确提示"对方已退出对局"（而非静默卡住） */
   peerLeft: boolean;
   /** 一次性提示（如"版本不一致，请刷新页面"）；界面显示后自行清除 */
@@ -274,6 +276,7 @@ export class NetSession {
       game: null,
       myPlayer: null,
       peerOnline: true,
+      peerOfflineAt: null,
       peerLeft: false,
       notice: null,
     };
@@ -363,6 +366,15 @@ export class NetSession {
   joinRoom(roomId: string, role: Role = 'guest'): void {
     const room = this.st.rooms.find((r) => r.id === roomId);
     if (!room) return;
+    // **误点「旁观」不能顶掉玩家身份**：本机记录是同一房间的 host/guest 时直接拦截
+    if (role === 'spectator') {
+      const rec = loadRejoinRecord();
+      if (rec && rec.roomId === roomId && rec.role !== 'spectator') {
+        this.st.notice = '你还在本局中，不能旁观自己的对局；请点「继续对局」';
+        this.emit();
+        return;
+      }
+    }
     this.st.roomId = roomId;
     this.st.role = role;
     this.st.config = room.config;
@@ -601,6 +613,7 @@ export class NetSession {
     this.st.game = null;
     this.st.myPlayer = null;
     this.st.peerOnline = true;
+    this.st.peerOfflineAt = null;
     this.st.peerLeft = false;
   }
 
@@ -639,13 +652,27 @@ export class NetSession {
     const online = !hasPeer || Date.now() - this.peerSeenAt < PEER_TIMEOUT_MS;
     if (online !== this.st.peerOnline) {
       this.st.peerOnline = online;
+      this.st.peerOfflineAt = online ? null : Date.now();
       this.emit();
     }
   }
 
   private emit(): void {
+    this.syncBattleFlag();
     const s = this.st;
     for (const cb of this.subs) cb(s);
+  }
+
+  /** 房主：按当前阶段同步房间公告里的 `inBattle`（大厅据此显示「旁观」）。
+   *  初始重掷阶段不经过 `dispatch`，所以必须在每次状态变化时校正，而不是只在出手时设置。 */
+  private syncBattleFlag(): void {
+    if (!this.myRoom || !this.st.game) return;
+    const ph = this.st.game.phase;
+    const inBattle = ph !== 'setup' && ph !== 'tactics';
+    if (this.myRoom.inBattle === inBattle) return;
+    this.myRoom = { ...this.myRoom, inBattle };
+    this.upsert(this.myRoom);
+    this.announce();
   }
 
   private recv(m: NetMessage): void {
@@ -730,6 +757,8 @@ export class NetSession {
               roomId: m.roomId,
               game: this.st.game,
               members: this.st.members,
+              chat: this.st.chat.slice(),
+              timer: this.st.timer,
               config: this.myRoom.config,
               hostKey: onlineKey(),
             });
@@ -737,8 +766,12 @@ export class NetSession {
             break;
           }
           const joinKey = m.key ?? '';
-          const knownGuestKey = readRoomKey('guest', m.roomId);
           const seated = this.st.members.some((x) => x.role === m.role);
+          // 未开局且座位已有旧成员（多半是老玩家关标签留下的）→ 允许顶座：先清旧 key；
+          // 对局已开始则**不允许**顶座，只认原主（key 不符会被下面的校验拦下并保留座位）。
+          const takeover = !this.st.game && seated;
+          if (takeover) writeRoomKey('guest', m.roomId, '');
+          const knownGuestKey = takeover ? null : readRoomKey('guest', m.roomId);
           // **对局中**（或该角色已在座＝刷新后 peerId 变了）→ 视为"回来"：按 role 替换/补入 + 发快照
           if (this.st.game || seated) {
             // **只认本人**：已有房客 key 且对不上 → 静默丢弃（不给局面、不占座）
@@ -762,6 +795,8 @@ export class NetSession {
                 roomId: m.roomId,
                 game: this.st.game,
                 members: this.st.members,
+                chat: this.st.chat.slice(),
+                timer: this.st.timer,
                 config: this.myRoom.config,
                 hostKey: onlineKey(),
               });
@@ -813,13 +848,15 @@ export class NetSession {
           // 重连成功 → **清掉"对方掉线/已退出"标记**（否则界面会一直停在"本局作废"）
           this.st.peerLeft = false;
           this.st.peerOnline = true;
+          this.st.peerOfflineAt = null;
           this.peerSeenAt = Date.now();
+          // **双方都要**把重连方并回名单（以 role 为准，替换为新 peerId）：
+          // 访客没有 myRoom，但心跳靠 members 里的 id 认人；不更新会误判"对方掉线"。
+          const has = this.st.members.some((x) => x.role === m.role);
+          this.st.members = has
+            ? this.st.members.map((x) => (x.role === m.role ? { id: m.from, name: m.name, role: m.role } : x))
+            : [...this.st.members, { id: m.from, name: m.name, role: m.role }];
           if (this.myRoom) {
-            // 房主：把重连方并回名单（以 role 为准，替换为新 peerId）
-            const has = this.st.members.some((x) => x.role === m.role);
-            this.st.members = has
-              ? this.st.members.map((x) => (x.role === m.role ? { id: m.from, name: m.name, role: m.role } : x))
-              : [...this.st.members, { id: m.from, name: m.name, role: m.role }];
             const guest = this.st.members.find((x) => x.role === 'guest');
             this.myRoom = { ...this.myRoom, guestName: guest?.name ?? null, filled: this.seatCount() };
             this.upsert(this.myRoom);
@@ -833,8 +870,11 @@ export class NetSession {
               roomId: m.roomId,
               game: this.st.game,
               members: this.st.members,
+              chat: this.st.chat.slice(),
+              timer: this.st.timer,
               config: cfg,
-              hostKey: onlineKey(),
+              // 只有房主才写 hostKey：访客回的快照不能覆盖房主身份
+              ...(this.st.role === 'host' ? { hostKey: onlineKey() } : {}),
             });
           }
           this.emit();
@@ -843,10 +883,40 @@ export class NetSession {
       case 'snapshot':
         if (mine(m.roomId) && m.from !== this.net.peerId && !this.st.game) {
           this.st.game = m.game;
-          this.st.members = m.members;
+          // 快照里的成员 id 可能还是我方旧 peerId → 校正成当前 id（心跳认人靠它）
+          this.st.members = (m.members ?? []).map((x) =>
+            x.role === this.st.role ? { ...x, id: this.net.peerId } : x,
+          );
           this.st.config = m.config;
+          // 聊天历史：合并去重（按时间排序）；原有未读数保持（历史算已读）
+          if (Array.isArray(m.chat)) {
+            const unread = Math.max(0, this.st.chat.length - this.chatReadCount);
+            const seen = new Set(this.st.chat.map((c) => `${c.at}|${c.peerId}|${c.text}`));
+            const merged = [...this.st.chat];
+            for (const c of m.chat) {
+              const key = `${c.at}|${c.peerId}|${c.text}`;
+              if (!seen.has(key)) {
+                merged.push(c);
+                seen.add(key);
+              }
+            }
+            merged.sort((x, y) => x.at - y.at);
+            this.st.chat = merged;
+            this.chatReadCount = Math.max(0, merged.length - unread);
+          }
+          // 倒计时：重连后**从当前时刻重新计时**（保留总时长），避免设备时钟偏差/断线期间被扣时
+          if (m.timer) {
+            this.st.timer = {
+              side: m.timer.side,
+              startAt: Date.now(),
+              ms: Math.max(1000, m.timer.ms),
+            };
+          }
+          // 选择态（选战术/选牌）：重连后**清空、不恢复**（避免复活已确认的旧选择导致按钮/高亮错乱）
+          this.st.sel = null;
           // 记下房主身份 key（房主 rejoin 时核对"是不是本人"）
-          if (m.hostKey) writeRoomKey('host', m.roomId, m.hostKey);
+          // 房主自己收到快照时不要覆盖本机记录的房主 key
+          if (m.hostKey && this.st.role !== 'host') writeRoomKey('host', m.roomId, m.hostKey);
           // **房主刷新后 `myRoom` 丢了** → 用快照里的 config/members 重建：
           //   否则之后不再应答 `room:join`、也不再 `room:announce`（房间会从大厅消失）。
           if (this.st.role === 'host' && !this.myRoom) {
@@ -868,6 +938,7 @@ export class NetSession {
           // 收到快照＝已经接回对局 → 清掉自己的"对方掉线/已退出"标记
           this.st.peerLeft = false;
           this.st.peerOnline = true;
+          this.st.peerOfflineAt = null;
           this.peerSeenAt = Date.now();
           this.emit();
         }

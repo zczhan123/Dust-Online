@@ -21,9 +21,6 @@ const clickEl = (n: El | null): void => {
   if (!n) throw new Error('missing element');
   n.click();
 };
-const dbl = (n: El): void => {
-  n.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-};
 const ab = (root: El, hero: string, side: 'A' | 'B'): El => {
   const n = qa(root, `.pick-ab.${side}`).find((b) => b.dataset.hero === hero);
   if (!n) throw new Error(`missing ab ${hero}/${side}`);
@@ -235,22 +232,21 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     ]);
   });
 
-  it('点名 → 候选 3 件；选中→确定 → 按列落入确认列', () => {
+  it('点名 → 候选 3 件；单击 → 按列落入确认列', () => {
     renderBuildSetup(root, () => {});
     ab(root, 'kong', 'A').click();
     expect(q(root, '.pick-col.cand.A .pick-chead .sub')!.textContent).toBe('雨中剑圣·空');
     expect(qa(root, '.pick-col.cand.A .pick-slot')).toHaveLength(3);
+    // 单击＝选中并直接确定（不再需要再点「确定」）
     candSlotBySrc(root, 'A', '002')!.click();
-    expect(candSlotBySrc(root, 'A', '002')!.classList.contains('picked')).toBe(true);
-    clickEl(q(root, '.pick-col.cand.A .pick-ok'));
     const slot = q(root, '.pick-col.confirm.A .pick-slot[data-col="2"]')!;
     expect(slot.querySelector('img')!.getAttribute('src')).toBe('./cards/002.jpg');
   });
 
-  it('双击候选卡 = 直接确定', () => {
+  it('单击候选卡 = 直接确定（双击不再重复确认）', () => {
     renderBuildSetup(root, () => {});
     ab(root, 'ying', 'A').click();
-    dbl(candSlotBySrc(root, 'A', '004')!);
+    candSlotBySrc(root, 'A', '004')!.click();
     expect(q(root, '.pick-col.confirm.A .pick-slot[data-col="1"] img')!.getAttribute('src')).toBe(
       './cards/004.jpg',
     );
@@ -259,7 +255,7 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
   it('已被选取：一方确定后，另一方候选同名神器显示「已被选取」', () => {
     renderBuildSetup(root, () => {});
     ab(root, 'kong', 'A').click();
-    dbl(candSlotBySrc(root, 'A', '001')!);
+    candSlotBySrc(root, 'A', '001')!.click();
     ab(root, 'kong', 'B').click();
     expect(qa(root, '.pick-col.cand.B .pick-slot.taken .pick-taken').map((n) => n.textContent)).toEqual([
       '已被选取',
@@ -269,9 +265,9 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
   it('满 3 件 → 印章 + 候选列锁定；取消后解除', () => {
     renderBuildSetup(root, () => {});
     ab(root, 'kong', 'A').click();
-    dbl(candSlotBySrc(root, 'A', '001')!);
-    dbl(candSlotBySrc(root, 'A', '002')!);
-    dbl(candSlotBySrc(root, 'A', '003')!);
+    candSlotBySrc(root, 'A', '001')!.click();
+    candSlotBySrc(root, 'A', '002')!.click();
+    candSlotBySrc(root, 'A', '003')!.click();
     expect(qa(root, '.pick-col.confirm.A .pick-seal')).toHaveLength(1);
     expect(q(root, '.pick-col.cand.A')!.classList.contains('locked')).toBe(true);
     clickEl(q(root, '.pick-col.confirm.A .pick-cbtn'));
@@ -283,9 +279,9 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     const onStart = vi.fn();
     renderBuildSetup(root, onStart);
     ab(root, 'kong', 'A').click();
-    dbl(candSlotBySrc(root, 'A', '001')!);
-    dbl(candSlotBySrc(root, 'A', '002')!);
-    dbl(candSlotBySrc(root, 'A', '003')!);
+    candSlotBySrc(root, 'A', '001')!.click();
+    candSlotBySrc(root, 'A', '002')!.click();
+    candSlotBySrc(root, 'A', '003')!.click();
     clickEl(q(root, '.pick-rand.B')); // B 随机补足并确定
     clickEl(q(root, '.pick-start'));
     const o = onStart.mock.calls[0][0] as SetupOptions;
@@ -301,9 +297,9 @@ describe('renderBuildSetup（构筑模式 · 5 栏）', () => {
     const onStart = vi.fn();
     renderBuildSetup(root, onStart);
     ab(root, 'kong', 'A').click();
-    dbl(candSlotBySrc(root, 'A', '001')!);
-    dbl(candSlotBySrc(root, 'A', '002')!);
-    dbl(candSlotBySrc(root, 'A', '003')!);
+    candSlotBySrc(root, 'A', '001')!.click();
+    candSlotBySrc(root, 'A', '002')!.click();
+    candSlotBySrc(root, 'A', '003')!.click();
     expect(q<HTMLButtonElement>(root, '.pick-start')!.disabled).toBe(true); // B 未确定
     expect(q(root, '.pick-start-hint')!.textContent).toContain('神器');
     clickEl(q(root, '.pick-rand.B'));
@@ -942,7 +938,7 @@ describe('异相（A01–A03）· 选择界面', () => {
     anomalySwitch().click();
     // B 选 batton 并确定其第三列 009
     ab(root, 'batton', 'B').click();
-    dbl(candSlotBySrc(root, 'B', '009')!);
+    candSlotBySrc(root, 'B', '009')!.click();
     // A 选 batton：第三列 009 已被 B 拿走 → 自动显示异相 A01（按钮保留但禁用）
     ab(root, 'batton', 'A').click();
     const alt = candSlotBySrc(root, 'A', 'A01')!;

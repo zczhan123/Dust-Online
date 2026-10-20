@@ -44,6 +44,9 @@ html = html.replace(/<link\b[^>]*>/g, (tag) => {
   return tag;
 });
 
+// 3a) 源里的 '../cards/'（上一级）也改成本级（单文件版里 index.html 与 cards/ 同层）
+for (const d of ['cards', 'legend', 'tactics']) html = html.split(`../${d}/`).join(`./${d}/`);
+
 // 3) 绝对路径 → 相对（源里写死的 '/cards/' 等；base=./ 不会改这些字面量）
 for (const d of ['cards', 'legend', 'tactics']) html = html.split(`/${d}/`).join(`./${d}/`);
 html = html.split('/cover.jpg').join('./cover.jpg');

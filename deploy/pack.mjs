@@ -49,6 +49,35 @@ const copy = (from, to) => {
 // 1) 网页（dist/ 的全部内容）
 copy(path.join(root, 'dist'), path.join(stage, 'www'));
 
+// 1b) 防回归：静态资源路径必须正确（否则部署后卡图全裂）
+{
+  const html = readFileSync(path.join(stage, 'www', 'index.html'), 'utf8');
+  let js = '';
+  const assetsDir = path.join(stage, 'www', 'assets');
+  for (const f of fs.readdirSync(assetsDir)) {
+    if (f.endsWith('.js')) js += readFileSync(path.join(assetsDir, f), 'utf8');
+  }
+  const all = html + js;
+  const bad = (all.match(/\.\.\/cards\//g) ?? []).length;
+  if (bad > 0) {
+    console.error(`[pack] ✗ 产物里仍有 ${bad} 处 ../cards/（部署后卡图会 404）`);
+    process.exit(1);
+  }
+  if (!all.includes('./cards/')) {
+    console.error('[pack] ✗ 产物里找不到 ./cards/（卡图路径不对）');
+    process.exit(1);
+  }
+  for (const d of ['cards', 'legend', 'tactics', 'fonts']) {
+    const p = path.join(stage, 'www', d);
+    const ok = fs.existsSync(p) && fs.readdirSync(p).length > 0;
+    if (!ok) {
+      console.error(`[pack] ✗ www/${d}/ 缺失或为空`);
+      process.exit(1);
+    }
+  }
+  console.log('[pack] ✓ 静态资源检查通过（./cards/ 路径 + cards/legend/tactics/fonts 均非空）');
+}
+
 // 2) 中继 + ws 依赖（ws 无运行时依赖，随包带走 → 服务器零 npm install）
 copy(path.join(root, 'scripts', 'relay.mjs'), path.join(stage, 'relay', 'relay.mjs'));
 copy(path.join(root, 'node_modules', 'ws'), path.join(stage, 'relay', 'node_modules', 'ws'));

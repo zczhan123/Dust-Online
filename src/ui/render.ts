@@ -1375,6 +1375,8 @@ function tacticBar(player: PlayerState, ctx: Ctx): HTMLElement {
   };
   // 查看卡图：右键（长按可等价）——技能行左键发动不受影响
   name.addEventListener('contextmenu', (e) => { e.preventDefault(); open(); });
+  // 触屏：单击战术名即看详情（名字本身没有其他左键行为）
+  name.addEventListener('click', () => open());
   let lp: number | null = null;
   const clearLp = (): void => { if (lp != null) { window.clearTimeout(lp); lp = null; } };
   name.addEventListener('pointerdown', () => {
@@ -1665,6 +1667,8 @@ function attachChallengeSkillsTrigger(node: HTMLElement, ctx: Ctx): void {
   node.addEventListener('pointerup', cancel);
   node.addEventListener('pointerleave', cancel);
   node.addEventListener('pointercancel', cancel);
+  // 触屏：单击即看技能（战斗界面卡图不可选，不会与选定冲突）
+  node.addEventListener('click', () => open());
 }
 
 /** 挑战·传奇「技能详情」浮窗（右键/长按卡图打开；**不再显示整张大图**），内容＝各条技能名/标记/槽/完整效果。 */
@@ -4187,36 +4191,49 @@ function logPanel(ctx: Ctx, zoomable = false): HTMLElement {
   // 右键 → 战报放大弹窗（更大的空间看全量战报）
   if (zoomable) {
     box.classList.add('log--zoomable');
-    box.title = '右键放大战报';
-    box.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
+    box.title = '右键 / 长按 / 单击放大战报';
+    const openPop = (): void => {
       ctx.hooks.ui.logPop = true;
       ctx.hooks.requestRender();
+    };
+    box.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openPop();
     });
+    // 触屏：单击即看完整战报（桌面左键不弹，避免误触）
+    box.addEventListener('click', (e) => {
+      const pe = e as PointerEvent;
+      const coarse =
+        typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      if (pe.pointerType === 'touch' || (!pe.pointerType && coarse)) openPop();
+    });
+    // 长按：位移超过 10px 才取消（真机手指微抖不误取消）
+    let lp: number | null = null;
+    let sx = 0;
+    let sy = 0;
+    const clearLp = (): void => { if (lp != null) { window.clearTimeout(lp); lp = null; } };
+    box.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return;
+      clearLp();
+      sx = e.clientX;
+      sy = e.clientY;
+      lp = window.setTimeout(() => { lp = null; openPop(); }, 500);
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (lp == null) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 10) clearLp();
+    });
+    box.addEventListener('pointerup', clearLp);
+    box.addEventListener('pointercancel', clearLp);
   }
   logLines(box, ctx.state.log.slice(-30).reverse(), ctx);
   return box;
 }
 
-/** 战报放大弹窗：全量战报、大空间（右键战报栏打开；点空白或 ✕ 关闭） */
+/** 战报放大弹窗：全量战报、大空间（右键/单击战报打开；点弹窗外面关闭，无头部按钮） */
 function logPopModal(ctx: Ctx): HTMLElement {
   const overlay = el('div', 'logpop-overlay');
   const modal = el('div', 'logpop-modal');
-  const head = el('div', 'logpop-head');
-  const title = el('div', 'logpop-title');
-  title.textContent = '战报';
-  head.appendChild(title);
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'btn btn-cancel';
-  close.dataset.act = 'logPopClose';
-  close.textContent = '✕';
-  close.addEventListener('click', () => {
-    ctx.hooks.ui.logPop = false;
-    ctx.hooks.requestRender();
-  });
-  head.appendChild(close);
-  modal.appendChild(head);
   const body = el('div', 'log log--pop');
   logLines(body, [...ctx.state.log].reverse(), ctx);
   modal.appendChild(body);
@@ -4986,6 +5003,8 @@ function attachDetailTrigger(node: HTMLElement, ctx: Ctx, artifactId: string, ow
   node.addEventListener('pointerup', cancel);
   node.addEventListener('pointerleave', cancel);
   node.addEventListener('pointercancel', cancel);
+  // 触屏：单击即看技能（战斗界面卡图不可选，不会与选定冲突）
+  node.addEventListener('click', () => open());
 }
 
 function applyPrefs(ctx: Ctx, next: Prefs): void {
@@ -5281,30 +5300,7 @@ function openDiagOverlay(): void {
 function logDrawer(ctx: Ctx): HTMLElement {
   const overlay = el('div', 'log-overlay');
   const panel = el('div', 'log-drawer');
-  const head = el('div', 'log-drawer-head');
-  const set = document.createElement('button');
-  set.type = 'button';
-  set.className = 'btn btn-settings';
-  set.dataset.act = 'drawerSettingsOpen';
-  set.textContent = '设置';
-  set.addEventListener('click', () => {
-    ctx.hooks.ui.logOpen = false;
-    ctx.hooks.ui.settingsOpen = true;
-    ctx.hooks.requestRender();
-  });
-  head.appendChild(set);
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'btn btn-cancel';
-  close.dataset.act = 'logClose';
-  close.textContent = '✕';
-  close.addEventListener('click', () => {
-    ctx.hooks.ui.logOpen = false;
-    ctx.hooks.requestRender();
-  });
-  head.appendChild(close);
-  panel.appendChild(head);
-  panel.appendChild(logPanel(ctx));
+  panel.appendChild(logPanel(ctx, true));
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
       ctx.hooks.ui.logOpen = false;
@@ -5387,7 +5383,11 @@ function layoutDetailBox(box: HTMLElement, rect: { left: number; top: number; wi
   let left = rect.left + rect.width + 8;
   if (left + W > vw - 8) left = rect.left - W - 8;
   left = Math.max(8, Math.min(left, vw - W - 8));
-  const top = Math.max(8, Math.min(rect.top, vh - 120));
+  // 下方放不下 → 向上展开；最后仍夹在视口内（手机底部触发时不被裁掉）
+  const bh = box.scrollHeight || 240;
+  let top = rect.top + rect.height + 8;
+  if (top + bh > vh - 8) top = rect.top - bh - 8;
+  top = Math.max(8, Math.min(top, vh - bh - 8));
   box.style.left = `${left}px`;
   box.style.top = `${top}px`;
   box.style.width = `${W}px`;

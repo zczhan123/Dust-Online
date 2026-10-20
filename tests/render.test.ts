@@ -408,14 +408,11 @@ describe('renderGame (read-only snapshot)', () => {
     expect(ui.logOpen).toBe(true);
     expect(root.querySelector('.log-drawer .log')).not.toBeNull();
 
-    // 抽屉里也有「设置」入口，且会先关抽屉（否则被遮罩挡住）
-    root.querySelector<HTMLButtonElement>('[data-act="drawerSettingsOpen"]')!.click();
-    expect(ui.logOpen).toBe(false);
-    expect(ui.settingsOpen).toBe(true);
-    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+    // 抽屉无头部/关闭按钮：点外部（遮罩）关闭
+    expect(root.querySelector('[data-act="drawerSettingsOpen"]')).toBeNull();
+    expect(root.querySelector('.log-drawer-head')).toBeNull();
 
-    // 重新打开抽屉后，点空白处关闭
-    root.querySelector<HTMLButtonElement>('.log-tab[data-act="logOpen"]')!.click();
+    // 点空白处关闭
     root.querySelector<HTMLElement>('.log-overlay')!.click();
     expect(ui.logOpen).toBe(false);
     expect(root.querySelector('.log-drawer')).toBeNull();
@@ -460,7 +457,7 @@ describe('renderGame (read-only snapshot)', () => {
     // 触屏模式：舒适密度 + 战报收起 + 缩略卡图 + 技能隐藏
     rowBtn('预设组合', '触屏模式').click();
     expect(ui.prefs.preset).toBe('touch');
-    expect(ui.prefs.density).toBe('comfortable');
+    expect(ui.prefs.density).toBe('compact');
     expect(ui.prefs.logCollapsed).toBe(true);
     expect(ui.prefs.cardArt).toBe('thumb');
     expect(ui.prefs.showSkillText).toBe(false);
@@ -477,7 +474,7 @@ describe('renderGame (read-only snapshot)', () => {
     expect(ui.prefs.preset).toBe('desktop');
     expect(ui.prefs.density).toBe('compact');
     expect(ui.prefs.logCollapsed).toBe(false);
-    expect(ui.prefs.cardArt).toBe('full');
+    expect(ui.prefs.cardArt).toBe('thumb');
     expect(ui.prefs.showSkillText).toBe(true);
     expect(root.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
   });
@@ -1484,7 +1481,7 @@ describe('renderGame (interaction)', () => {
     expect((root.textContent ?? '').length).toBeGreaterThan(0);
   });
 
-  it('opens a read-only skill detail popover by right-clicking the card art (not left-click)', () => {
+  it('opens a read-only skill detail popover by clicking (battle: tap = view) or right-clicking the card art', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', '003'] });
     const { ui } = mount(state, root);
     expect(root.querySelector('.detail-popover')).toBeNull();
@@ -1493,9 +1490,10 @@ describe('renderGame (interaction)', () => {
       '.player--self .card[data-artifact="001"] .card-art',
     )!;
     expect(art.classList.contains('detail-trigger')).toBe(true);
-    // 左键不再打开详情
+    // 战斗界面：单击即看（触屏口径）
     art.click();
-    expect(ui.detail).toBeNull();
+    expect(ui.detail!.artifactId).toBe('001');
+    ui.detail = null;
     // 右键打开
     art.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(ui.detail!.artifactId).toBe('001');
@@ -1571,17 +1569,17 @@ describe('renderGame (interaction)', () => {
     reset.click();
     expect(ui.prefs).toEqual({
       showSkillText: true,
-      cardArt: 'full',
+      cardArt: 'thumb',
       density: 'compact',
-      mirrorEnemy: false,
+      mirrorEnemy: true,
       preset: 'desktop',
       logCollapsed: false,
-      zoomMode: 'off',
+      zoomMode: 'auto',
       zoomPercent: 90,
     });
-    // 恢复默认 = 电脑模式（技能显示 + 完整卡图）
+    // 恢复默认 = 电脑模式（技能显示 + 缩略卡图）
     expect(root.querySelectorAll('.skill-text').length).toBeGreaterThan(0);
-    expect(root.querySelectorAll('.card-art--thumb').length).toBe(0);
+    expect(root.querySelectorAll('.card-art--thumb').length).toBeGreaterThan(0);
 
     // 关闭
     root.querySelector<HTMLButtonElement>('.settings-close')!.click();

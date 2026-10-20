@@ -109,6 +109,10 @@ export type NetMessage =
       game: GameState;
       members: Member[];
       config: RoomConfig;
+      /** 聊天记录（重连/加入时补历史；接收端自己去重合并） */
+      chat?: { peerId: string; name: string; text: string; at: number; sys?: boolean }[];
+      /** 行动倒计时（重连时补；接收端**从当前时刻重新计时**，沿用总时长） */
+      timer?: { side: 'A' | 'B'; startAt: number; ms: number } | null;
       hostKey?: string;
     }
   | { t: 'presence'; from: string; roomId: string; members: Member[] } // 房主广播在场名单

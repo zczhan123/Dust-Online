@@ -233,6 +233,14 @@ function createCardInspector(
   }
   function open(id: string, x: number | null, y: number | null, soft: boolean): void {
     box.innerHTML = '';
+    // 右上角悬浮关闭（不占行、不加高；触控区 40px）——神器/战术/传奇英雄面板共用
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'pick-modal-close';
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', '关闭');
+    closeBtn.addEventListener('click', () => close());
+    box.appendChild(closeBtn);
     const isLegend = /^L\d{2}$/.test(id);
     const isTactic = isTacticId(id);
     const legendText = isLegend && opts?.legendText ? LEGEND_TEXT[id] : undefined;
@@ -1029,13 +1037,13 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
           picked: pick[side] === id,
           onClick: () => {
             if (readOnly(side)) return;
-            pick[side] = pick[side] === id ? null : id;
+            // 单击＝选中并直接进确定区（原为双击；双击保留兼容）
+            pick[side] = id;
             anim = null;
-            render();
+            confirmPickYi(side);
           },
           onDblClick: () => {
-            pick[side] = id;
-            confirmPickYi(side);
+            // 单击已经确定；双击不再重复执行，避免二次确认
           },
           altSwitch: anomaly && !locked && altId
             ? () => { candAlt[side][i] = !candAlt[side][i]; pick[side] = null; anim = null; render(); }
@@ -2004,6 +2012,14 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     const title = el('div', 'pick-chal-title');
     title.textContent = `传说中的“${card.legacy}”`;
     modalBox.appendChild(title);
+    // 右上角悬浮关闭（不占行、不加高；触控区 40px）
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'pick-chal-close';
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', '关闭');
+    closeBtn.addEventListener('click', () => { modal.classList.remove('on'); });
+    modalBox.appendChild(closeBtn);
     const meta = el('div', 'pick-chal-meta');
     const life = card.life != null ? `生命 ${card.life}` : '生命 待转写';
     const cap = card.defenseCap != null ? `防御骰上限 ${card.defenseCap}` : card.skills ? '防御骰上限 无' : '防御骰上限 待转写';

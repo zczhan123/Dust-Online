@@ -632,11 +632,13 @@ button.pay-die {
   line-height: 1.6;
   max-height: 160px;
   overflow-y: auto;
-  /* 滚动条隐藏式（仍可滚动） */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* 可见细滚动条（战报栏与弹框都要能看出可滚） */
+  scrollbar-width: thin;
+  scrollbar-color: #6b7280 #1f242b;
 }
-.log::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.log::-webkit-scrollbar { width: 6px; height: 6px; }
+.log::-webkit-scrollbar-thumb { background: #6b7280; border-radius: 3px; }
+.log::-webkit-scrollbar-track { background: #1f242b; }
 .log-line {
   white-space: pre-wrap;
 }
@@ -650,6 +652,7 @@ button.pay-die {
 .log-prefix { color: inherit; opacity: .72; }
 .sidebar .log {
   flex: 1;
+  min-height: 0;
   max-height: none;
 }
 
@@ -1231,8 +1234,9 @@ button.pay-die {
 .detail-overlay { position: fixed; inset: 0; z-index: 50; }
 .detail-popover {
   position: fixed;
-  background: #fffdf8;
-  border: 1px solid #d9d2c4;
+  background: #1b1a18;
+  border: 1px solid #3a3834;
+  color: #e8e4da;
   border-radius: 10px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   padding: 8px 10px;
@@ -1240,13 +1244,14 @@ button.pay-die {
   overflow-y: auto;
 }
 .detail-head {
+  padding-right: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 .detail-title { font-weight: 700; font-size: 17px; }
-.detail-sub { font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
+.detail-sub { font-size: 13px; color: #b9b3a6; margin: 2px 0 6px; }
 
 /* ===== 中央操作区：提示栏 + 操作栏合并 ===== */
 .actionzone {
@@ -1350,7 +1355,7 @@ button.pay-die {
 
 /* ===== 二期：响应式 + 战报抽屉 ===== */
 /* 战报抽屉拉手：左中细长竖条 + 小三角（仅非传奇：侧栏收起 / 窄屏时显示） */
-.log-tab { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 30; width: 16px; height: 64px; padding: 0; border: 1px solid rgba(0, 0, 0, .25); border-left: 0; border-radius: 0 7px 7px 0; background: rgba(0, 0, 0, .45); color: #f3f0e8; cursor: pointer; align-items: center; justify-content: center; }
+.log-tab { display: none; position: fixed; left: 0; top: calc(50% - 96px); transform: translateY(-50%); z-index: 30; width: 16px; height: 64px; padding: 0; border: 1px solid rgba(0, 0, 0, .25); border-left: 0; border-radius: 0 7px 7px 0; background: rgba(0, 0, 0, .45); color: #f3f0e8; cursor: pointer; align-items: center; justify-content: center; }
 .log-tab:hover { background: rgba(0, 0, 0, .62); }
 .log-tab-tri { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid currentColor; }
 .app:not(.legend-mode).log-collapsed .log-tab { display: flex; }
@@ -1367,13 +1372,13 @@ button.pay-die {
   background: #fffdf8;
   border-right: 1px solid var(--line);
   box-shadow: 0 0 24px rgba(0, 0, 0, 0.2);
-  padding: 12px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
 }
-.log-drawer .log { max-height: none; flex: 1; }
+.log-drawer .log { max-height: none; flex: 1; min-height: 0; overflow-y: auto; border-radius: 0; }
 
 /* 技能详情浮窗：窄屏 → 底部抽屉 */
 .detail-popover--sheet {
@@ -1388,7 +1393,8 @@ button.pay-die {
 /* 中屏（720–1279）：战报栏默认收起（改由贴边拉手拉出）；卡片允许换行 */
 @media (max-width: 1279px) {
   .sidebar { display: none; }
-  .app:not(.legend-mode) .log-tab { display: flex; }
+  .app:not(.legend-mode):not(.log-collapsed) .sidebar { display: flex; }
+  .app:not(.legend-mode).log-collapsed .log-tab { display: flex; }
   .card { min-width: 180px; }
 }
 
@@ -2272,10 +2278,8 @@ button.pay-die {
 /* ── 战报放大弹窗（右键战报栏打开） ── */
 .log--zoomable { cursor: context-menu; }
 .logpop-overlay { position: fixed; inset: 0; background: rgba(20, 24, 30, 0.42); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; box-sizing: border-box; }
-.logpop-modal { width: min(920px, 94vw); height: min(80vh, 760px); background: var(--panel, #fbf9f4); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; box-sizing: border-box; }
-.logpop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.logpop-title { font-weight: 700; font-size: 16px; }
-.logpop-modal .log--pop { flex: 1; max-height: none; overflow-y: auto; }
+.logpop-modal { width: min(920px, 94vw); height: min(80vh, 760px); background: var(--panel, #fbf9f4); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; padding: 0; box-sizing: border-box; overflow: hidden; }
+.logpop-modal .log--pop { flex: 1; max-height: none; overflow-y: auto; border-radius: 10px; }
 #app.setup-page .pick-special-badge { position: absolute; left: 6px; top: 32px; z-index: 4; padding: 1px 8px; border-radius: 5px; background: #6d4c1a; color: #f7eccf; border: 1px solid #f5f4f0; font-size: 12px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
 /* 挑战模式「调整」徽标（选择界面）：**红底白字**；默认占「异相」位置，有「异相」则排其下 */
 #app.setup-page .pick-adjust-badge { position: absolute; left: 6px; top: 6px; z-index: 5; padding: 2px 9px; border-radius: 5px; background: #dc2626; color: #fff; border: 1px solid #f5f4f0; font-size: 13px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
@@ -2911,3 +2915,24 @@ html[data-theme] .area--driven { border-style: solid; border-color: #e0c07a; bac
 .challenge-skills-box .csk-detail-eff { font-size: 12.5px; color: #3f3a33; line-height: 1.45; margin-top: 2px; }
 .challenge-skills-box .settings-close { position: absolute; right: 12px; top: 12px; }
 
+
+/* 触屏：关掉长按原生菜单/选中/拖图（卡图、战术名标题等所有触发点） */
+img, .detail-trigger, .card-art, .pick-portrait { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
+.detail-popover .skill-text { color: #b9b3a6; }
+.detail-popover .skill-name, .detail-popover .detail-title { color: #e8e4da; }
+.detail-popover .skill-part { background: rgba(255,255,255,.06); border-left-color: #6b665c; }
+.detail-popover .skill-part--on { background: rgba(190,160,90,.18); border-left-color: #c9a65f; }
+.detail-popover .skill-part--off { background: rgba(255,255,255,.04); border-left-color: #4a463e; }
+.detail-close { position: absolute; top: 4px; right: 4px; width: 40px; height: 40px; border: none; background: transparent; color: #b9b3a6; font-size: 20px; line-height: 40px; text-align: center; cursor: pointer; touch-action: manipulation; }
+.detail-close:hover { color: #e8e4da; }
+
+/* 主题覆盖：技能详情弹框统一深色（覆盖 html[data-theme] 的浅色，权重对齐） */
+html[data-theme] .detail-popover { background: #1b1a18; border-color: #3a3834; color: #e8e4da; }
+html[data-theme] .detail-popover .skill-text, html[data-theme] .detail-popover .detail-tactic-eff { color: #b9b3a6; }
+html[data-theme] .detail-popover .skill-name, html[data-theme] .detail-popover .detail-title { color: #e8e4da; }
+
+#app.setup-page .pick-chal-close { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; border: none; background: transparent; color: #b9b3a6; font-size: 22px; line-height: 40px; text-align: center; cursor: pointer; z-index: 2; touch-action: manipulation; }
+#app.setup-page .pick-chal-close:hover { color: #e8e4da; }
+
+#app.setup-page .pick-modal-close { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; border: none; background: transparent; color: #b9b3a6; font-size: 22px; line-height: 40px; text-align: center; cursor: pointer; z-index: 3; touch-action: manipulation; }
+#app.setup-page .pick-modal-close:hover { color: #e8e4da; }

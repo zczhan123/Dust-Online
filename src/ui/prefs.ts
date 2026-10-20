@@ -28,25 +28,25 @@ export type PresetId = 'desktop' | 'touch' | 'custom';
 
 type PresetValues = Omit<Prefs, 'preset' | 'animSpeed' | 'nickName'>;
 
-/** 电脑模式建议组合：紧凑 + 战报显示 + 完整卡图 + 技能显示 */
+/** 电脑模式建议组合：紧凑 + 战报显示 + 缩略卡图 + 技能显示 + 镜像 + 整屏自动（对齐高度） */
 export const DESKTOP_PRESET: PresetValues = {
   showSkillText: true,
-  cardArt: 'full',
+  cardArt: 'thumb',
   density: 'compact',
-  mirrorEnemy: false,
+  mirrorEnemy: true,
   logCollapsed: false,
-  zoomMode: 'off',
+  zoomMode: 'auto',
   zoomPercent: 90,
 };
 
-/** 触屏/手机建议组合：舒适 + 战报收起 + 缩略卡图 + 技能隐藏 */
+/** 触屏/手机建议组合：紧凑 + 战报收起 + 缩略卡图 + 技能缩略 + 镜像 + 整屏自动（对齐高度） */
 export const TOUCH_PRESET: PresetValues = {
   showSkillText: false,
   cardArt: 'thumb',
-  density: 'comfortable',
-  mirrorEnemy: false,
+  density: 'compact',
+  mirrorEnemy: true,
   logCollapsed: true,
-  zoomMode: 'off',
+  zoomMode: 'auto',
   zoomPercent: 90,
 };
 

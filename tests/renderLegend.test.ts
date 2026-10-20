@@ -159,7 +159,7 @@ describe('renderGame · 传奇模式布局（预设·带传奇）', () => {
 });
 
 describe('战报栏 · 右键放大弹窗', () => {
-  it('右键战报栏 → 弹出放大弹窗（全量）；✕ 关闭', () => {
+  it('右键战报栏 → 弹出放大弹窗（全量）；点弹窗外面关闭', () => {
     const g = setupGame({ seed: 1, firstPlayer: 'A' });
     g.log.push(
       { turn: 1, phase: 'main', text: '事件一' },
@@ -182,7 +182,9 @@ describe('战报栏 · 右键放大弹窗', () => {
       'T1·主要：事件一',
     ]);
 
-    (root.querySelector('.logpop-modal .btn-cancel') as HTMLElement).click();
+    // 无头部/关闭按钮；点弹窗外面（遮罩）关闭
+    expect(root.querySelector('.logpop-head')).toBeNull();
+    (root.querySelector('.logpop-overlay') as HTMLElement).click();
     expect(ui.logPop).toBe(false);
     expect(root.querySelector('.logpop-modal')).toBeNull();
   });
