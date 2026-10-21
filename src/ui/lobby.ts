@@ -205,6 +205,11 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
       chip.textContent = t;
       main.appendChild(chip);
     }
+    if (r.config.hasPassword) {
+      const chip = el('span', 'lobby-chip');
+      chip.textContent = '密码';
+      main.appendChild(chip);
+    }
 
     const side = el('div', 'lobby-row-side');
     const seats = el('span', 'lobby-seats');
@@ -250,14 +255,18 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
       sp.textContent = '旁观';
       sp.addEventListener('click', (e) => {
         e.stopPropagation();
-        let off = (): void => {};
-        off = session.subscribe((s) => {
-          if (s.game) {
-            off();
-            enterOnlineBattle(session);
-          }
-        });
-        session.joinRoom(r.id, 'spectator');
+        const go = (pwd?: string): void => {
+          let off = (): void => {};
+          off = session.subscribe((s) => {
+            if (s.game) {
+              off();
+              enterOnlineBattle(session);
+            }
+          });
+          session.joinRoom(r.id, 'spectator', pwd ?? '');
+        };
+        if (r.config.hasPassword) askRoomPassword(r, go);
+        else go();
       });
       side.appendChild(sp);
     }
@@ -281,6 +290,13 @@ export function renderLobby(root: HTMLElement, onExit: () => void, onStart: (opt
           }
         });
         session.rejoinRoom(r.id);
+        return;
+      }
+      if (r.config.hasPassword) {
+        askRoomPassword(r, (pwd) => {
+          session.joinRoom(r.id, 'guest', pwd);
+          enterSelection(r.config.mode);
+        });
         return;
       }
       session.joinRoom(r.id);
@@ -387,6 +403,85 @@ function rowEl(label: string, opts: HTMLElement[]): HTMLElement {
   return row;
 }
 
+/** 加密房间：加入前先输入密码（**纯数字 4 位**；单例——重复点房间不会叠加） */
+let pwdMaskEl: HTMLElement | null = null;
+function askRoomPassword(room: RoomInfo, onOk: (pwd: string) => void): void {
+  if (pwdMaskEl) {
+    (pwdMaskEl.querySelector('input') as HTMLInputElement | null)?.focus();
+    return;
+  }
+  const mask = el('div', 'pwd-mask');
+  pwdMaskEl = mask;
+  const modal = el('div', 'pwd-modal');
+  const title = el('div', 'pwd-title');
+  title.textContent = `加入「${room.hostName}」的房间`;
+  const hint = el('div', 'pwd-hint');
+  hint.textContent = '4 位数字密码';
+  const input = document.createElement('input');
+  input.className = 'pwd-pin';
+  input.type = 'password';
+  input.inputMode = 'numeric';
+  input.autocomplete = 'off';
+  input.maxLength = 4;
+  input.placeholder = '••••';
+  const err = el('div', 'pwd-err');
+  err.textContent = '请输入 4 位数字密码';
+  err.hidden = true;
+  const foot = el('div', 'pwd-foot');
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'pwd-btn';
+  cancel.textContent = '取消';
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'pwd-btn pwd-btn--primary';
+  ok.textContent = '进入';
+  ok.disabled = true;
+  const close = (): void => {
+    document.removeEventListener('keydown', onKey);
+    mask.remove();
+    pwdMaskEl = null;
+  };
+  const sync = (): void => {
+    ok.disabled = input.value.length !== 4;
+  };
+  input.addEventListener('input', () => {
+    input.value = input.value.replace(/\D/g, '').slice(0, 4);
+    err.hidden = true;
+    sync();
+  });
+  const submit = (): void => {
+    const v = input.value.replace(/\D/g, '').slice(0, 4);
+    if (v.length !== 4) {
+      err.hidden = false;
+      modal.classList.remove('pwd-shake');
+      void modal.offsetWidth;
+      modal.classList.add('pwd-shake');
+      input.focus();
+      return;
+    }
+    close();
+    onOk(v);
+  };
+  ok.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+  });
+  cancel.addEventListener('click', close);
+  mask.addEventListener('click', (e) => {
+    if (e.target === mask) close();
+  });
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') close();
+  };
+  document.addEventListener('keydown', onKey);
+  foot.append(cancel, ok);
+  modal.append(title, hint, input, err, foot);
+  mask.appendChild(modal);
+  document.body.appendChild(mask);
+  requestAnimationFrame(() => input.focus());
+}
+
 /** 创建房间窗口：单弹窗、选项都行内药丸（未选＝深底浅字 / 选中＝绿底白字）、底部「创建/取消」。 */
 function openCreateModal(surface: HTMLElement, session: NetSession, onCreated: (mode: RoomConfig['mode']) => void): void {
   const cfg: RoomConfig = { ...DEFAULT_CONFIG };
@@ -442,6 +537,33 @@ function openCreateModal(surface: HTMLElement, session: NetSession, onCreated: (
       rowEl('旁观', [pill('允许旁观', cfg.allowSpectators, () => (cfg.allowSpectators = !cfg.allowSpectators, render()))]),
     );
 
+    // 密码（纯数字 4 位；留空＝无密码；输入了但不足 4 位 → 不允许创建）
+    const pwdRow = el('div', 'room-row');
+    const pwdLab = el('span', 'room-lab');
+    pwdLab.textContent = '密码';
+    const pwd = document.createElement('input');
+    pwd.className = 'room-note';
+    pwd.type = 'text';
+    pwd.inputMode = 'numeric';
+    pwd.autocomplete = 'off';
+    pwd.value = cfg.password ?? '';
+    pwd.maxLength = 4;
+    pwd.placeholder = '4 位数字（留空＝无密码）';
+    pwdRow.append(pwdLab, pwd);
+    rows.appendChild(pwdRow);
+    const pwdHint = el('div', 'room-pwd-hint');
+    pwdHint.textContent = '密码需为 4 位数字（留空＝无密码）';
+    pwdHint.hidden = true;
+    rows.appendChild(pwdHint);
+    let createOk: HTMLButtonElement | null = null;
+    const pwdOk = (v: string): boolean => v.length === 0 || v.length === 4;
+    pwd.addEventListener('input', () => {
+      pwd.value = pwd.value.replace(/\D/g, '').slice(0, 4);
+      cfg.password = pwd.value;
+      pwdHint.hidden = pwdOk(pwd.value);
+      if (createOk) createOk.disabled = !pwdOk(pwd.value);
+    });
+
     const noteRow = el('div', 'room-row');
     const noteLab = el('span', 'room-lab');
     noteLab.textContent = '备注';
@@ -461,9 +583,24 @@ function openCreateModal(surface: HTMLElement, session: NetSession, onCreated: (
     ok.type = 'button';
     ok.className = 'lobby-btn lobby-create';
     ok.textContent = '创建';
+    createOk = ok;
+    ok.disabled = !pwdOk(pwd.value);
     ok.addEventListener('click', () => {
       cfg.note = note.value.trim();
-      session.createRoom(cfg);
+      const pv = pwd.value.replace(/\D/g, '').slice(0, 4);
+      if (!pwdOk(pv)) {
+        pwdHint.hidden = false;
+        pwd.focus();
+        return;
+      }
+      cfg.password = pv;
+      try {
+        session.createRoom(cfg);
+      } catch (e) {
+        pwdHint.hidden = false;
+        pwdHint.textContent = e instanceof Error ? e.message : '创建失败';
+        return;
+      }
       mask.remove();
       onCreated(cfg.mode); // 建房后直接进对应模式的选择页
     });

@@ -109,7 +109,7 @@ export function loadPrefs(): Prefs {
       out.zoomMode = data.zoomMode;
     }
     if (typeof data?.zoomPercent === 'number') {
-      out.zoomPercent = Math.min(100, Math.max(50, Math.round(data.zoomPercent)));
+      out.zoomPercent = Math.min(100, Math.max(10, Math.round(data.zoomPercent)));
     }
     if (data?.animSpeed === 'normal' || data?.animSpeed === 'fast') {
       out.animSpeed = data.animSpeed;

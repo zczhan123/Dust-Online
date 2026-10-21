@@ -23,6 +23,10 @@ export interface RoomConfig {
   turnSeconds: number;
   allowSpectators: boolean;
   note: string;
+  /** 建房时的密码（**仅入参**：createRoom 会立刻剥离，不进入公告/快照） */
+  password?: string;
+  /** 公开标记：本房有密码（大厅显示「密码」标签；不含明文） */
+  hasPassword?: boolean;
 }
 
 /** 大厅房间列表的一项 */
@@ -77,6 +81,8 @@ export type NetMessage =
       role: Role;
       version: string;
       key?: string;
+      /** 房间密码（仅当房主设置了密码时校验；重连走 rejoin，不需要密码） */
+      password?: string;
     }
   | { t: 'room:leave'; from: string; roomId: string }
   | {
@@ -87,7 +93,7 @@ export type NetMessage =
       t: 'room:denied';
       from: string;
       roomId: string;
-      reason: 'version' | 'banned' | 'spectate';
+      reason: 'version' | 'banned' | 'spectate' | 'password';
       target?: string;
     }
   | {

@@ -288,7 +288,7 @@ function noteDuanexing(g: GameState, target: PlayerId): void {
   if (g.skillsUsedThisTurn.includes(key)) return; // 每回合最多触发 1 次
   const oppId: PlayerId = target === 'A' ? 'B' : 'A';
   if (g.players[oppId].areas.attack.length === 0) return; // 无可弃的攻击骰 → 不弹（不可完成）
-  g.skillsUsedThisTurn.push(key);
+  // 注意：**询问时不计次数**——只有玩家接受（真正弃置对方攻击骰）才算用掉本次
   queuePending(g, { kind: 'duanexing', player: target });
   logLine(g, `${pname(target)} 「闻我名者断恶行」：受到伤害 → 可弃置对方 1 个攻击骰（本回合 1 次）`);
 }
@@ -920,7 +920,7 @@ export function afterAttackResolved(
     !g.chenaiUsed[pa.attacker] &&
     hasActiveSkill(atk, 'chenai.rise')
   ) {
-    g.chenaiUsed[pa.attacker] = true;
+    // 注意：**询问时不计次数**——只有玩家接受（真正获得额外尘起）才算用掉本次
     queuePending(g, { kind: 'chenaiFreeRise', player: pa.attacker });
   }
   // 004 锋芒·触发：你的攻击被防御骰抵挡后

@@ -2936,3 +2936,41 @@ html[data-theme] .detail-popover .skill-name, html[data-theme] .detail-popover .
 
 #app.setup-page .pick-modal-close { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; border: none; background: transparent; color: #b9b3a6; font-size: 22px; line-height: 40px; text-align: center; cursor: pointer; z-index: 3; touch-action: manipulation; }
 #app.setup-page .pick-modal-close:hover { color: #e8e4da; }
+
+/* 房间密码弹窗（挂 body；自带变量，不依赖 #app.setup-page 作用域） */
+.pwd-mask {
+  --menu-sans: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --green: #3c6b4a;
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; box-sizing: border-box;
+  background: rgba(0,0,0,.62);
+  animation: pwd-mask-in .16s ease-out both;
+}
+.pwd-modal { width: min(340px, 88vw); box-sizing: border-box; padding: 22px 22px 18px; border-radius: 14px; background: #1b1a1d; border: 1px solid #3a3a40; box-shadow: 0 18px 50px rgba(0,0,0,.55); color: #f3f0e8; text-align: center; animation: pwd-modal-in .18s cubic-bezier(.16,1,.3,1) both; }
+.pwd-title { font-family: var(--menu-sans); font-size: 17px; font-weight: 700; color: #f3f0e8; }
+.pwd-hint { margin-top: 6px; font-family: var(--menu-sans); font-size: 12px; color: #a6a095; }
+.pwd-pin { display: block; width: 100%; margin: 14px auto 0; padding: 10px 0 8px; border: none; border-bottom: 1px solid #4a4a52; background: transparent; color: #fff; text-align: center; font-family: var(--menu-sans); font-size: 28px; font-weight: 700; letter-spacing: .55em; text-indent: .55em; font-variant-numeric: tabular-nums; outline: none; }
+.pwd-pin:focus { border-bottom-color: #e8e4da; }
+.pwd-pin::placeholder { color: #55555c; letter-spacing: .4em; }
+.pwd-err { margin-top: 8px; font-family: var(--menu-sans); font-size: 12px; color: #f28b82; }
+.pwd-err[hidden] { display: none; }
+.pwd-foot { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.pwd-btn { min-height: 40px; padding: 0 22px; border-radius: 10px; border: 1px solid rgba(255,255,255,.34); background: rgba(255,255,255,.12); color: #f3f0e8; font-family: var(--menu-sans); font-weight: 700; font-size: 14px; cursor: pointer; transition: transform .12s ease, background .12s ease; }
+.pwd-btn:hover { background: rgba(255,255,255,.18); }
+.pwd-btn:active { transform: scale(.96); }
+.pwd-btn:disabled { opacity: .45; cursor: default; }
+.pwd-btn:disabled:active { transform: none; }
+.pwd-btn--primary { background: var(--green); border-color: #274a33; color: #fff; }
+.pwd-btn--primary:hover { filter: brightness(1.06); }
+@keyframes pwd-modal-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes pwd-mask-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pwd-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-2px); } 40% { transform: translateX(2px); } 60% { transform: translateX(-1px); } 80% { transform: translateX(1px); } }
+.pwd-modal.pwd-shake { animation: pwd-shake .22s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .pwd-mask, .pwd-modal, .pwd-modal.pwd-shake { animation: none; }
+  .pwd-btn:active { transform: none; }
+}
+
+#app.setup-page .room-pwd-hint { flex: 1 1 100%; margin-top: -6px; font-family: var(--menu-sans); font-size: 12px; color: #f28b82; }
+#app.setup-page .room-pwd-hint[hidden] { display: none; }

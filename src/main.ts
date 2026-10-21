@@ -17,6 +17,9 @@ if (!root) throw new Error('#app not found');
 let state: GameState | null = null;
 let online: NetSession | null = null; // 联机对局会话（非空＝当前在联机对局）
 let battleShell: OnlineShell | null = null; // 战斗界面的聊天浮层
+let battleUnsub: (() => void) | null = null; // 战斗界面的 session 订阅（重进/重连必须先取消旧订阅）
+/** 本地动作派发中：session 的 emit 期间不要立刻重绘（否则一次动作渲染两遍 → 飞出的骰子还没回来、区域已提前亮出真骰） */
+let inLocalDispatch = false;
 
 const ui: UiState = {
   rerollSelected: new Set(),
@@ -56,6 +59,8 @@ const leaveOnlineToLobby = (): void => {
   online?.leaveRoom();
   online?.close();
   unbindTurnTimer();
+  battleUnsub?.();
+  battleUnsub = null;
   battleShell?.dispose();
   battleShell = null;
   online = null;
@@ -97,8 +102,15 @@ const dispatchAction = (a: Action): void => {
   // 【排查·?diag=1】只记挑战模式：动作 + 动作后的状态快照（"隐形骰子"排查用）
   if (isDiagEnabled()) diag('action', { t: a.t, a });
   try {
-    if (online) online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
-    else applyAction(state, a);
+    if (online) {
+      // 本地动作：session.dispatch 内部会 emit（触发订阅者重绘）→ 先拦下，统一由本函数结尾渲染一次
+      inLocalDispatch = true;
+      try {
+        online.dispatch(a); // 联机：本地应用 + 广播（对端回放）
+      } finally {
+        inLocalDispatch = false;
+      }
+    } else applyAction(state, a);
     ui.error = null;
     resetUi();
   } catch (e) {
@@ -271,6 +283,10 @@ const onlineLayer = (): HTMLElement => {
 // 联机：对局生成后 → 切战斗界面（渲染 session 的对局；固定视角；动作走 session）
 setOnlineBattleHandler((session) => {
   online = session;
+  // 重连/多次进入战斗：先清旧订阅与计时器（否则每来一条消息就 render 多一遍 → 动画重复播放）
+  battleUnsub?.();
+  battleUnsub = null;
+  unbindTurnTimer();
   battleShell?.dispose();
   battleShell = createOnlineShell({ session, onExit: () => {}, onGiveUp: leaveOnlineToLobby }, onlineLayer());
   state = session.state.game;
@@ -285,8 +301,9 @@ setOnlineBattleHandler((session) => {
       turnSeconds: session.state.config?.turnSeconds ?? 30,
     });
   }
-  session.subscribe((s) => {
+  battleUnsub = session.subscribe((s) => {
     setTurnTimerPaused(!s.peerOnline || s.peerLeft); // 对方掉线/退出 → 暂停倒计时；恢复 → 继续
+    if (inLocalDispatch) return; // 本地动作期间由 dispatchAction 统一渲染（避免二次重建把真骰提前亮出）
     if (s.game) {
       state = s.game;
       render();

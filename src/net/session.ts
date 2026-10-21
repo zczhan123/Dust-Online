@@ -220,6 +220,42 @@ function writeRoomKey(kind: 'host' | 'guest', roomId: string, key: string): void
   }
 }
 
+/** 房间密码（**localStorage**：房主关标签重连后仍能校验新加入；明文，仅防手滑） */
+const ROOM_PWD_KEY = 'dust.roompwd.v1';
+function loadRoomPwds(): Record<string, string> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const o = JSON.parse(localStorage.getItem(ROOM_PWD_KEY) ?? '{}') as Record<string, string>;
+    return o && typeof o === 'object' ? o : {};
+  } catch {
+    return {};
+  }
+}
+function saveRoomPwd(roomId: string, pwd: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const o = loadRoomPwds();
+    o[roomId] = pwd;
+    localStorage.setItem(ROOM_PWD_KEY, JSON.stringify(o));
+  } catch {
+    /* ignore */
+  }
+}
+function loadRoomPwd(roomId: string): string | null {
+  const v = loadRoomPwds()[roomId];
+  return typeof v === 'string' ? v : null;
+}
+function clearRoomPwd(roomId: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const o = loadRoomPwds();
+    delete o[roomId];
+    localStorage.setItem(ROOM_PWD_KEY, JSON.stringify(o));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 本标签页是否有"上次未退出的房间"（供启动时决定是否直接进大厅以尝试重连）。 */
 export function hasSavedRoom(): boolean {
   return loadSavedRoom() !== null;
@@ -250,6 +286,8 @@ export class NetSession {
   private subs = new Set<(s: SessionState) => void>();
   /** 我作为**房主**时的房间信息（用于公告 / 应答房间列表） */
   private myRoom: RoomInfo | null = null;
+  /** 本房密码（**仅房主内存**；公告/快照里只有 hasPassword 标记，绝不含明文） */
+  private roomPassword = '';
   /** 心跳：对端最近一次"有消息"的时刻 / 定时器 / 关闭标签时的尽力通知 */
   private peerSeenAt = 0;
   private hbTimer: ReturnType<typeof setInterval> | null = null;
@@ -336,6 +374,16 @@ export class NetSession {
 
   createRoom(config: RoomConfig): string {
     const id = `room-${this.net.peerId}`;
+    // 密码只留在房主内存 + 本地记录；公开 config 里只带 hasPassword 标记
+    const { password: rawPwd, ...pub } = config;
+    // 密码规则：**纯数字、恰好 4 位**；留空＝无密码；输入了但不足 4 位 → 拒绝创建（不产生"假无密码房"）
+    const pwd = (rawPwd ?? '').replace(/\D/g, '').slice(0, 4);
+    if ((rawPwd ?? '').trim() !== '' && pwd.length !== 4) {
+      throw new Error('密码需为 4 位数字（留空＝无密码）');
+    }
+    this.roomPassword = pwd.length === 4 ? pwd : '';
+    if (this.roomPassword) saveRoomPwd(id, this.roomPassword);
+    config = { ...pub, hasPassword: this.roomPassword.length === 4 };
     this.myRoom = {
       id,
       hostId: this.net.peerId,
@@ -363,7 +411,8 @@ export class NetSession {
     return id;
   }
 
-  joinRoom(roomId: string, role: Role = 'guest'): void {
+  joinRoom(roomId: string, role: Role = 'guest', password = ''): void {
+    const pwd = (password ?? '').replace(/\D/g, '').slice(0, 4);
     const room = this.st.rooms.find((r) => r.id === roomId);
     if (!room) return;
     // **误点「旁观」不能顶掉玩家身份**：本机记录是同一房间的 host/guest 时直接拦截
@@ -389,6 +438,7 @@ export class NetSession {
       role,
       version: APP_BUILD,
       key: onlineKey(),
+      ...(pwd ? { password: pwd } : {}),
     });
     this.startHeartbeat();
     // **旁观者不算"对局者"** → 不写本标签页的「未完成对局」记录（刷新不会弹"继续上一局"）；
@@ -466,6 +516,7 @@ export class NetSession {
     this.stopHeartbeat();
     clearSavedRoom();
     clearRejoinRecord(id); // 主动离开 → 不再给「继续对局」
+    clearRoomPwd(id);
     this.resetRoom();
     this.emit();
   }
@@ -602,6 +653,7 @@ export class NetSession {
 
   private resetRoom(): void {
     this.clearRejoinTimer();
+    this.roomPassword = '';
     this.st.roomId = null;
     this.st.role = null;
     this.st.config = null;
@@ -727,6 +779,13 @@ export class NetSession {
             break;
           }
           // ── 旁观：只有**已真正开战 + 允许旁观**才放行（**不占座、不需要身份 key、不看座位数**）
+          // **房间密码**：有密码就校（旁观同样要）；房主重连后本地密码记录丢失 → 拒绝新加入（不悄悄变无密码）
+          if (this.myRoom.config.hasPassword) {
+            if (!this.roomPassword || (m.password ?? '') !== this.roomPassword) {
+              this.net.send({ t: 'room:denied', from: this.net.peerId, roomId: m.roomId, reason: 'password', target: m.from });
+              break;
+            }
+          }
           if (m.role === 'spectator') {
             const ph = this.st.game?.phase;
             if (!this.myRoom.config.allowSpectators || !this.st.game || ph === 'setup' || ph === 'tactics') {
@@ -828,7 +887,9 @@ export class NetSession {
               ? '房间版本不一致，无法加入——请刷新页面后重试'
               : m.reason === 'spectate'
                 ? '现在不能旁观（未开局 / 还在选战术牌 / 房主关闭了旁观）'
-                : '房主拒绝了你的加入（可能被拉黑）';
+                : m.reason === 'password'
+                  ? '密码错误，请重试'
+                  : '房主拒绝了你的加入（可能被拉黑）';
           this.emit();
         }
         break;
@@ -920,6 +981,8 @@ export class NetSession {
           // **房主刷新后 `myRoom` 丢了** → 用快照里的 config/members 重建：
           //   否则之后不再应答 `room:join`、也不再 `room:announce`（房间会从大厅消失）。
           if (this.st.role === 'host' && !this.myRoom) {
+            // 房主重连：从本地记录恢复本房密码（丢了 → 新加入会被拒，但不影响已在对局的人 rejoin）
+            this.roomPassword = loadRoomPwd(m.roomId) ?? '';
             const guest = this.st.members.find((x) => x.role === 'guest');
             this.myRoom = {
               id: m.roomId,

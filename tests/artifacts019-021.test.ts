@@ -426,6 +426,38 @@ describe('019 尘哀（尘起 / 蛮王之牙）', () => {
     applyAction(g, { t: 'block' });
     expect(g.pending?.kind ?? null).not.toBe('chenaiFreeRise');
   });
+
+  it('尘起：拒绝不消耗每回合 1 次 —— 下次伤害仍会再问；接受后才不再问', () => {
+    const g = nisaGame();
+    toMain(g);
+    activate(g, 'A', '019', 'right');
+    g.players.A.areas.attack.push({ id: 'cost1', value: 2, kind: 'attack' });
+    applyAction(g, {
+      t: 'skill',
+      artifactId: '019',
+      side: 'right',
+      params: { costSlots: [{ dieIds: ['cost1'] }], picks: ['gain'] },
+    });
+    // 第一次攻击 → 询问 → 拒绝
+    g.players.A.areas.attack.push({ id: 'atk1', value: 3, kind: 'attack' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk1'] }] });
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind).toBe('chenaiFreeRise');
+    applyAction(g, { t: 'chenaiFreeRise', accept: false });
+    expect(g.chenaiUsed.A).toBe(false);
+    // 第二次攻击 → 仍应再次询问
+    g.players.A.areas.attack.push({ id: 'atk2', value: 3, kind: 'attack' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk2'] }] });
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind).toBe('chenaiFreeRise');
+    // 接受一次 → 本回合不再询问
+    applyAction(g, { t: 'chenaiFreeRise', accept: true });
+    expect(g.chenaiUsed.A).toBe(true);
+    g.players.A.areas.attack.push({ id: 'atk3', value: 3, kind: 'attack' });
+    applyAction(g, { t: 'attack', costSlots: [{ dieIds: ['atk3'] }] });
+    applyAction(g, { t: 'block' });
+    expect(g.pending?.kind ?? null).not.toBe('chenaiFreeRise');
+  });
 });
 
 describe('兽魂：多段攻击中「取消伤害」后后续段必须继续（回归 2026-09-25）', () => {

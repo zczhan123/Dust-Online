@@ -1097,6 +1097,21 @@ export function weijuResolve(root: HTMLElement, opts: WeijuResolveOpts): number 
 /** 需要在"切换视角后"补播的"获得"骰 id（跨一次重绘传递）。 */
 let pendingAddIds: string[] | null = null;
 
+/** 重置动效运行时（换局面对象/收到重连快照时调用）：
+ *  - 清掉跨帧的"延后获得"队列 + fx 层残留克隆；
+ *  - 否则重连后会把旧动画补播到新局面上（真实事故：一颗骰子飞成两颗、越重连越乱）。 */
+export function resetMotionRuntime(): void {
+  pendingAddIds = null;
+  if (typeof document === 'undefined') return;
+  const layer = document.getElementById('fx-layer');
+  if (layer) layer.innerHTML = '';
+}
+
+/** 测试/排查用：是否还有未补播的"获得"骰。 */
+export function hasPendingAdds(): boolean {
+  return pendingAddIds != null;
+}
+
 /** "消耗/弃置"一组的完整时长（供"整组播完才下一组"计时）。 */
 export function removalGroupMs(): number {
   return ms(MOTION.move) + ms(MOTION.hold) + ms(MOTION.fade);

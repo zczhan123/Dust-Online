@@ -858,11 +858,13 @@ describe('renderChallengeSetup（挑战模式 · 选择界面）', () => {
   it('结算模式药丸：悬浮显示说明（文案唯一来源＝SETTLE_MODE_TEXT）', () => {
     renderChallengeSetup(root, () => {});
     const b = qa(root, '.pick-seg-btn').find((x) => x.dataset.settle === 'favor')!;
-    b.dispatchEvent(new MouseEvent('mouseenter'));
+    const enter = new Event('pointerenter');
+    Object.defineProperty(enter, 'pointerType', { value: 'mouse' });
+    b.dispatchEvent(enter);
     const tip = document.body.querySelector('.settle-tip') as HTMLElement;
     expect(tip.textContent).toBe('替昔日传奇做的决定，都会自动选择对玩家有利——标准规则');
     expect(tip.hidden).toBe(false);
-    b.dispatchEvent(new MouseEvent('mouseleave'));
+    b.dispatchEvent(new Event('pointerleave'));
     expect(tip.hidden).toBe(true);
   });
 });

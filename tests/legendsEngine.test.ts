@@ -2033,15 +2033,21 @@ describe('L12 闻我名者断恶行（触发）', () => {
     expect(g2.pending?.kind).toBe('duanexing');
   });
 
-  it('每回合最多 1 次：本回合第二次受伤不再弹（不发动也照记一次）', () => {
+  it('每回合最多 1 次：拒绝不消耗 → 第二次受伤仍会再问；接受后本回合不再问', () => {
     const g = l12B();
     g.phase = 'main';
     g.activePlayer = 'A';
-    g.players.A.areas.attack = [die('ak', 2, 'attack')];
+    g.players.A.areas.attack = [die('ak', 2, 'attack'), die('ak2', 3, 'attack')];
     dealTrueDamage(g, 'B', 1, 'A');
     pumpPending(g);
     expect(g.pending?.kind).toBe('duanexing');
     applyAction(g, { t: 'duanexing', accept: false });
+    // 拒绝不消耗 → 再次受伤仍询问
+    dealTrueDamage(g, 'B', 1, 'A');
+    pumpPending(g);
+    expect(g.pending?.kind).toBe('duanexing');
+    // 接受一次 → 本回合不再询问
+    applyAction(g, { t: 'duanexing', accept: true, dieId: 'ak' });
     dealTrueDamage(g, 'B', 1, 'A');
     pumpPending(g);
     expect(g.pending).toBeNull();

@@ -5791,6 +5791,7 @@ function applyActionCore(g: GameState, action: Action): GameState {
       if (!pd || pd.kind !== 'chenaiFreeRise') throw new Error('no chenaiFreeRise pending');
       g.pending = null;
       if (action.accept) {
+        g.chenaiUsed[pd.player] = true; // 接受才消耗「每回合 1 次」
         g.freeNoCostRise += 1;
         logLine(g, `${pname(pd.player)} 「尘起」：获得 1 次无需冥想骰的额外尘起行动（可在主要阶段立即使用）`);
         fxSkillFired(g, pd.player, 'chenai.rise');
@@ -5911,11 +5912,12 @@ function applyActionCore(g: GameState, action: Action): GameState {
       const pd = g.pending;
       if (!pd || pd.kind !== 'duanexing') throw new Error('no duanexing pending');
       const oppId3: PlayerId = pd.player === 'A' ? 'B' : 'A';
-      if (!action.accept) {
-        logLine(g, `${pname(pd.player)} 「闻我名者断恶行」：不发动`);
-        g.pending = null;
-        break;
-      }
+    if (!action.accept) {
+      logLine(g, `${pname(pd.player)} 「闻我名者断恶行」：不发动`);
+      g.pending = null;
+      break;
+    }
+    g.skillsUsedThisTurn.push(skillUseKey(pd.player, 'miyun.duanexing')); // 接受才消耗「每回合 1 次」
       const dieId = action.dieId;
       if (!dieId) throw new Error('「闻我名者断恶行」需指定要弃置的攻击骰');
       const opp = g.players[oppId3];

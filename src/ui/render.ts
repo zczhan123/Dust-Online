@@ -28,7 +28,7 @@ import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
-import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
+import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, resetMotionRuntime, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
 import { showSettleTip, hideSettleTip } from './settleTip';
 import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, staleDice, diagDump, diagClear, diagCount } from './diag';
@@ -59,6 +59,8 @@ const PHASE_LABEL: Record<Phase, string> = {
 
 /** 已显示视角（按 GameState 对象身份）。左右互搏换手时用于"动效播完再瞬间切视角"。 */
 const lastView = new WeakMap<GameState, PlayerId>();
+/** 上一次渲染的**局面对象引用**（重连/新开局会换对象 → 触发动效运行时重置） */
+let lastStateRef: GameState | null = null;
 
 /** 上一次已播"攻击反馈"的待抵挡对象（用于识别"新出现的一次攻击"）。 */
 const lastAttack = new WeakMap<GameState, PendingAttack | null>();
@@ -5174,7 +5176,7 @@ function settingsPanel(ctx: Ctx): HTMLElement {
       b.className = 'btn settings-opt';
       b.textContent = text;
       b.addEventListener('click', () =>
-        setPref(ctx, 'zoomPercent', Math.min(100, Math.max(50, ui.prefs.zoomPercent + delta))),
+        setPref(ctx, 'zoomPercent', Math.min(100, Math.max(10, ui.prefs.zoomPercent + delta))),
       );
       wrap.appendChild(b);
     };
@@ -6283,6 +6285,8 @@ export function phaseBannerSegs(
 export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHooks): void {
   root.classList.remove('setup-page'); // 离开设置页 → 恢复普通背景
   const legal = getLegalActions(state);
+  // 任何重绘都先收起「结算模式」浮层（否则徽标换新元素、旧浮层会一直挡着）
+  hideSettleTip();
 
   // ── 动效：动画速度 + 视角解耦 ───────────────────────────────────────
   // 左右互搏：操作者恒在下方（viewOwnerOf＝actorOf），换手会镜像整盘；联机：视角固定（viewOwnerOf 返回本机玩家）。
@@ -6290,6 +6294,11 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   //   · 有骰子消耗 或 有生命变化 → 先用旧视角把动效播完，再瞬间切（两阶段）。
   //   · 纯获得骰子 → 先瞬间切，再在新视角里从中间飞入。
   //   · 无动效 → 直接瞬间切。联机（viewTarget 固定）永不触发。
+  // 局面对象变了（新开局 / 重连收到快照）→ 先清掉动效残留（fx 克隆、延后获得队列），避免旧动画叠到新局面上
+  if (lastStateRef !== state) {
+    lastStateRef = state;
+    resetMotionRuntime();
+  }
   setMotionSpeed(speedOf(hooks.ui.prefs.animSpeed));
   const viewTarget: PlayerId = viewOwnerOf(state);
   const prevDice = snapshotDice(root);
@@ -7253,7 +7262,7 @@ function applyZoom(stage: HTMLElement, prefs: Prefs): void {
   }
   stage.style.transformOrigin = 'top left';
   if (prefs.zoomMode === 'manual') {
-    const k = Math.min(1, Math.max(0.5, prefs.zoomPercent / 100));
+    const k = Math.min(1, Math.max(0.1, prefs.zoomPercent / 100));
     stage.style.transform = k === 1 ? '' : `scale(${k})`;
     stage.style.width = k === 1 ? '' : `${100 / k}%`;
     return;
