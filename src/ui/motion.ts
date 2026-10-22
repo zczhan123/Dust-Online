@@ -389,7 +389,7 @@ function makeFlyingDie(kind: 'held' | 'virtual' | 'solid', player: PlayerId, val
  * 清除骰子元素上的内联 `visibility`（"揭出"的**唯一入口**）。
  * 只作用于**当前 DOM 里存在**的元素；已使用/消耗/弃置的骰子没有元素 → **安全无操作**（不会复活）。
  */
-export function revealDieEls(root: HTMLElement, ids: string[]): void {
+export function revealDieEls(root: ParentNode, ids: string[]): void {
   let found = 0;
   for (const id of ids) {
     const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
@@ -399,6 +399,45 @@ export function revealDieEls(root: HTMLElement, ids: string[]): void {
     }
   }
   diag('reveal', { ids, found });
+}
+
+/** ?? id ??????? fx ????????????????????? */
+function animGhostStillFlying(id: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const layer = document.getElementById('fx-layer');
+  return !!layer && !!layer.querySelector(`[data-anim-id="${id}"]`);
+}
+
+/** ? id ???? DOM ????? chip?????? */
+function revealChipEls(id: string): void {
+  if (typeof document === 'undefined') return;
+  document
+    .querySelectorAll<HTMLElement>(`.pay-die--held[data-id="${id}"], .tactic-held-die[data-id="${id}"]`)
+    .forEach((el) => {
+      el.style.visibility = '';
+    });
+}
+
+/** ?????"??????"??????
+ *  ?????? #fx-layer ?????????????????????????/????/??????
+ *  ? DOM ???????? ? ?????????"????????????"??
+ *  ?????? DOM???????????????????? */
+export function restoreInFlightHides(root: ParentNode): void {
+  if (typeof document === 'undefined') return;
+  const layer = document.getElementById('fx-layer');
+  if (!layer) return;
+  const ids = new Set<string>();
+  layer.querySelectorAll<HTMLElement>('[data-anim-id]').forEach((nd) => {
+    const id = nd.dataset.animId;
+    if (id) ids.add(id);
+  });
+  if (ids.size === 0) return;
+  root
+    .querySelectorAll<HTMLElement>('.die[data-id], .pay-die--held[data-id], .tactic-held-die[data-id]')
+    .forEach((el) => {
+      const id = el.dataset.id;
+      if (id && ids.has(id)) el.style.visibility = 'hidden';
+    });
 }
 
 function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
@@ -411,15 +450,21 @@ function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   const layer = ensureFxLayer();
+  const gid = el.dataset.id ?? '';
+  if (gid) g.dataset.animId = gid;
   (layer ?? document.body).appendChild(g);
   el.style.visibility = 'hidden';
   diag('hide-viz', { src: 'ghost', ids: [el.dataset.id ?? '?'] });
   return {
     el: g,
     reveal: () => {
-      el.style.visibility = '';
-      diag('reveal-viz', { src: 'ghost', ids: [el.dataset.id ?? '?'] });
       g.remove();
+      if (gid) {
+        if (!animGhostStillFlying(gid)) revealDieEls(document, [gid]);
+      } else {
+        el.style.visibility = '';
+      }
+      diag('reveal-viz', { src: 'ghost', ids: [gid || '?'] });
     },
   };
 }
@@ -1917,12 +1962,14 @@ function playHanguang(
         ghost.style.width = `${r.width}px`;
         ghost.style.height = `${r.height}px`;
         ghost.innerHTML = stored.html;
+        ghost.dataset.animId = h.heldId;
         layer.appendChild(ghost);
         el.style.visibility = 'hidden';
         const d0 = Math.max(0, delayMs);
         const total = moveDur + holdDur + moveDur;
         window.setTimeout(() => {
-          el.style.visibility = '';
+          ghost.remove();
+          if (!animGhostStillFlying(h.heldId)) revealDieEls(document, [h.heldId]);
         }, d0 + total - 40);
         window.setTimeout(() => ghost.remove(), d0 + total + 60);
         maxDur = Math.max(maxDur, playAreaMove(ghost, stored.rect, center, pool, moveDur, holdDur, undefined, undefined, delayMs));
@@ -1973,6 +2020,7 @@ export function playGouhun(
     g.style.width = '24px';
     g.style.height = '24px';
     g.innerHTML = chip ? chip.outerHTML : `<span class="pay-die pay-die--held">${e.value}</span>`;
+    g.dataset.animId = e.chipId;
     layer.appendChild(g);
     if (chip) chip.style.visibility = 'hidden';
     const tx = dr.left + dr.width / 2 - pool.x;
@@ -1991,7 +2039,8 @@ export function playGouhun(
       g.style.opacity = '1';
     }
     window.setTimeout(() => {
-      if (chip) chip.style.visibility = '';
+      g.remove();
+      if (!animGhostStillFlying(e.chipId)) revealChipEls(e.chipId);
     }, total - 40);
     window.setTimeout(() => g.remove(), total + 80);
     maxDur = Math.max(maxDur, total);
@@ -2576,6 +2625,8 @@ export function playLegendSpawn(
       tcY = landing.y;
     }
     const el = makeFlyingDie('solid', 'B', it.value);
+    const gid = ids[i] ?? '';
+    if (gid) el.dataset.animId = gid;
     // `pool` 是**中心点**；骰子是 26×26 → 左上角要减半个骰子，否则中心恒偏 (+13,+13)（真事故）。
     el.style.left = `${pool.x - AREA_ROW_DIE_W / 2}px`;
     el.style.top = `${pool.y - AREA_ROW_DIE_W / 2}px`;
@@ -2599,9 +2650,13 @@ export function playLegendSpawn(
       );
     }
     window.setTimeout(() => {
-      if (realEl) realEl.style.visibility = '';
-      diag('reveal-viz', { src: 'spawn', ids: [ids[i] ?? '?'] }); // 落位 → 揭出真骰
       el.remove();
+      if (gid) {
+        if (!animGhostStillFlying(gid)) revealDieEls(document, [gid]);
+      } else if (realEl) {
+        realEl.style.visibility = '';
+      }
+      diag('reveal-viz', { src: 'spawn', ids: [gid || '?'] }); // 落位 → 揭出真骰
     }, delay + total + 90);
   });
   return delay + total;

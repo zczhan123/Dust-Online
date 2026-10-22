@@ -28,7 +28,7 @@ import { battleNotes } from '../core/engine/battleNotes';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
-import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, resetMotionRuntime, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
+import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, resetMotionRuntime, restoreInFlightHides, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
 import { showSettleTip, hideSettleTip } from './settleTip';
 import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, staleDice, diagDump, diagClear, diagCount } from './diag';
@@ -6731,6 +6731,8 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   stage.appendChild(app);
   root.appendChild(stage);
+  // ?????"??????"?????????/????/??????????????
+  restoreInFlightHides(root);
 
   if (state.phase === 'gameOver') {
     root.appendChild(gameOverModal(ctx));
@@ -6738,14 +6740,18 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
   if (hooks.ui.onlineLeaveOpen && hooks.online) {
     root.appendChild(onlineLeaveOverlay(ctx));
   }
-  if (state.phase === 'tactics') {
+  const tacticPending = state.pending?.kind;
+  const isTacticPick =
+    tacticPending === 'tacticDice' || tacticPending === 'tacticFirst' || tacticPending === 'tacticGuess';
+  // 挑战模式建局**不经 `tactics` 阶段**（直接 initialReroll），但 T01/T13 的战前交互 pending 仍会挂 → 不能只按阶段显示
+  if (state.phase === 'tactics' || isTacticPick) {
     // 联机·非本人操作 → 只读等待（不显示对方牌面）
     if (onlineNonActor(ctx)) {
       root.appendChild(tacticWaitOverlay(ctx));
-    } else if (state.pending?.kind === 'tacticDice') root.appendChild(tacticDiceOverlay(ctx));
-    else if (state.pending?.kind === 'tacticFirst') root.appendChild(tacticFirstOverlay(ctx));
-    else if (state.pending?.kind === 'tacticGuess') root.appendChild(tacticGuessOverlay(ctx));
-    else root.appendChild(tacticChooseOverlay(ctx));
+    } else if (tacticPending === 'tacticDice') root.appendChild(tacticDiceOverlay(ctx));
+    else if (tacticPending === 'tacticFirst') root.appendChild(tacticFirstOverlay(ctx));
+    else if (tacticPending === 'tacticGuess') root.appendChild(tacticGuessOverlay(ctx));
+    else if (state.phase === 'tactics') root.appendChild(tacticChooseOverlay(ctx));
   }
   if (hooks.ui.settingsOpen) {
     root.appendChild(settingsPanel(ctx));

@@ -3635,7 +3635,10 @@ export function createChallengeGame(opts: ChallengeSetupOptions): GameState {
   if (card.token) g.challenge.token = 'black';
   logLine(g, `挑战模式：对手＝传说中的「${card.legacy}」· 生命 ${g.players.B.life}`);
   // 挑战者的战术牌：构筑直接生效
-  if (opts.tactic) applyTacticStart(g, 'A');
+  if (opts.tactic) {
+    applyTacticStart(g, 'A');
+    pumpPending(g); // ???????T01 ?? / T13 ?????????? createGame ? pump???????????
+  }
   // 战前收口：**初始生命修正**（标准流程在"战前收口" `maybeEnterInitialReroll` 结算；挑战建局不经 `tactics` 阶段 → 这里补，
   //   否则所有 `lifeMods` 失效，如 T03 顽强 +6）。`applyTacticLifeMods` 内部已处理「+取最大 / −取最大」→ 增、减一并修。
   if (opts.tactic) {
