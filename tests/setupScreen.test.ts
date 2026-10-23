@@ -387,10 +387,14 @@ describe('渲染入口 / 菜单', () => {
     expect(panel).toBeTruthy();
     expect(panel.textContent).toContain('无言的双子龙');
     expect(panel.textContent).toContain('OpenCode + DeepSeek V4.1 Flash');
-    expect(panel.textContent).toContain('当前版本：');
-    expect(panel.textContent).toContain('版权归原作者所有');
+    expect(panel.textContent).toContain('当前版本');
+    expect(panel.textContent).toContain('Lambda');
+    expect(panel.textContent).toContain('9件异相');
+    expect(panel.textContent).toContain('挑战为单人');
     expect(panel.textContent).toContain('684573027'); // 问题反馈群
-    expect(panel.textContent).toContain('2 vs 2 团队模式已列入长期计划，具体时间待定');
+    expect(panel.textContent).toContain('dust.qiangda.top');
+    expect(panel.textContent).toContain('2 vs 2');
+    expect(panel.textContent).toContain('团队模式已列入长期计划，具体时间待定');
   });
 
   it('renderSetup 第二层：「构筑模式」进入构筑界面', () => {

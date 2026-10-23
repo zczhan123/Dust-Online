@@ -564,16 +564,22 @@
 - 战斗界面（卡不可选）：**单击 = 看技能**；选择界面（单击=选定）：**长按 = 看技能**。
 - 技能详情弹框 .detail-popover：**深色统一**（#1b1a18 / 标题 #e8e4da / 正文 #b9b3a6 / 边框 #3a3834），右上角悬浮 .detail-close（40px 触控区，不占行）。
 - 详情弹框定位 layoutDetailBox：下方放不下→向上展开，最后 clamp 到视口内（与选择界面一致），高度限制在视口内、内部滚动。
-- 默认预设：电脑＝技能显示/缩略卡图/紧凑/镜像/战报显示/整屏自动；触屏＝技能缩略/缩略卡图/紧凑/镜像/战报缩略/整屏自动。整屏自动＝按高度缩放（pplyZoom 的 h/h，下限 0.8）。回归：	ests/prefs.test.ts。
+- 默认预设：电脑＝技能显示/缩略卡图/紧凑/镜像/战报显示/整屏自动；触屏＝技能缩略/缩略卡图/紧凑/镜像/战报缩略/整屏自动。整屏自动＝按高度缩放（`applyZoom` 的 `vh / 内容高`，自动档下限 0.8、手动档 0.1–1）。回归：`tests/prefs.test.ts`。
+- 结算模式浮层（settleTip）：触屏**点击**显示、4 秒自动收起；点浮层/锚点以外、滚动、切后台立即收起；桌面 hover 不变。
 
-## ???????2026-10-20?
-- **???????**?`RoomConfig.password` ???????`createRoom` ????? `NetSession.roomPassword`???????/???????? `config.hasPassword`?
-- ?????`case 'room:join'` ?"?? ? ???"?????/???????**???????**??? ? `room:denied(reason='password', target)`?
-- **???rejoin??????**???? key??????? `localStorage["dust.roompwd.v1"]` ? roomId ??????? ? ???????????????
-- ????"???"?????????/?????????????
+## 联机房间密码（2026-10-20）
+- `RoomConfig.password` 只是建房入参：`createRoom` 立刻剥离到 `NetSession.roomPassword`（私有）；公告/快照里只有公开的 `config.hasPassword`。
+- 校验位置：`case 'room:join'` 在“版本 → 黑名单”之后、旁观/座位分支之前；**旁观同样要密码**；错误 → `room:denied(reason='password', target)`。
+- **重连（rejoin）不校验密码**（走身份 key）；房主重连从 `localStorage["dust.roompwd.v1"]` 按 roomId 恢复；恢复失败 → 拒绝新加入（不悄悄变无密码房）。
+- 密码规则：纯数字、恰好 4 位（不足/含字母按无效处理）；建房明文、加入掩码；弹窗单例（重复点房间不叠加）。
+- 密码只作“防手滑”软门槛（明文经中继/本地存储），不是安全边界。
 
-## viewport?2026-10-20?
-- `index.html` ?? `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">` ? ?????<1280/<720/<640???????????????????
-- **密码规则**：纯数字、恰好 4 位（不足/含字母按无效处理）；建房明文、加入掩码；弹窗单例（重复点房间不叠加）。
-- **纯 UI 重绘不播动效**：`renderGame` 用 `motionFingerprint(state)` 对比上一帧；指纹相同（设置/聊天/退出确认等）时临时 `setMotionEnabled(false)`，渲染结束恢复。
-- **viewport ???????2026-10-20?**????? viewport?B2?????????????????grid ????????? 1??
+## 移动端 viewport（2026-10-20 已试并回退）
+- 曾加 `<meta name="viewport" ...>`，实测收益不佳（选择板按宽度缩放方案 B2 也因 grid 不溢出而无效）→ **已删除**；**不要**再加。
+- 保持“980 虚拟宽 + 浏览器整体缩放”；整屏缩放自动档按**视口高度**（`applyZoom`）。
+
+## 动效门禁（2026-10-20 已回退）
+- 曾用“状态指纹”（`motionFingerprint`）抑制纯 UI 重绘的动画，会误杀**驱动骰/存放骰**等未纳入指纹的动画（挑战 Z01/Z09/Z11 全部中招）→ **已删除**。
+- “点设置/聊天/退出重播动画”的真正原因是**联机订阅泄漏**（一次动作渲染多遍）→ 已用 `battleUnsub` + `unbindTurnTimer` 修好，**不要再引入状态指纹类门禁**。
+- 飞行中的骰子跨重绘保持隐藏：克隆带 `data-anim-id`，每次渲染后 `restoreInFlightHides(root)`；揭出按 id（`revealDieEls`）。重连换局面对象时 `resetMotionRuntime()` 清残留。
+- 新增 UI 动效仍遵守：只动 `transform/opacity`、时长 100–250ms、`prefers-reduced-motion` 兜底。

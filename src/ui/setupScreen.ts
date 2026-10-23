@@ -375,18 +375,46 @@ function openAboutModal(): void {
   box.appendChild(head);
 
   const body = el('div', 'about-body');
-  const line = (text: string, cls = ''): void => {
-    const p = el('div', `about-line${cls ? ` ${cls}` : ''}`);
-    p.textContent = text;
-    body.appendChild(p);
+  const hero = el('div', 'about-hero');
+  const heroTitle = el('div', 'about-title');
+  heroTitle.textContent = '《尘起时刻》线上版';
+  const heroSub = el('div', 'about-sub');
+  heroSub.textContent = '桌游《尘起时刻》的网页实现';
+  hero.append(heroTitle, heroSub);
+  body.appendChild(hero);
+
+  const sep = (): void => {
+    body.appendChild(el('div', 'about-sep'));
   };
-  line('《尘起时刻》线上版', 'about-title');
-  line('策划与实现：群友「无言的双子龙」');
-  line('开发方式：OpenCode + DeepSeek V4.1 Flash 协作开发');
-  line(`当前版本：${APP_VERSION_LABEL}`, 'about-meta');
-  line('原作《尘起时刻》的卡牌、规则与美术版权归原作者所有；本作为非商业同人实现，仅供交流与娱乐。', 'about-note');
-  line('遇到 Bug 或结算逻辑异常，欢迎到玩家群 684573027 反馈；附上战报或截图，更容易定位问题。', 'about-note');
-  line('2 vs 2 团队模式已列入长期计划，具体时间待定。');
+  const kv = (k: string, v: string): void => {
+    const row = el('div', 'about-kv');
+    const kk = el('div', 'about-k');
+    kk.textContent = k;
+    const vv = el('div', 'about-v');
+    vv.textContent = v;
+    row.append(kk, vv);
+    body.appendChild(row);
+  };
+
+  sep();
+  kv('原作', '桌游《尘起时刻》· 作者 Lambda');
+  kv('授权', '已获作者 Lambda 口头授权（非商业同人）');
+  kv('策划与实现', '群友「无言的双子龙」');
+  kv('开发方式', 'OpenCode + DeepSeek V4.1 Flash 协作开发');
+  kv('当前版本', APP_VERSION_LABEL);
+
+  sep();
+  kv('模式', '预设 / 构筑 / 轮选（支持本地左右互搏与在线联机）；\n挑战为单人对抗「昔日传奇」。');
+  kv(
+    '内容',
+    '36件神器面板 · 9件异相神器面板（其中1件为特典异相）\n12件传奇英雄面板 · 18张战术牌 · 12张挑战模式卡',
+  );
+
+  sep();
+  kv('说明', '本作没有专门适配手机界面；可在「设置 → 整屏缩放」调整界面大小（手动 10%–100%）。');
+  kv('反馈', 'Bug 请到玩家群 684573027 反馈（附版本号、模式、操作步骤；联机请注明）。');
+  kv('2 vs 2', '团队模式已列入长期计划，具体时间待定。');
+  kv('临时试玩', 'https://dust.qiangda.top');
   box.appendChild(body);
 
   overlay.appendChild(box);
