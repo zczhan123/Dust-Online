@@ -13,14 +13,14 @@
    - 可选：nginx；`systemd`（Linux 服务器）。
 3. **认证（二选一）**：
    - **HTTPS + PAT**：GitHub → Settings → Developer settings → Personal access tokens →
-     Fine-grained token，权限仅勾选该仓库的 **Contents: Read**；克隆时用户名填 GitHub 用户名、密码填 token。
-   - **SSH**：把自己的公钥加到 GitHub → SSH keys，使用 `git@github.com:zczhan123/-Dust-Online.git`。
+     细粒度令牌，权限仅勾选该仓库的 **内容：读取**；克隆时用户名填 GitHub 用户名、密码填 token。
+   - **SSH**：把自己的公钥加到 GitHub → SSH keys，使用 `git@github.com:zczhan123/Dust-Online.git`。
 
 ## 1. 首次部署
 
 ```bash
 sudo mkdir -p /opt/dust && sudo chown "$USER" /opt/dust
-git clone https://github.com/zczhan123/-Dust-Online.git /opt/dust/app
+git clone https://github.com/zczhan123/Dust-Online.git /opt/dust/app
 cd /opt/dust/app
 npm ci                 # 按 package-lock.json 安装（含构建工具）
 npm run build          # tsc + vite build → dist/
