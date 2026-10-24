@@ -1,0 +1,2 @@
+# 让 Linux 上的脚本始终保持 LF（Windows 的 core.autocrlf=true 也不会破坏）
+*.sh text eol=lf

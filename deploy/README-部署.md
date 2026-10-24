@@ -10,7 +10,7 @@
 ```
 dust-online/
 ├─ README-部署.md          ← 本文件
-├─ VERSION.txt             ← 版本号 + 打包时间（排查问题先看它）
+├─ VERSION.txt             ← 压缩包标签（vN + 打包时间；线上真实版本以「关于游戏」为准）
 ├─ www/                    ← 网页（给 nginx/Caddy 托管）
 ├─ relay/
 │  ├─ relay.mjs            ← 联机中继（Node 程序）
@@ -20,7 +20,9 @@ dust-online/
    ├─ nginx.conf           ← 路线甲：IP + http
    ├─ nginx-https.conf     ← 路线乙：域名 + https
    ├─ Caddyfile            ← 备选：Caddy（自动证书）
-   └─ dust-relay.service   ← 中继常驻服务（systemd）
+   ├─ dust-relay.service   ← 中继常驻服务（systemd）
+   ├─ update.sh            ← 源码模式一键更新（迁移后使用）
+   └─ README-源码部署.md    ← 想改用源码模式 / 一条命令更新，看这份
 ```
 
 > `www/fonts/` 内是 **2 个行草字体子集**（`zhimangxing-subset*.woff2`）；更新版本时不要漏拷该目录（漏了字体会回退成系统字体）。
@@ -213,10 +215,13 @@ node /opt/dust/relay/check.mjs wss://你的域名/ws        # 路线乙
 
 ## 9. 更新版本
 
-1. 拿到新的 zip，解压到临时目录，**替换** `/opt/dust/www/`（整目录替换，别只覆盖一层）。
-2. `sudo systemctl restart dust-relay`（一般不用换中继，但一起重启最省心）。
-3. **不用动 nginx 配置**。
-4. 通知玩家刷新页面（旧版本加入会被提示"版本不一致，请刷新"）。
+1. 拿到新的 zip，解压到临时目录；
+2. **整目录替换** `/opt/dust/www/`（别只覆盖一层），并把新的 `/opt/dust/relay/` 一并替换（中继代码通常不变，`relay/relay.mjs` 与 `relay/node_modules/ws/` 都要在）；
+3. `sudo systemctl restart dust-relay`（换过中继就一定要重启）；
+4. 核对包内 `VERSION.txt` 与「关于游戏」显示一致（**以「关于游戏」为准**）；
+5. 通知玩家刷新页面（旧版本加入会被提示"版本不一致，请刷新"）。
+
+> 长期更省事：一次性迁移到**源码模式**，以后更新只需 `bash deploy/update.sh`（见 `deploy/README-源码部署.md` 第 4 节）。
 
 ---
 
@@ -231,6 +236,7 @@ node /opt/dust/relay/check.mjs wss://你的域名/ws        # 路线乙
 | 一直"正在连接服务器" | 跑第 7 节自检；最常见是 nginx 反代少了 `Upgrade`/`Connection` 两行 |
 | 自检报 101 失败（wss） | 证书链/域名不匹配；先确认浏览器能打开 `https://域名/` |
 | "版本不一致，请刷新" | 服务器文件和玩家缓存不同：重新部署 + 让玩家 Ctrl+F5 |
+| 「关于游戏」还是旧版本 | ① 换的是旧 zip；② 只替换了 `www/` 但没重启/没换 `relay`；③ 玩家没硬刷新。包内 `VERSION.txt` 与「关于游戏」应一致 |
 | 局域网能玩、外网不行 | 云服务器**安全组**没放行 80/443（放行后不用管 8787） |
 | 8787 端口被占用 | 改 `dust-relay.service` 里的 `8787`，并同步改 nginx/Caddy 的 `proxy_pass` |
 | 中继反复重启 | 看 `journalctl -u dust-relay`；多为路径/权限/端口问题 |
@@ -251,7 +257,7 @@ node /opt/dust/relay/check.mjs wss://你的域名/ws        # 路线乙
 - **一台服务器一份中继即可**：多房间共用（按房间隔离，互不串台）。
 - **必须部署在域名根路径**（原因见上表）。
 - **房间密码**：建房时可设 4 位数字密码，加入与旁观都要输入；密码只存在房主内存/本地记录，随消息只传"有密码"标记（明文经中继，**仅防手滑，不是加密**）；断线重连不重新要密码。
-- **手机适配**：页面已加 viewport，手机断点生效（单列/可横滑/按真实高度缩放）；不锁定横竖屏，跟随系统。
+- **手机适配**：**没有专门适配手机界面**；可用「设置 → 整屏缩放」自行调整（手动 10%–100%）。不锁定横竖屏，跟随系统。
 - 浏览器：Chrome / Edge / Firefox / Safari 近两年版本；手机可用但界面以桌面为主。
 
 ---
@@ -266,4 +272,4 @@ node /opt/dust/relay/check.mjs wss://你的域名/ws        # 路线乙
 | 对外端口 | 80（路线甲）/ 443（路线乙） |
 | 反代路径 | `/ws` → `http://127.0.0.1:8787` |
 | 服务名 | `dust-relay` |
-| 版本 | 见 `VERSION.txt` |
+| 版本 | 以「关于游戏」/ `dist` 构建产物为准（`VERSION.txt` 只是包标签） |

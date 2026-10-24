@@ -35,7 +35,7 @@
   - 注意两个**盲点**（只在这套测法下出现，正式联机不会）：①**一个标签页总在后台** → 动画计时异常（如重掷后对方新骰子看不到）；②两标签**共用一份浏览器存储**（昵称/设置会互相覆盖）。
 - **更接近"真联机"**：`npm run relay` + 两个**不同浏览器**（或跨机）各开 `http://localhost:5173/?server=ws://localhost:8787`（跨机把 `localhost` 换成房主机的局域网 IP）。
 - **动画**最准的看处在**左右互搏**（一个可见页面）。
-- 断线重连**尚未做**（依赖服务器，搁置）。
+- 断线重连**已实现**：`src/net/ws.ts`（指数退避、断线入队补发）+ `session.ts`（自动 `rejoin`、对端回 `snapshot`）；中继按房间隔离（`scripts/relay.mjs`）。
 
 ## git
 历史原因（原 D 盘仓库不记录所有权）保留 safe.directory 前缀写法：
@@ -583,3 +583,14 @@
 - “点设置/聊天/退出重播动画”的真正原因是**联机订阅泄漏**（一次动作渲染多遍）→ 已用 `battleUnsub` + `unbindTurnTimer` 修好，**不要再引入状态指纹类门禁**。
 - 飞行中的骰子跨重绘保持隐藏：克隆带 `data-anim-id`，每次渲染后 `restoreInFlightHides(root)`；揭出按 id（`revealDieEls`）。重连换局面对象时 `resetMotionRuntime()` 清残留。
 - 新增 UI 动效仍遵守：只动 `transform/opacity`、时长 100–250ms、`prefers-reduced-motion` 兜底。
+
+## 发布 / 上传口径（2026-10-24，强制）
+- **上传 GitHub / 建 Release：只带联机部署包** `delivery/尘起时刻-联机部署.zip`。
+  **绝不含本地试玩包**（`尘起时刻-试玩.zip`、`dist-delivery/`）；**不要再询问用户**"要不要带试玩包"。
+- 版本唯一来源 = `package.json` 的 `version`（构建时注入 `__APP_VERSION__`，首页/「关于游戏」显示）。
+  `VERSION.txt` 只是**压缩包标签**，不参与网页显示；验收线上版本一律看「关于游戏」或 `dist/assets/*.js`。
+- 部署/更新两条路：
+  1. **源码模式（推荐长期）**：`bash deploy/update.sh`（fetch → pull --ff-only 或 checkout tag → `npm ci` → `npm run build` → 重启中继 → **校验 dist 版本与 package.json 一致**）；
+  2. **压缩包模式**：替换 `www/` + `relay/` → `systemctl restart dust-relay`（文档见 `deploy/README-部署.md` §9）。
+- 仓库为**公开仓库**：克隆/拉取无需 Collaborator/PAT；`deploy/README-源码部署.md` 不得再写"必须加协作者"。
+

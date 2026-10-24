@@ -93,6 +93,10 @@ for (const f of ['nginx.conf', 'nginx-https.conf', 'Caddyfile', 'dust-relay.serv
 // 4) 说明文档（根目录一份，deploy/ 里一份）
 copy(path.join(root, 'deploy', 'README-部署.md'), path.join(stage, 'README-部署.md'));
 copy(path.join(root, 'deploy', 'README-部署.md'), path.join(stage, 'deploy', 'README-部署.md'));
+// 4b) 源码模式文档 + 一键更新脚本（管理员不解压源码也能看到迁移办法）
+copy(path.join(root, 'deploy', 'README-源码部署.md'), path.join(stage, 'README-源码部署.md'));
+copy(path.join(root, 'deploy', 'README-源码部署.md'), path.join(stage, 'deploy', 'README-源码部署.md'));
+copy(path.join(root, 'deploy', 'update.sh'), path.join(stage, 'deploy', 'update.sh'));
 
 // 5) 版本戳（方便排查群友装的是哪版）
 writeFileSync(
