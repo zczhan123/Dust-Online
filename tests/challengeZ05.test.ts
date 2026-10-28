@@ -158,28 +158,51 @@ describe('挑战模式 · Z05 效果', () => {
     expect(vals(g.players.A.areas.meditation)).toEqual([5]);
   });
 
-  it('数罪并罚：匹配 2 组 → 4 次 6 点攻击 + 自伤 6 点', () => {
+  it('数罪并罚：逐组结算——每组 2 次 6 点攻击后才扣 3 点真实伤害', () => {
     const g = make();
     setA(g, {});
     const life0 = g.players.B.life;
     applyChallengeSkill(g, Z05, SK('z05-3'), [die('d1', 1), die('d2', 1), die('d3', 6), die('d4', 6)]);
-    expect(g.virtualQueue).toHaveLength(3); // 4 段：1 发出 + 3 待
+    expect(g.challenge!.deferred).toMatchObject({ skillId: 'z05-3', step: 0, groupIndex: 1, groupTotal: 2 });
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 6 });
-    // 多组提示：第 1 组 · 本组第 1 / 2 次
     expect(g.pendingAttack?.legendGroup).toEqual({ index: 1, total: 2, sub: 1, subTotal: 2 });
-    expect(g.players.B.life).toBe(life0 - 6); // 2 组 × 3
+    expect(g.players.B.life).toBe(life0); // 第 1 组攻击未打完前不扣自伤
+    applyAction(g, { t: 'block' }); // 本组第 1 次
+    expect(g.pendingAttack?.legendGroup).toMatchObject({ index: 1, sub: 2 });
+    applyAction(g, { t: 'block' }); // 本组第 2 次
+    expect(g.pendingAttack).toBeNull();
+    expect(g.virtualQueue).toBeFalsy();
+    expect(g.players.B.life).toBe(life0);
+    resolveLegendDeferred(g, Z05); // 第 1 组：扣 3
+    expect(g.players.B.life).toBe(life0 - 3);
+    expect(g.challenge!.deferred).toMatchObject({ step: 1, groupIndex: 1 });
+    resolveLegendDeferred(g, Z05); // 开第 2 组
+    expect(g.pendingAttack?.legendGroup).toEqual({ index: 2, total: 2, sub: 1, subTotal: 2 });
+    applyAction(g, { t: 'block' });
+    applyAction(g, { t: 'block' });
+    resolveLegendDeferred(g, Z05); // 第 2 组：再扣 3
+    expect(g.players.B.life).toBe(life0 - 6);
+    expect(g.challenge!.deferred).toBeUndefined();
+    const texts = g.log.map((l) => l.text);
+    expect(texts.filter((t) => /第 \d+\/\d+ 组：自身受到 3 点真实伤害/.test(t)).length).toBe(2);
+    expect(texts.some((t) => t.includes('自身受到 6 点真实伤害'))).toBe(false);
   });
 
-  it('电刑：匹配 2 组 → 1/2/3 各两次；末尾再加"攻击骰区的攻击骰"', () => {
+  it('电刑：匹配 2 组 → 1/2/6 各两次；末尾再加"攻击骰区的攻击骰"', () => {
     const g = make();
     setA(g, {});
     g.players.B.areas.attack = [die('ba', 5, 'attack')];
     applyChallengeSkill(g, Z05, SK('z05-4'), [die('d1', 3), die('d2', 4), die('d3', 4), die('d4', 3)]);
-    // 2 组 ×（1,2,3）=6 + 攻击区 1 = 7 段 → 1 发出 + 6 待
-    expect(g.virtualQueue).toHaveLength(6);
+    expect(g.virtualQueue).toHaveLength(6); // 2 组 × 3 段 + 攻击区 1（首段已发出）
     expect(g.pendingAttack).toMatchObject({ attacker: 'B', baseValue: 1 });
-    // 多组提示：第 1 组 · 本组第 1 / 3 次
     expect(g.pendingAttack?.legendGroup).toEqual({ index: 1, total: 2, sub: 1, subTotal: 3 });
+    const seen: number[] = [];
+    let guard = 0;
+    while (g.pendingAttack && guard++ < 20) {
+      seen.push(g.pendingAttack.baseValue ?? -1);
+      applyAction(g, { t: 'block' });
+    }
+    expect(seen).toEqual([1, 2, 6, 1, 2, 6, 5]);
   });
 
   it('净化：把本技能上的 2 颗驱动骰移入防御骰区', () => {

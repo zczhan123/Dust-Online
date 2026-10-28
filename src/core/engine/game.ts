@@ -1713,38 +1713,33 @@ export function applyChallengeSkill(
       return { spawn, outIds };
     }
     case 'z05-3': {
-      // 数罪并罚：每匹配 1 组 → 2 次 6 点攻击 + 自伤 3 点真实伤害
+      // 数罪并罚：**逐组结算**——每组 2 次 6 点攻击 → 自身受到 3 点真实伤害 → 下一组
       const size = skill.slots?.[0].count || 2;
       const groups = Math.floor(consumed.length / size);
       if (groups > 0) {
-        // §19⑨ 多段攻击源：数罪并罚
-        g.virtualQueue = Array.from({ length: groups * 2 }, (_, k) => ({
-          attacker: 'B' as PlayerId,
-          value: 6,
-          label: skill.name,
-          owner: 'B' as PlayerId,
-          // 每组 2 段 → 提示"第 K / N 组 · 本组第 j / 2 次"
-          legendGroup: { index: Math.floor(k / 2) + 1, total: groups, sub: (k % 2) + 1, subTotal: 2 },
-        }));
-        dealTrueDamage(g, 'B', groups * 3, 'B');
-        logLine(g, `「${legacy}」：${skill.name} — ${groups} 组：${groups * 2} 次 6 点攻击，自身受到 ${groups * 3} 点真实伤害`);
+        g.challenge!.deferred = { skillId: skill.id, step: 0, groupIndex: 1, groupTotal: groups };
+        queueShuzuiGroup(g, skill.name, 1, groups);
+        logLine(
+          g,
+          `「${legacy}」：${skill.name} — ${groups} 组：逐组结算（每组 2 次 6 点攻击 + 自身受到 3 点真实伤害）`,
+        );
         pumpAttackQueue(g);
       }
       return { spawn, outIds };
     }
     case 'z05-4': {
-      // 电刑：每匹配 1 组 → 以 1、2、3 点各攻击 1 次；末尾再"若攻击骰区有攻击骰，也一并攻击"
+      // 电刑：每匹配 1 组 → 以 1、2、6 点各攻击 1 次；末尾再"若攻击骰区有攻击骰，也一并攻击"
       const size = skill.slots?.[0].count || 2;
       const groups = Math.floor(consumed.length / size);
       const q: NonNullable<GameState['virtualQueue']> = [];
       for (let gi = 0; gi < groups; gi++) {
-        [1, 2, 3].forEach((v, j) => {
+        [1, 2, 6].forEach((v, j) => {
           q.push({
             attacker: 'B' as PlayerId,
             value: v,
             label: skill.name,
             owner: 'B' as PlayerId,
-            // 每组 3 段（1/2/3）→ 提示"第 K / N 组 · 本组第 j / 3 次"
+            // 每组 3 段（1/2/6）→ 提示"第 K / N 组 · 本组第 j / 3 次"
             legendGroup: { index: gi + 1, total: groups, sub: j + 1, subTotal: 3 },
           });
         });
@@ -2349,6 +2344,18 @@ function runLegendTurn(g: GameState): void {
   }
 }
 
+/** Z05「数罪并罚」：把第 `index` 组的 2 次 6 点攻击放进队列（逐组结算，组间等攻击+自伤都播完）。 */
+function queueShuzuiGroup(g: GameState, label: string, index: number, total: number): void {
+  // §19⑨ 多段攻击源：数罪并罚
+  g.virtualQueue = [0, 1].map((k) => ({
+    attacker: 'B' as PlayerId,
+    value: 6,
+    label,
+    owner: 'B' as PlayerId,
+    legendGroup: { index, total, sub: k + 1, subTotal: 2 },
+  }));
+}
+
 /**
  * 收尾"延后一步"的效果（**按卡面顺序**：例「暗夜凶神」＝①8点攻击 →（攻击结算后）②弃挑战者1防御骰 →③计数+1）。
  * 只在攻击已结算完、回到传奇回合时执行；遇到"②的代决"就挂起等待。
@@ -2362,6 +2369,28 @@ export function resolveLegendDeferred(g: GameState, card: ChallengeCard): void {
     return;
   }
   const A = g.players.A;
+  if (skill.id === 'z05-3') {
+    // 数罪并罚：**逐组两拍**——step 0（本组 2 次攻击已结算）→ 扣 3；step 1 → 开下一组。
+    const total = d.groupTotal ?? 1;
+    const idx = d.groupIndex ?? 1;
+    if (d.step === 0) {
+      d.step = 1;
+      const before = g.players.B.life;
+      dealTrueDamage(g, 'B', 3, 'B');
+      logLine(
+        g,
+        `「${card.legacy}」：${skill.name} — 第 ${idx}/${total} 组：自身受到 3 点真实伤害（生命 ${before} → ${g.players.B.life}）`,
+      );
+      if ((g.phase as string) === 'gameOver' || idx >= total) g.challenge.deferred = undefined;
+      return;
+    }
+    const next = idx + 1;
+    d.groupIndex = next;
+    d.step = 0;
+    queueShuzuiGroup(g, skill.name, next, total);
+    pumpAttackQueue(g);
+    return;
+  }
   if (skill.id === 'z02-3') {
     // ② 弃挑战者 1 颗防御骰（弃哪颗＝代决，模式 1；**攻击结算之后**才问）
     const wants = challengeDecisions(g, skill, true);

@@ -511,6 +511,9 @@ export interface GameState {
       groups?: number[][];
       dice?: { id: string; value: number }[];
       moved?: boolean;
+      /** Z05「数罪并罚」：逐组结算时的当前组号（1 起）与总组数 */
+      groupIndex?: number;
+      groupTotal?: number;
     };
   };
   dustfall: number;

@@ -175,7 +175,7 @@ export const CHALLENGES: ChallengeCard[] = [
           { kind: 'pips', count: 2, faces: [3, 4] },
           { kind: 'pips', count: 2, faces: [3, 4] },
         ],
-        effect: '每投掷出 1 组：以 1、2、3 点依次进行 1 次攻击。如果攻击骰区有攻击骰，也使用所有攻击骰发起攻击。',
+        effect: '每投掷出 1 组：以 1、2、6 点依次进行 1 次攻击。如果攻击骰区有攻击骰，也使用所有攻击骰发起攻击。',
       },
       { id: 'z05-5', name: '净化', slots: [{ kind: 'pips', count: 2, faces: [2, 5] }], effect: '将本技能上的驱动骰全部移动至防御骰区。' },
     ],
