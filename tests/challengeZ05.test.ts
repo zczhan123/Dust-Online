@@ -9,6 +9,10 @@ import {
 } from '../src/core/engine/game';
 import { matchGroupsPartial } from '../src/core/engine/challenge';
 import { CHALLENGES } from '../src/core/content/challenges';
+import { applyLifeLoss } from '../src/core/engine/combat';
+import { noteLifeDrop } from '../src/core/engine/effects';
+import { SKILL_HANDLERS } from '../src/core/engine/skills';
+import { SeededRng } from '../src/core/rng/rng';
 import type { Die, DiceKind, GameState } from '../src/core/model/types';
 
 const die = (id: string, value: number, kind: DiceKind = 'meditation'): Die => ({ id, value, kind });
@@ -211,5 +215,49 @@ describe('挑战模式 · Z05 效果', () => {
     expect(() => applyAction(g, { t: 'challengePick', id: 'x2' })).not.toThrow();
     resolveLegendDeferred(g, Z05);
     expect(g.players.B.areas.defense.map((d) => d.value)).toEqual([1, 1, 1, 5]); // 移入 5
+  });
+
+  it('033「死亡亦逝·充能」抹零是非伤害 → 不触发绝境天神额外投骰', () => {
+    const g = createChallengeGame({
+      seed: 1,
+      cardId: 'Z05',
+      challenger: ['031', '032', '033'],
+      settleMode: 'manual',
+    });
+    g.activePlayer = 'A';
+    g.players.B.life = 25; // 抹零 25 → 20（下降 5，但不是伤害）
+    const a033 = g.players.A.artifacts.find((a) => a.id === '033')!;
+    SKILL_HANDLERS['diaoling.charge'].run({
+      g,
+      player: 'A',
+      artifact: a033,
+      rng: new SeededRng(1),
+      params: {},
+      endMainPhase: () => {},
+      reportConsumed: () => {},
+    });
+    expect(g.players.B.life).toBe(20);
+    expect(g.challenge!.damagedDuringChallengerTurn).toBeFalsy();
+    g.activePlayer = 'B';
+    beginTurn(g);
+    expect(g.challenge!.driven).toHaveLength(8); // 基础 8 颗，不是 8+2
+    expect(g.log.some((l) => l.text.includes('额外投掷'))).toBe(false);
+  });
+
+  it('noteLifeDrop（生命下降）不置位「受到伤害」标记', () => {
+    const g = make();
+    g.activePlayer = 'A';
+    noteLifeDrop(g, 'B', 5);
+    expect(g.challenge!.damagedDuringChallengerTurn).toBeFalsy();
+  });
+
+  it('真实伤害仍触发绝境天神额外投骰（回归）', () => {
+    const g = make();
+    g.activePlayer = 'A';
+    applyLifeLoss(g, 'B', 5);
+    expect(g.challenge!.damagedDuringChallengerTurn).toBe(true);
+    g.activePlayer = 'B';
+    beginTurn(g);
+    expect(g.challenge!.driven).toHaveLength(10);
   });
 });

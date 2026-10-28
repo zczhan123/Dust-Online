@@ -253,6 +253,12 @@ export function tryYonghengQueen(g: GameState, target: PlayerId, amount: number)
 
 export function applyLifeLoss(g: GameState, target: PlayerId, amount: number): void {
   g.players[target].life -= amount;
+  // Z05「绝境天神」：记录"**上个挑战者的回合**里，传奇（B）受到过**伤害**"（传奇回合开始时读取并清除）。
+  //   只在**真实伤害/攻击伤害**的落血点 `applyLifeLoss` 置位；033 抹零、遍野残杀、z11-2 抹零等
+  //   **非伤害的生命下降**只走 `noteLifeDrop`（服务 L11/T13），**不得**计入"受到伤害"。
+  if (amount > 0 && g.mode === 'challenge' && target === 'B' && g.activePlayer === 'A' && g.challenge) {
+    g.challenge.damagedDuringChallengerTurn = true;
+  }
   noteLifeDrop(g, target, amount); // L11 邪灵序曲：任何"生命减少"都计数（含伤害/真伤）
   checkLifeEnd(g);
   noteDamageTaken(g, target);

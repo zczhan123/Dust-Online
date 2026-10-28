@@ -180,10 +180,8 @@ export function checkLifeTens(g: GameState, player: PlayerId): void {
  */
 export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): void {
   if (amount <= 0) return;
-  // Z05「绝境天神」：记录"**上个挑战者的回合**里，昔日传奇受到过伤害"（传奇回合开始时读取并清除）
-  if (g.mode === 'challenge' && player === 'B' && g.activePlayer === 'A' && g.challenge) {
-    g.challenge.damagedDuringChallengerTurn = true;
-  }
+  // ⚠️ 本函数只表示「**生命下降**」（任何原因，含 033 抹零/直接设 0），**不代表「受到伤害」**。
+  //    Z05「绝境天神」的"额外投骰"只认伤害/真伤 → 标记在 `applyLifeLoss` 置位（见 combat.ts）。
   // T13「远见」：**第一个**仍存活、且生命降为 ≤20 的玩家 → 全局只记一次；猜对者排队发奖。
   //   死亡（生命 ≤0 → 游戏结束）不计入、不发奖（用户裁定）；L04 重开不清除（生命继承）。
   if (

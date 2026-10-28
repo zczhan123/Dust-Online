@@ -466,8 +466,9 @@ export interface GameState {
     caiyuliuHits?: number;
     /** Z03「拔城」：**本传奇回合内**已"发动"过的技能 id（每回合清；用于"既没发动 X 也没发动 Y"判定） */
     firedThisTurn?: string[];
-    /** Z05「绝境天神」：「**上个挑战者的回合**」里，传奇（B）是否受到过伤害 → 本回合额外投 2 个驱动骰。
-     *  在 `noteLifeDrop` 里置位（A 的回合、受伤者为 B）；`runLegendTurn` 读取后清零。 */
+    /** Z05「绝境天神」：「**上个挑战者的回合**」里，传奇（B）是否受到过**伤害** → 本回合额外投 2 个驱动骰。
+     *  只在 `applyLifeLoss`（攻击伤害 / 真实伤害）里置位（A 的回合、受伤者为 B）；`runLegendTurn` 读取后清零。
+     *  **非伤害的生命下降**（033 抹零、遍野残杀、z11-2 抹零）只走 `noteLifeDrop`（L11/T13），不置位本标记。 */
     damagedDuringChallengerTurn?: boolean;
     /** Z06「漆黑死神」黑白指示物当前面（战斗开始＝`'black'`；传奇回合结束翻面）。技能按 `color` 决定是否发动 */
     token?: 'black' | 'white';
