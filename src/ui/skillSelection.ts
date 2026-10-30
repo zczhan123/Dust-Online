@@ -16,6 +16,8 @@ export type SelectStep =
       validate?: (dice: { id: string; value: number; kind: DiceKind }[]) => { ok: boolean; hint?: string };
       /** 本步是「使用/消耗」的支付（走 paySlots）→ 034 破障的存放骰也可选；「弃置/移动」类禁开 */
       allowArtifact?: boolean;
+      /** Z12「不动菩提」：本步不是"使用/消耗/弃置"（如移动/改点/置换源骰）→ 不按封锁过滤 */
+      ignoreLock?: boolean;
     }
   | { kind: 'option'; label: string; options: { value: string; label: string }[] }
   | { kind: 'number'; label: string; min: number; max: number; fmt?: (n: number) => string }
@@ -196,6 +198,7 @@ function swordCostSteps(
         max: Math.min(2 * room, 2 * Math.floor(sources / 2)),
         filter: (d) => !real.includes(d.id),
         allowArtifact: true,
+        ignoreLock: true,
         validate: (ds) =>
           ds.length % 2 === 0
             ? { ok: true, hint: ds.length ? `${ds.length / 2} 组置换（视为 5 点）` : '不置换' }
@@ -212,6 +215,7 @@ function swordCostSteps(
         max: needDice,
         filter: (d) => !real.includes(d.id),
         allowArtifact: true,
+        ignoreLock: true,
       });
     }
   }
@@ -414,7 +418,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     steps: ({ state, player, chosenDice }) => {
       const first = chosenDice[0]?.[0];
       const steps: SelectStep[] = [
-        { kind: 'dice', label: '选择要点数下降的能力骰（恰好 1 颗，点数≥2）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1, filter: (d) => d.value >= 2 },
+        { kind: 'dice', label: '选择要点数下降的能力骰（恰好 1 颗，点数≥2）', owner: 'self', areas: ['attack', 'defense', 'meditation'], min: 1, max: 1, filter: (d) => d.value >= 2, ignoreLock: true },
       ];
       if (first) {
         const die = KINDS.flatMap((k) => state.players[player].areas[k]).find((d) => d.id === first);
@@ -681,6 +685,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         areas: ['meditation'],
         min: 1,
         max: Math.min(3, state.players[player].areas.meditation.length),
+        ignoreLock: true,
       },
     ],
     buildParams: ({ chosenDice, options }) => ({ to: options[0], meditationDieIds: chosenDice[1] ?? [] }),
@@ -705,12 +710,13 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     steps: () => [
       {
         kind: 'dice',
-        label: '选择要变更的己方「1 点」能力骰（0–2 颗，可不选）',
+        label: '选择要改点的自己「1 点」能力骰（0–2 颗，可不选）',
         owner: 'self',
         areas: KINDS,
         min: 0,
         max: 2,
         filter: (d) => d.value === 1,
+        ignoreLock: true,
       },
     ],
     buildParams: ({ chosenDice }) => ({ targetDieIds: chosenDice[0] ?? [] }),
@@ -735,11 +741,12 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
     steps: () => [
       {
         kind: 'dice',
-        label: '选择要移动到攻击骰区的冥想骰（1–2 颗，保留点数）',
+        label: '选择要移动的己方冥想骰（1–2 颗，用于抵挡）',
         owner: 'self',
         areas: ['meditation'],
         min: 1,
         max: 2,
+        ignoreLock: true,
       },
     ],
     buildParams: () => ({}),
@@ -938,7 +945,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
   // 023 蛇蝎·共振（启动）：先选我方要重掷的 1 颗骰（之后的①/②在待决策里选）
   'shexie.gongzhen': {
     steps: () => [
-      { kind: 'dice', label: '选择你要重掷的 1 颗能力骰（将按新点数落入对应区域）', owner: 'self', areas: KINDS, min: 1, max: 1 },
+      { kind: 'dice', label: '选择你要重掷的 1 颗能力骰（将按新点数落入对应区域）', owner: 'self', areas: KINDS, min: 1, max: 1, ignoreLock: true },
     ],
     buildParams: ({ chosenDice }) => ({ dieId: chosenDice[0]?.[0] }),
   },
@@ -997,7 +1004,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
             { value: 'opponent', label: '对方的能力骰' },
           ],
         },
-        { kind: 'dice', label: '选择要移动的 1 颗能力骰', owner: sideChoice, areas: KINDS, min: 1, max: 1 },
+        { kind: 'dice', label: '选择要移动的 1 颗能力骰', owner: sideChoice, areas: KINDS, min: 1, max: 1, ignoreLock: true },
       ];
       const pickedId = chosenDice[1]?.[0];
       const currentKind = pickedId
@@ -1056,6 +1063,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
           areas: [s.kind],
           min: need,
           max: need,
+          ignoreLock: true,
         });
       }
       return steps;
@@ -1080,7 +1088,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
             { value: 'opponent', label: '对方的能力骰' },
           ],
         },
-        { kind: 'dice', label: `选择要变为 ${value} 点的 1 颗能力骰（保留原区域）`, owner, areas: KINDS, min: 1, max: 1 },
+        { kind: 'dice', label: `选择要变为 ${value} 点的 1 颗能力骰（保留原区域）`, owner, areas: KINDS, min: 1, max: 1, ignoreLock: true },
       ];
     },
     buildParams: () => ({}),
@@ -1148,7 +1156,7 @@ export const SKILL_SELECTION: Record<string, SkillSelection> = {
         { value: 'meditation', label: '冥想骰区' },
       ];
       return [
-        { kind: 'dice' as const, label: '选择要移动的 1 个能力骰', owner: 'self' as const, areas: KINDS, min: 1, max: 1 },
+        { kind: 'dice' as const, label: '选择要移动的 1 个能力骰', owner: 'self' as const, areas: KINDS, min: 1, max: 1, ignoreLock: true },
         {
           kind: 'option' as const,
           label: '移动到哪个区域',

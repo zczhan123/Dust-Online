@@ -286,6 +286,8 @@ interface Ctx {
     isSelected: (id: string) => boolean;
     toggle: (d: Die) => void;
     filter?: (d: Die) => boolean;
+    /** Z12「不动菩提」：选骰目的不是使用/消耗/弃置（移动/改点/置换源/分配）→ 不按封锁过滤 */
+    ignoreLock?: boolean;
   } | null;
   /** 界面偏好 */
   prefs: Prefs;
@@ -1259,10 +1261,13 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     } else if (ap) {
       // 选骰面板开启：仅“可选集合已确定”的骰区可点（与面板骰片共享同一选中状态）
       if (areaPickable && (!ap.filter || ap.filter(d))) {
-        die.classList.add('clickable');
-        die.title = '点击选择该骰';
-        if (ap.isSelected(d.id)) die.classList.add('selected');
-        die.addEventListener('click', () => ap.toggle(d));
+        const locked = !ap.ignoreLock && isValueLocked(ctx.state, player.id, d.value);
+        if (!locked) {
+          die.classList.add('clickable');
+          die.title = '点击选择该骰';
+          if (ap.isSelected(d.id)) die.classList.add('selected');
+          die.addEventListener('click', () => ap.toggle(d));
+        }
       }
     } else if (challengeDieInChipPool(ctx, d, player)) {
       // 挑战代决·骰片选择：骰区对应骰子与面板骰片**双入口**（共享同一选中状态）
@@ -1290,7 +1295,8 @@ function areaBox(kind: DiceKind, player: PlayerState, ctx: Ctx): HTMLElement {
     } else if (ctx.selectionStep) {
       const step = ctx.selectionStep;
       if (step.kind === 'dice' && ctx.selectionOwner === player.id && step.areas.includes(kind)) {
-        const selectable = !isValueLocked(ctx.state, player.id, d.value) && (!step.filter || step.filter(d));
+        const locked = !step.ignoreLock && isValueLocked(ctx.state, player.id, d.value);
+        const selectable = !locked && (!step.filter || step.filter(d));
         if (selectable) {
           die.classList.add('clickable');
           die.title = '点击选择该骰';
@@ -3743,7 +3749,7 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
       if (sel.currentSel.has(d.id)) {
         die.classList.add('selected');
       }
-      if (!isValueLocked(ctx.state, ownerId, d.value) && (!step.filter || step.filter(d))) {
+      if ((step.ignoreLock || !isValueLocked(ctx.state, ownerId, d.value)) && (!step.filter || step.filter(d))) {
         die.classList.add('clickable');
         die.addEventListener('click', () => toggleSelDie(ctx.hooks, step, d));
       } else {
@@ -3765,7 +3771,7 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
         chip.textContent = String(h.value);
         chip.title = `「金刚·破障」：神器上存放的骰（${h.value} 点，视为${KIND_NAMES[k]}骰）`;
         if (sel.currentSel.has(h.id)) chip.classList.add('selected');
-        if (!isValueLocked(ctx.state, ownerId, h.value) && (!step.filter || step.filter(hd))) {
+        if ((step.ignoreLock || !isValueLocked(ctx.state, ownerId, h.value)) && (!step.filter || step.filter(hd))) {
           chip.classList.add('clickable');
           chip.addEventListener('click', () => toggleSelDie(ctx.hooks, step, hd));
         } else {
@@ -6542,6 +6548,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         kinds: ['attack', 'defense', 'meditation'],
         isSelected: (id: string) => cp.dieIds.includes(id),
         toggle: (d: Die) => toggleConvertDie(hooks, d),
+        ignoreLock: true, // 010 置换源骰不算使用/消耗/弃置（有效 5 点由 convertAvailable 另行封锁）
       };
     }
     const fp = hooks.ui.fengmangPick;
@@ -6564,6 +6571,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         filter: (d: Die) => !qz.preview && !used.has(d.id),
         isSelected: (id: string) => qz.selected.includes(id),
         toggle: (d: Die) => toggleQuanzhiDie(hooks, d),
+        ignoreLock: true, // 分配新获得的骰到区域，不是使用/消耗/弃置
       };
     }
     if (selectionStep && selectionStep.kind === 'dice' && selectionOwner) {
@@ -6574,6 +6582,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         filter: step.filter ? (d: Die) => step.filter!(d) : undefined,
         isSelected: (id: string) => hooks.ui.selection?.currentSel.has(id) ?? false,
         toggle: (d: Die) => toggleSelDie(hooks, step, d),
+        ignoreLock: step.ignoreLock,
       };
     }
     return null;
