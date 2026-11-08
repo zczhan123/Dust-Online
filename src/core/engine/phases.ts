@@ -6,6 +6,7 @@ import { logLine, pname, vals, valsSorted } from './log';
 import { dealTrueDamage } from './combat';
 import { noteYuluoDiceConsumed, offerAdapt } from './effects';
 import { fxPush, fxSkillFired } from './fx';
+import { rosterOf } from '../model/participants';
 
 /** 补充阶段：补充 min(速度, 意志 - 现有骰数) 颗随机骰，按分布落区 */
 export function refillPhase(g: GameState, player: PlayerId, rng: Rng): number {
@@ -68,7 +69,7 @@ export function doReroll(g: GameState, player: PlayerId, dieIds: string[], rng: 
   // 动效旁路：把"本次重掷了哪几颗"报给界面（无论点数是否变化，一律播翻滚动画）
   fxPush({ kind: 'reroll', player, dieIds: [...dieIds] });
   // 027 寒光·凛冽之音（充能）：持有者的下个尘起阶段开始前，任何人重掷都会使「被重掷方」受伤
-  const holders = (['A', 'B'] as PlayerId[]).filter((id) => g.rerollPunish[id]);
+  const holders = rosterOf(g).filter((id) => g.rerollPunish[id]);
   if (holders.length === 0) return;
   if (g.phase === 'gameOver') return;
   // 伤害来源 = 027 持有者；若持有者恰为「被重掷方」（自掷）则取另一方（保证「来自对方」的 009 判定正确）

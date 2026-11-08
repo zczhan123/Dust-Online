@@ -1,11 +1,11 @@
-import type { Artifact, DiceKind, GameState, PendingAttack, PlayerId, PlayerState } from '../model/types';
+import type { Artifact, DiceKind, GameState, Pending, PendingAttack, PlayerId, PlayerState } from '../model/types';
 import { hasActiveSkill, skillActive, skillUseKey } from './skill-state';
-import { pumpPending, queuePending } from './pending';
+import { pumpPending, queueDunwuPulseForAction, queuePending } from './pending';
 import { runChargeSkill } from './charge';
 import { chargeLayerUp } from './dustRise';
 import { paySlots, heal, canPayCosts, checkLifeTens, noteYuanwu, noteLifeDrop, abilityDicePool, type SlotFill } from './effects';
 import { logLine, pname } from './log';
-import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine } from './fx';
+import { fxPush, fxTacticFired, fxSkillFired, fxTrueLine, fxCurrentSource } from './fx';
 import {
   addLegendDefense,
   fxLegendSkill,
@@ -18,6 +18,7 @@ import {
   legendLegacyName,
 } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
+import { lifeOf, resolveEnemy, rosterOf, setLife } from '../model/participants';
 
 /** 按技能 key 找到拥有它的神器（避免硬编码神器编号） */
 export function artifactWithSkill(p: PlayerState, key: string): Artifact | undefined {
@@ -26,7 +27,7 @@ export function artifactWithSkill(p: PlayerState, key: string): Artifact | undef
 
 /** 战术牌 T16「潜伏」是否在场（**全局**：任一玩家持有即生效）。 */
 export function t16Active(g: GameState): boolean {
-  return (['A', 'B'] as PlayerId[]).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.key === 'qianfu');
+  return rosterOf(g).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.key === 'qianfu');
 }
 /** T16「潜伏」：当前回合玩家在自己的**第一个回合** → 双方均不能进行攻击。 */
 export function attacksBanned(g: GameState): boolean {
@@ -57,6 +58,24 @@ function applyWuguang(p: PlayerState, point: number): number {
 }
 
 /**
+ * 028 天罚 / A05 异相天罚 的「本回合攻击修正」→ **卡名**（提示栏与战报共用，禁止再按 blockKind 硬编码）。
+ * 白昼之火 / 深空之火 都是"只能用冥想骰抵挡"，陨落 是"只能用攻击骰抵挡"。
+ */
+export const TIANFA_SKILL_NAME: Record<string, string> = {
+  'tianfa.bairi': '白昼之火',
+  'tianfa.yunluo': '陨落',
+  'tianfa.alt.shenkong': '深空之火',
+  'tianfa.alt.yunluo': '陨落',
+};
+
+/** 该玩家本回合的天罚卡名（无 → null）。A05 的深空之火 不能写成白昼之火（真实 bug 2026-11-07）。 */
+export function tianfaSkillName(g: GameState, player: PlayerId): string | null {
+  const t = g.tianfa[player];
+  if (!t) return null;
+  return TIANFA_SKILL_NAME[t.key] ?? (t.blockKind === 'attack' ? '陨落' : '白昼之火');
+}
+
+/**
  * 「攻击点数被改判」的说明文案（供**提示栏 + 战报**写明"X 点骰子被「技能」改为 Y 点"）。
  * 来源：028「白昼之火/陨落」（视为 6）、L06「无光领域」（±1）；无改判返回 `null`。
  * ⚠️ 全模式生效（标准/轮选/构筑/挑战/联机 + 英雄面板）。
@@ -66,7 +85,9 @@ export function attackPointNote(g: GameState, pa: PendingAttack): string | null 
   const eff = pa.baseValue;
   if (raw == null || eff == null || raw === eff) return null;
   const srcs: string[] = [];
-  if (g.tianfa[pa.attacker]) srcs.push(pa.blockKind === 'attack' ? '陨落' : '白昼之火');
+  // 只有「真的把点数改判」的天罚（bairi/yunluo，带 value）才写；A05 深空之火只改抵挡类型和伤害，不改点数
+  const tf = tianfaSkillName(g, pa.attacker);
+  if (tf && g.tianfa[pa.attacker]?.value !== undefined) srcs.push(tf);
   if (g.players[pa.attacker].wuguang) srcs.push('无光领域');
   return srcs.length > 0
     ? `被${srcs.map((n) => `「${n}」`).join('、')}改为 ${eff} 点`
@@ -119,7 +140,7 @@ export function attackDamageBonus(
   }
   // 030 救赎·寰宇飞升（持续·双向）：双方各自回合的**第一次**攻击伤害 +3（FAQ 30.1.1；任一方持有并激活即生效）
   if (g.attacksThisTurn[player] === 0) {
-    for (const id of ['A', 'B'] as PlayerId[]) {
+    for (const id of rosterOf(g)) {
       if (hasActiveSkill(g.players[id], 'jiushu.huanyu')) {
         consider(3, '寰宇飞升');
         break;
@@ -251,8 +272,9 @@ export function tryYonghengQueen(g: GameState, target: PlayerId, amount: number)
   throw new YonghengQueenSignal(target);
 }
 
-export function applyLifeLoss(g: GameState, target: PlayerId, amount: number): void {
-  g.players[target].life -= amount;
+export function applyLifeLoss(g: GameState, target: PlayerId, amount: number, source: PlayerId): void {
+  if (g.rules?.lifeModel === 'perTeam') setLife(g, target, lifeOf(g, target) - amount);
+  else g.players[target].life -= amount;
   // Z05「绝境天神」：记录"**上个挑战者的回合**里，传奇（B）受到过**伤害**"（传奇回合开始时读取并清除）。
   //   只在**真实伤害/攻击伤害**的落血点 `applyLifeLoss` 置位；033 抹零、遍野残杀、z11-2 抹零等
   //   **非伤害的生命下降**只走 `noteLifeDrop`（服务 L11/T13），**不得**计入"受到伤害"。
@@ -262,7 +284,7 @@ export function applyLifeLoss(g: GameState, target: PlayerId, amount: number): v
   noteLifeDrop(g, target, amount); // L11 邪灵序曲：任何"生命减少"都计数（含伤害/真伤）
   checkLifeEnd(g);
   noteDamageTaken(g, target);
-  noteDuanexing(g, target); // L12 闻我名者断恶行：受到伤害/真伤后（gameOver 时内部直接跳过）
+  noteDuanexing(g, target, source); // L12 闻我名者断恶行：受到伤害/真伤后（gameOver 时内部直接跳过）
   checkLifeTens(g, target); // L05 复仇之灵：生命十位数变化 → 强制额外尘起
 }
 
@@ -286,13 +308,14 @@ function noteDamageTaken(g: GameState, target: PlayerId): void {
  * 决策人＝持有者本人；神上的存放骰不算攻击骰（只取对方 `areas.attack`）。
  * 用 `skillsUsedThisTurn`（键 `玩家:miyun.duanexing`）记"本回合已触发"——在**入队时**即登记，避免同回合两次受伤重复排队。
  */
-function noteDuanexing(g: GameState, target: PlayerId): void {
+function noteDuanexing(g: GameState, target: PlayerId, source: PlayerId): void {
   if (g.phase === 'gameOver') return;
   const p = g.players[target];
   if (!hasActiveSkill(p, 'miyun.duanexing')) return;
   const key = skillUseKey(target, 'miyun.duanexing');
   if (g.skillsUsedThisTurn.includes(key)) return; // 每回合最多触发 1 次
-  const oppId: PlayerId = target === 'A' ? 'B' : 'A';
+  // 自伤时 source 是本人；此时仍取"对方"（1v1 等价旧逻辑）。
+  const oppId: PlayerId = source !== target ? source : resolveEnemy(g, target);
   if (g.players[oppId].areas.attack.length === 0) return; // 无可弃的攻击骰 → 不弹（不可完成）
   // 注意：**询问时不计次数**——只有玩家接受（真正弃置对方攻击骰）才算用掉本次
   queuePending(g, { kind: 'duanexing', player: target });
@@ -302,11 +325,12 @@ function noteDuanexing(g: GameState, target: PlayerId): void {
 export function checkLifeEnd(g: GameState): void {
   if (g.phase === 'gameOver') return;
   if (legendDeathRevive(g)) return; // Z06「死即新生」：传奇生命归 0 → 复活，**不判负**
-  const a = g.players.A.life;
-  const b = g.players.B.life;
+  const teamMode = g.rules?.lifeModel === 'perTeam';
+  const a = teamMode ? (g.teams?.A?.life ?? 0) : g.players.A.life;
+  const b = teamMode ? (g.teams?.B?.life ?? 0) : g.players.B.life;
   let winner: PlayerId | null = null;
   if (a <= 0 && b <= 0) {
-    winner = g.activePlayer;
+    winner = teamMode ? ((g.teamOf?.[g.activePlayer] as PlayerId | undefined) ?? g.activePlayer) : g.activePlayer;
   } else if (a <= 0) {
     winner = 'B';
   } else if (b <= 0) {
@@ -349,7 +373,18 @@ function applyNextTurnHalving(g: GameState, player: PlayerId, pa: PendingAttack)
 }
 
 /** 支付 1 个攻击骰位发起攻击：消耗骰位，产生待结算攻击（伤害=有效点数+攻击伤害加成） */
-export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], mods?: AttackMods): void {
+/** 解析本次攻击的防守座位：2v2 必须显式传入；1v1 缺省为唯一敌人。 */
+export function defenderOf(g: GameState, pa: PendingAttack): PlayerId {
+  return pa.defender ?? resolveEnemy(g, pa.attacker);
+}
+
+export function doAttack(
+  g: GameState,
+  player: PlayerId,
+  costSlots: SlotFill[],
+  mods?: AttackMods,
+  target?: PlayerId,
+): void {
   if (g.pendingAttack) throw new Error('pending attack unresolved');
   // 战术牌 T16「潜伏」：双方各自的第一个回合内，双方均不能进行攻击
   if (attacksBanned(g)) {
@@ -361,7 +396,7 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   // 技能发起的虚拟攻击（013 电刑 / A01 不败之王 等）没有实体攻击骰 → 不受影响。
   const loneLastAttackDie =
     g.players[player].areas.attack.length === 1 && hasActiveSkill(g.players[player], 'nisa.wujinzhulie');
-  const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, undefined, 'attack');
+  const eff = paySlots(g, player, [{ kind: 'attack' }], costSlots, 'attack');
   // 025 屠虎·奇袭：本次攻击用「视为攻击骰」的骰发起 → 弹「奇袭」技能名
   if (eff.some((d) => d.source === 'treated')) fxSkillFired(g, player, 'tuohu.qixi');
   const effDie = eff[0];
@@ -378,10 +413,22 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   // Z10「迟来的正义」：任一方生命 <10 时，传奇的攻击伤害＝**攻击点数 ×2**（**不加其它加成**，遵黄金法则）
   const lateJustice = player === 'B' && legendLateJustice(g);
   const value = lateJustice ? attackPoint * 2 : attackPoint + bonus;
+  const defender: PlayerId = target ?? resolveEnemy(g, player);
+  // 「不可抵挡」的来源（只供提示栏）：022 处刑通牒 / L07 无尽追猎 / 001 中央突破
+  const unblockableLabel =
+    mods?.forceUnblockable === true
+      ? '处刑通牒'
+      : loneLastAttackDie
+        ? '无尽追猎'
+        : g.unblockableThisTurn
+          ? '中央突破'
+          : undefined;
   const pa: PendingAttack = {
     attacker: player,
+    defender,
     value,
     unblockable: g.unblockableThisTurn || mods?.forceUnblockable === true || loneLastAttackDie,
+    ...(unblockableLabel ? { unblockableLabel } : {}),
     physical: true,
     sourceDieId: effDie.realIds[0],
     sourceValue: effDie.value,
@@ -394,7 +441,6 @@ export function doAttack(g: GameState, player: PlayerId, costSlots: SlotFill[], 
   applyNextTurnHalving(g, player, pa);
   // 025 屠虎·横贯（持续）：记入本回合攻击次数（即使随后被「不动菩提」取消）
   g.attacksThisTurn[player] += 1;
-  const defender: PlayerId = player === 'A' ? 'B' : 'A';
   const buffText = bonus > 0 ? `（攻击伤害+${bonus}，共 ${pa.value} 点）` : '';
   // 战报要写明"点数被改判"（028「视为6」/ L06 ±1）——否则"使用 6 点攻击骰"会和骰面矛盾
   const pointNote = attackPointNote(g, pa);
@@ -420,7 +466,7 @@ function parkAttack(g: GameState, pa: PendingAttack): void {
 
 /** 攻击已停住后：011 顿悟·灵能屏障 触发（对方可消耗 1 冥想骰使伤害减半）。 */
 export function maybeBarrier(g: GameState, pa: PendingAttack): void {
-  const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defender: PlayerId = defenderOf(g, pa);
   if (
     g.pending === null &&
     hasActiveSkill(g.players[defender], 'dunwu.barrier.trigger') &&
@@ -447,7 +493,7 @@ export function commitAttack(g: GameState, pa: PendingAttack): void {
  */
 function maybePutiAttack(g: GameState, pa: PendingAttack): boolean {
   if (!pa.sourceDieId) return false; // 没有实体攻击骰 → 不算"使用攻击骰"
-  const defender: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defender: PlayerId = defenderOf(g, pa);
   const puti = artifactWithSkill(g.players[defender], 'jingang.puti.trigger');
   const point = pa.baseValue ?? pa.value;
   if (
@@ -479,7 +525,7 @@ export function virtualAttack(
   player: PlayerId,
   baseValue: number,
   source?: { skill: string; owner: PlayerId },
-  opts?: { unblockable?: boolean },
+  opts?: { unblockable?: boolean; defender?: PlayerId },
 ): void {
   // 战术牌 T16「潜伏」：双方各自的第一个回合内，双方均不能进行攻击（技能发起的虚拟攻击同样被禁）
   if (attacksBanned(g)) {
@@ -496,8 +542,10 @@ export function virtualAttack(
   const lateJustice = player === 'B' && legendLateJustice(g);
   g.pendingAttack = {
     attacker: player,
+    defender: opts?.defender ?? resolveEnemy(g, player),
     value: lateJustice ? point * 2 : point + base.value,
     unblockable: opts?.unblockable ?? g.unblockableThisTurn,
+    ...(g.unblockableThisTurn ? { unblockableLabel: '中央突破' } : {}),
     physical: false,
     baseValue: point,
     rawPoint: baseValue,
@@ -516,15 +564,17 @@ export function virtualAttack(
  * - 支付防御骰位 = 抵挡（伤害 0；021 满计数时例外，仍造成一半伤害）
  * - 不给 / 不可抵挡 = 造成伤害；若防守方有 020「兽魂」持续且计数 ≥1，改由**攻击方**决定是否取消（延后结算）
  */
-export function resolveBlock(g: GameState, costSlots?: SlotFill[]): void {
+export function resolveBlock(g: GameState, costSlots?: SlotFill[], by?: PlayerId): void {
   const pa = g.pendingAttack;
   if (!pa) throw new Error('no pending attack');
-  const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defenderId: PlayerId = defenderOf(g, pa);
+  if (g.rules?.id === '2v2' && by === undefined) throw new Error('block actor required');
+  if (by !== undefined && by !== defenderId) throw new Error('only the defender can block');
 
   if (!pa.unblockable && costSlots && costSlots.length > 0) {
     // 028 天罚：若本次攻击限制了抵挡骰类型（白昼之火=冥想 / 陨落=攻击），则按该类型支付
     const blockKind = pa.blockKind ?? 'defense';
-    const eff = paySlots(g, defenderId, [{ kind: blockKind }], costSlots, undefined, 'defense');
+    const eff = paySlots(g, defenderId, [{ kind: blockKind }], costSlots, 'defense');
     const kindCn = blockKind === 'attack' ? '攻击' : blockKind === 'meditation' ? '冥想' : '防御';
     logLine(g, `${pname(defenderId)} 用 ${eff[0].value} 点${kindCn}骰抵挡了攻击`);
     // 034 金刚·不动菩提（触发）：攻击方可用「神器上同点数存放骰」取消对方这次抵挡
@@ -645,13 +695,13 @@ export function settleAttack(
     fxLegendSkill(g, 'z09-x');
     o = { ...o, damageDealt: dmgCap };
   }
-  const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defenderId: PlayerId = defenderOf(g, pa);
   const defender = g.players[defenderId];
   if (o.applyDamage && (o.damageDealt > 0 || !o.blocked)) {
     // L11 永恒女王：若本次**攻击伤害**会致死 → 拦截（抛信号，由 applyAction 收尾"取消一切 + 开新回合"）
     if (o.damageDealt > 0) tryYonghengQueen(g, defenderId, o.damageDealt);
     const before = defender.life;
-    applyLifeLoss(g, defenderId, o.damageDealt);
+    applyLifeLoss(g, defenderId, o.damageDealt, pa.attacker);
     logLine(
       g,
       o.blocked
@@ -723,7 +773,7 @@ export function settleAttack(
 
 /** 一次攻击的收尾（被抵挡/未抵挡皆可）：扣血、事件点、028×013 电刑、推进多段队列 */
 export function finalizeAttackResolution(g: GameState, pa: PendingAttack, blocked: boolean): void {
-  const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+  const defenderId: PlayerId = defenderOf(g, pa);
   let damageDealt = pa.value;
   // 「被抵挡」= 用了防御骰（一个事实）；与「伤害=0」是两回事。唯一例外：021 半伤为 0 时按 FAQ 21.1.7 不算被抵挡
   let blockedForTriggers = blocked;
@@ -818,6 +868,12 @@ function shouhunInfo(g: GameState, player: PlayerId): ShouhunInfo | null {
  * 一次攻击结算完成后的**事件点**（供正常结算与「兽魂」延后结算共用）：
  * 造成伤害后（冥界行走/裁雨流/尘起）、被抵挡后（锋芒）、使用攻击骰后（电刑/雷暴）。
  */
+/** 2v2 攻守标记：每次攻击结算后翻面；1v1 不设置 stance，不受影响。 */
+export function flipStance(g: GameState): void {
+  if (g.rules?.id !== '2v2' || !g.stance) return;
+  g.stance = g.stance === 'attackPicks' ? 'defensePicks' : 'attackPicks';
+}
+
 export function afterAttackResolved(
   g: GameState,
   pa: PendingAttack,
@@ -828,7 +884,7 @@ export function afterAttackResolved(
   // 注意：触发看 **伤害**（damageDealt>0）、匹配看 **点数**（baseValue ?? value）——两者是不同概念。
   if (res.damageDealt > 0 && hasActiveSkill(g.players[pa.attacker], 'zoray.wufaraoshu')) {
     const atkPoint = pa.baseValue ?? pa.value;
-    const defenderId2: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+    const defenderId2: PlayerId = defenderOf(g, pa);
     if (g.players[defenderId2].areas.defense.some((d) => d.value === atkPoint)) {
       queuePending(g, { kind: 'wufaraoshu', player: pa.attacker, value: atkPoint });
     }
@@ -838,7 +894,7 @@ export function afterAttackResolved(
   // L03 传奇面板·统御战场（持续）：受到**攻击造成的伤害**后 → 该玩家的「孤王」充能 +1
   // （封顶 chargeReq；满 3 不再加、也不触发充能效果）
   if (res.damageDealt > 0) {
-    const defenderId: PlayerId = pa.attacker === 'A' ? 'B' : 'A';
+    const defenderId: PlayerId = defenderOf(g, pa);
     const def = g.players[defenderId];
     if (hasActiveSkill(def, 'batton.tongyuzhancang')) {
       // 「孤王」＝第三列：009 用 `guwang.charge`、异相 A01 用 `guwang.alt.charge`——两种 key 都要认
@@ -931,18 +987,25 @@ export function afterAttackResolved(
   }
   // 004 锋芒·触发：你的攻击被防御骰抵挡后
   if (res.blocked && hasActiveSkill(atk, 'buxiang.fengmang.trigger')) {
-    queuePending(g, { kind: 'fengmang', player: pa.attacker, defenderId: pa.attacker === 'A' ? 'B' : 'A', value: pa.value });
+    queuePending(g, { kind: 'fengmang', player: pa.attacker, defenderId: defenderOf(g, pa), value: pa.value });
   }
   // 025 屠虎·横贯·触发：你的攻击被抵挡后，可弃置对方 1 颗**点数小于该攻击**的能力骰
   // （FAQ 25.2.1：必须严格小于，不能相同；FAQ 25.2.3：比较的是攻击点数，不含伤害修正）
   if (res.blocked && hasActiveSkill(atk, 'tuohu.hengguan.trigger')) {
     const cmp = pa.baseValue ?? pa.value;
-    const opp = g.players[pa.attacker === 'A' ? 'B' : 'A'];
+    const opp = g.players[defenderOf(g, pa)];
     const hasTarget = (['attack', 'defense', 'meditation'] as const).some((k) =>
       opp.areas[k].some((d) => d.value < cmp),
     );
     // 无合格目标时不可发动（不弹待决策）
-    if (hasTarget) queuePending(g, { kind: 'hengguan', player: pa.attacker, value: cmp });
+    if (hasTarget) {
+      queuePending(g, {
+        kind: 'hengguan',
+        player: pa.attacker,
+        value: cmp,
+        target: defenderOf(g, pa),
+      });
+    }
   }
   // 013 鸣雷·触发式询问（在攻击结算完成的这一刻）
   // 不再用"是否处于多段攻击队列"做一刀切抑制：
@@ -989,11 +1052,16 @@ export function afterAttackResolved(
   if (g.mode === 'challenge' && g.challenge?.xueji && pa.attacker === 'B' && !g.virtualQueue && !g.attackQueue) {
     g.challenge.xueji = false;
   }
+  // 攻守标记：攻击流程走完即翻面（被抵挡/取消/0 伤害也算）
+  flipStance(g);
 }
 
 /** 若存在多段攻击队列且当前无待决策/待抵挡，则发起下一段虚拟攻击 */
 export function pumpAttackQueue(g: GameState): void {
   pumpPending(g); // 先弹出排队中的待决策/018 强制必杀，保证「攻击与攻击之间可中断」
+  // 011「灵能脉冲·触发」：本动作刚发生「技能消耗」→ **必须先问脉冲，再开打**（013 电刑：脉冲先于三连击）。
+  // 幂等（处理完即清空计数器）；若生成了脉冲，下面的守卫会挡住本次攻击排队。
+  queueDunwuPulseForAction(g);
   if (g.pendingAttack || g.pending || g.phase === 'gameOver') return;
   // T16「潜伏」：本回合禁攻 → **一次性清空多段队列**（否则"被禁的攻击"会残留队列 → `challengeStep` 要求队列为空 → 回合卡死 + 界面白等一拍）
   if (attacksBanned(g)) {
@@ -1006,9 +1074,10 @@ export function pumpAttackQueue(g: GameState): void {
   const q = g.attackQueue;
   if (q) {
     const value = q.values.shift()!;
+    const defender = q.defenders?.shift();
     if (q.values.length === 0) g.attackQueue = null;
     logLine(g, `${pname(q.player)} 「电刑」第 ${value} 点攻击（依次结算）`);
-    virtualAttack(g, q.player, value, { skill: '电刑', owner: q.player });
+    virtualAttack(g, q.player, value, { skill: '电刑', owner: q.player }, { defender });
     return;
   }
   // A01 不败之王：技能发起的多次攻击，**攻击者可不同**（你先 5 点 → 对方 3 点 ×2）
@@ -1017,7 +1086,7 @@ export function pumpAttackQueue(g: GameState): void {
     const next = vq.shift()!;
     if (vq.length === 0) g.virtualQueue = null;
     logLine(g, `${pname(next.attacker)} 「${next.label}」：以 ${next.value} 点发起攻击（依次结算）`);
-    virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner }, { unblockable: next.unblockable });
+    virtualAttack(g, next.attacker, next.value, { skill: next.label, owner: next.owner }, { unblockable: next.unblockable, defender: next.defender });
     // 挑战模式「枭首」：本条攻击用的是**攻击骰区里的那颗真骰**。
     // ⚠️ 这里**不删**它——骰子留在区里（"用掉"发生在**这次攻击结算后**，见 settleAttack）：
     //   于是"新骰飞进来"与"旧骰还并排在区里"能同帧存在，界面再按"先进后出"演；
@@ -1078,23 +1147,42 @@ export function dealTrueDamage(
     !opts?.skipCibei &&
     source !== target &&
     amount > 0 &&
-    g.pending === null &&
     (g.phase as string) !== 'gameOver' &&
     TACTIC_BY_ID[g.players[source].tactic ?? '']?.key === 'cibei' &&
     !g.players[source].tacticOnceUsed
   ) {
-    g.pending = { kind: 'ciBei', player: source, target, amount };
+    // ⚠️ 板上已挂着别的（例如"正在结算的这个技能自己"）→ **排队**，不能静默跳过；
+    // 跳过会让这 2 点真伤悄悄落地、永远不询问（真实事故 2026-11-07：锋芒 / 清算 / 技能内重掷）。
+    const pend: Pending = { kind: 'ciBei', player: source, target, amount };
+    if (g.pending === null) g.pending = pend;
+    else queuePending(g, pend);
     return; // 伤害延后到决策解决时结算
   }
-  // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消（仅当当前无待决策）
+  // 009 高塔铁幕触发：受到**来自对方**的真实伤害时，若有防御骰可消耗 1 个取消。
+  // 同样：板上被占时**排队**（等当前结算完再问），不许静默跳过。
   if (
     source !== target &&
-    g.pending === null &&
-    g.phase !== 'gameOver' &&
+    (g.phase as string) !== 'gameOver' &&
     hasActiveSkill(p, 'guwang.trigger') &&
     canPayCosts(g, target, { defense: 1 }, { held: true })
   ) {
-    g.pending = { kind: 'guwangCancel', player: target, amount };
+    // 把"谁发动了什么"记进待决策：玩家可能下一个动作才点取消，那时 curSource 已经清了。
+    const card = fxCurrentSource();
+    const sourceCard = !card
+      ? {}
+      : 'tacticId' in card
+        ? { sourceCard: { player: card.player, tacticId: card.tacticId } }
+        : {
+            sourceCard: {
+              player: card.player,
+              artifactId: card.artifactId,
+              side: card.side,
+              ...(card.skillKey ? { skillKey: card.skillKey } : {}),
+            },
+          };
+    const pend: Pending = { kind: 'guwangCancel', player: target, amount, source, ...sourceCard };
+    if (g.pending === null) g.pending = pend;
+    else queuePending(g, pend);
     return; // 伤害延后到决策解决时结算
   }
   // L06 死即新生（持续）：**因自己造成的伤害**死亡 → 改为生命重设 13（上限不变、不判负、游戏继续）
@@ -1108,7 +1196,7 @@ export function dealTrueDamage(
     // L01 断苇一斩：真伤**实际落到生命上**时，记"造成伤害"（来源＝对方；仅其回合内计）
     if (source !== target && g.activePlayer === source) g.players[source].dealtDamageThisTurn = true;
     tryYonghengQueen(g, target, amount); // L11 永恒女王：**真伤**致死者同样触发
-    applyLifeLoss(g, target, amount);
+    applyLifeLoss(g, target, amount, source);
   }
   // T14「赴火」：受到"来源＝对方"的真实伤害 → 反弹等量真伤（自伤/游戏结束自动跳过）
   noteFirstDamageFromOpponent(g, target, amount, source);
@@ -1119,16 +1207,21 @@ export function dealTrueDamage(
 }
 
 /** 结算被延后的真实伤害（由 guwangCancel 决策在放弃取消时调用） */
-export function applyDeferredTrueDamage(g: GameState, target: PlayerId, amount: number): void {
+export function applyDeferredTrueDamage(
+  g: GameState,
+  target: PlayerId,
+  amount: number,
+  source: PlayerId,
+): void {
   const p = g.players[target];
   const before = p.life;
   // L01 断苇一斩：延后的真伤实际结算时，记"造成伤害"（来源＝当前回合玩家）
   if (g.activePlayer !== target) g.players[g.activePlayer].dealtDamageThisTurn = true;
   tryYonghengQueen(g, target, amount); // L11 永恒女王：延后的真伤同样按"真实伤害"处理
-  applyLifeLoss(g, target, amount);
+  applyLifeLoss(g, target, amount, source);
   logLine(g, `${pname(target)} 受到 ${amount} 点真实伤害（生命 ${before} → ${p.life}）`);
-  // 009 延后的真伤恒为"来自对方" → T14 可反弹（source＝目标玩家）
-  noteFirstDamageFromOpponent(g, target, amount, target === 'A' ? 'B' : 'A');
+  // T14「赴火」：受到"来源＝对方"的真实伤害 → 反弹等量真伤（自伤/游戏结束自动跳过）
+  noteFirstDamageFromOpponent(g, target, amount, source);
   // T17「诱敌」：同样可挂"移动最多 3 颗骰"的可选待决策
-  noteYoudiAfterDamage(g, target, amount, target === 'A' ? 'B' : 'A');
+  noteYoudiAfterDamage(g, target, amount, source);
 }

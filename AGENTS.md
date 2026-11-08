@@ -3,6 +3,79 @@
 《尘起时刻》网页版 Demo。TypeScript + Vite + Vitest + 原生 DOM/CSS。
 引擎在 `src/core/`（零 UI 依赖，ui → core 单向）；界面在 `src/ui/`。
 
+## 2v2 UI 铁律（最高优先，2026-11-05 用户强制）
+
+1. **1v1 是唯一 UI 真源。** 2v2 不另做一套；只保留四座位、目标、投票、团队生命、攻守标记、2v2 布局。
+2. **禁止第二套复制实现。** 卡牌、详情、设置、阶段、动作文字、技能按钮、选骰、尘起、战斗动画、战报，都必须接 1v1 共享实现。
+3. **不做 checkpoint、不做备份、不搞回退方案。** 出问题就修，不靠回退。
+4. **不以“结构像了”为完成。** 以 1v1 的实际 DOM、文案、交互顺序、动画时序为准。
+5. **先修用户看得见的细节，再谈大重构。** 共享只是实现手段，不是先造框架。
+6. **1v1 行为不能改。** 抽共享时保持 1v1 DOM、CSS、交互、时序不变。
+7. **尘印按规则书。** A1 先手时尾位 B2；B1 先手时尾位 A1。先验证引擎，再修渲染，不写死 B2。
+8. **卡图详情必须和 1v1 一致。** 属性、充能、计数、分布、实时技能状态、激活侧、特典提示、定位、关闭方式都要一致。
+9. **阶段动画文字必须和 1v1 一致。** 有“回合开始”，跨阶段按顺序补播，等骰子/支付/攻击动画播完再播。
+10. **设置和手动缩放必须和 1v1 一致。** 不保留 2v2 私有设置副本。
+11. **技能按钮必须去重。** 按 `artifactId:side`，不能把 legal 里每个候选动作都渲染成按钮。
+12. **技能选骰必须是骰片。** 用 `.pay-die`，不能用 `.option-btn` 文本代替。
+13. **尘起必须接完整 1v1 flow。** 选侧、支付、尘印、置换、免费尘起、取消，不能只做一半。
+14. **没有真实骰子变化时，不允许布局 FLIP。** 跳过、推进阶段、开设置、切按钮时，骰子不能天女散花。
+15. **重掷必须走完整时序。** 旧位 → 中间 → 停顿/翻面 → 飞回新区域；禁止手写静态影子层。
+16. **攻方选择顺序固定。** 选攻击骰 → 选目标 → 确定/取消；确认条必须写明“用哪颗骰打谁”。
+17. **守方流程固定。** 攻击骰停中间 → 切守方视觉 → 投票 → 切回攻方 → 攻击骰/防御骰并排消失 → 黑线。
+18. **投票按钮玩家色加在按钮本身。** 不是只染文字。
+19. **战报只用一套。** 用真实 `turn/phase/actor`，禁止从文本正则猜 actor。
+20. **测试和用户点测都通过才算完成。** 不通过就继续修，不提前报完成。
+21. **底座 001–012 未通过，不进入 013–015。** 后续 3 件一批。
+22. **不 commit、不 push，除非用户明确要求。**
+23. **批量修改后必须验证落地。** 禁止静默 `Replace` 后不检查。
+
+## 基线对照铁律（强制，2026-11-05）
+
+1. **1v1 的唯一基线是 git HEAD（0.34.6）。**
+   - 审计、修复、恢复 1v1 前，先 `git show HEAD:src/ui/...` 看旧代码。
+   - 禁止用当前工作区代码反推“以前是什么”。
+2. **2v2 没有 HEAD 基线。**
+   - 2v2 是新文件；参照是 1v1 HEAD 的相同交互。
+   - 不得把 1v1 当前工作区的临时改动当成 2v2 标准。
+3. **每次改动前先看 `git diff HEAD`。**
+   - 分类：纯共享支持（1v1 行为应不变）/ 1v1 实际行为变化（必须单列并得到用户确认）/ 2v2 新逻辑（必须隔离）。
+4. **1v1 行为变化必须单列。**
+   - 当前已批准的 1v1 变化只有：手动缩放数字输入框（保留）、手动缩放上限 150%。
+   - 其他 1v1 行为默认不得变化。
+5. **恢复 1v1 改动必须按 HEAD 原样恢复。**
+   - 例如 `playValueFlip`：HEAD 没有 `fromRect`，就恢复为没有 `fromRect`。
+6. **修复后再次 `git diff HEAD` + 跑 1v1 回归。**
+   - 确认 1v1 没有新的漂移；再跑 2v2 测试和用户点测。
+7. **禁止用“当前看起来没问题”代替 HEAD 对照。**
+
+## 临时实现前置确认（最高优先，2026-11-04 用户强制）
+任何临时界面、临时替代实现、降级方案、裸壳或“先能跑”的中间产物，在动手前必须先向用户说明：
+1. 为什么必须临时；
+2. 会替换/破坏哪些现有东西；
+3. 是否可回退、怎么回退；
+4. 预计什么时候被正式版本替换；
+5. 是否会影响验收范围。
+
+必须得到用户**明确同意**后才能创建；**不得先做出来再解释**。本规则优先于任何“先给用户看看”的冲动。
+
+## 2v2 开发期间的 1v1 原则（强制）
+1. 可以修改 1v1 代码，但不得改变 1v1 所有模式的行为。
+   - 每次抽共享层后，先跑 1v1 全模式回归，再让 2v2 接入。
+2. 尽量复用 1v1，禁止另开一套。
+   - 2v2 只做多座位适配层，不得另建 2v2 规则引擎或第二套 UI 真源。
+   - 无法复用时必须说明原因，不得静默复制。
+
+## 2v2 执行门禁（强制）
+- 每个大阶段开始前先写退出条件清单。
+- 清单未全部完成，不得向用户汇报“完成”。
+- 测试通过后继续下一项；用户实际点测本身是允许停下的验收点。
+- 只允许在：阶段完成 / 需要决策 / 规则歧义 时结束 turn。
+- 禁止使用“本轮完成 / 小批完成 / 继续执行中”等半截汇报。
+## 2v2 汇报频率（强制）
+- 内部 checkpoint 静默，不逐条汇报。
+- 只在第 4/5/6/7/8 大阶段完成、失败或需要用户决策时汇报。
+- 禁止在中途使用“本轮完成 / 小批完成”模板。
+
 ## 开工清单（每次动手前，先念这 6 条——入口闸门，细则见下）
 1. **界面任务**：先 `skill frontend-design` + `skill micro-interaction`，再做；**禁止只换色 / 临时糊**。（**含仓库外的预览页**，如 `..\plans\...\*.html`；且必须**先加载两个 skill 并声明**再动手。）
 2. **新卡 / 改卡**：先过 **§19 逐条必查（①–⑨）**（010 置换 ／ 027 重掷 ／ 026 时点 ／ 决策人 ／ **使用·消耗·弃置用词** ／ 034 破障 ／ ⑦伤害口径 ／ ⑧支付求值器 ／ **⑨多段攻击三件套＝013 电刑 / A08 将至的电刑 / A01 不败之王**）。
@@ -15,7 +88,7 @@
 1. `npx tsc --noEmit` ／ `npx vitest run` ／ `npx vite build` **全绿，并贴实际输出**。
 2. 术语**全量一致**（代码 + UI + 文档 + 文件名 + 交叉引用）。
 3. 列表 / 选项测试用**精确断言**（禁 `toContain`）；**一个动作只有一个渲染来源**。
-4. **每批一次小提交**；提交信息中文 + 关键细节。
+4. **不自动提交**；只有用户明确要求时才 commit，提交信息中文 + 关键细节。
 5. **改版本号只许用 `edit`/`write` 工具**（`package.json` 的 `"version"` 一行）。
    ⚠️ **绝对禁止**用 PowerShell `Set-Content -Encoding utf8` / `Out-File` 写 `package.json`——**PS 5.1 会写入 BOM（`EF BB BF`）→ 文件成为非法 JSON → `npm run dev` 一启动就崩（vite 解析 PostCSS 配置时 `Unexpected token '﻿'`）**。真实事故 2026-10-08（v0.16.2 提交把 dev 弄挂）。
    写完**必须**验字节：`[System.IO.File]::ReadAllBytes($f)[0..2]` ≠ `EF BB BF`，且 `node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"` 通过。
@@ -79,8 +152,11 @@
 - 中央操作区面板一律**横向流式（够位就同行）**：`.actionzone` 为 `flex-wrap:wrap` 行容器（内部面板 `flex:0 1 auto`，**提示栏 `.hint` 仍独占一行** `flex:1 1 100%`）。**唯一例外（2026-10-07 用户要求）：技能向导（`chooserPanel`）的"骰片步"用 3 行式**——仅当 `step.kind === 'dice'` 时加类 **`.selector--head-row`**，CSS 里 `.actionzone > .selector--head-row` 与 `.actionzone .selector--head-row .selector-head` 均 `flex:1 1 100%` → **① 提示 / ② 文字（步骤标题 + 已选）/ ③ 骰片 + 操作按钮**。**其余一律"够位就同行"**：选项/数字/点数/slots 步、029 全知、T18 适应、027 寒光（`.selector--flow`）等自定义面板都**不独占整行**；支付 `.paypanel` / 尘起 `.dustflow` / 置换 `.convertpick` 不受影响。长文案必须 min-width:0 + overflow-wrap:anywhere（**不要用 overflow:hidden 裁剪**，避免静默截断）。
 - 设置项列表：`显示技能描述` / `卡图` / `界面密度` / `动画速度` / `镜像神器摆放` / `预设组合` / `战报栏` + `恢复默认`。
 - **战斗界面动效（2026-10-03，P-A/P-B）**：动效集中在 `src/ui/motion.ts`（`MOTION` 时长 / `EASE` 缓动 / `masterEnabled` 总闸 / `setMotionSpeed` 速度倍率 / `runBoardMotions`）。规则：**只动 `transform`/`opacity`**；`prefers-reduced-motion` 自动降级；**无真实布局（jsdom/测试，`getBoundingClientRect().width===0`）整体跳过**（保证测试零副作用）；**只在"骰子集合变化 或 生命变化"时才动**（避免开设置/选择器导致骰子乱动）。`renderGame` 在 `applyZoom` **之后**统一播放。
-  - **视角翻转硬约定（左右互搏）**：**"谁在下方"＝`viewOwnerOf(state)`**（现＝`actorOf`）。**联机（将来）只需把 `viewOwnerOf` 改成"本机玩家（固定）"** → `prevView===viewTarget` 恒成立、**永不触发切换**（其余逻辑不动）。**严禁在"视角切换那一帧"播放"旧坐标"动效**（让位 FLIP / 飞向中间残影），否则整盘骰子飞到镜像位；但**"从中间飞入"与朝向无关，切视角帧照常播**。做法＝**两阶段**：`lastView: WeakMap<GameState, PlayerId>` 记已显示视角；`holdView = 视角要变 && (removed 有骰子被消耗 ‖ 有生命变化 ‖ **attackChanging（新发起攻击 isNewAttack ‖ 攻击被解决 isResolve）**) && 真实布局`——**凡"从旧视角坐标开始"的动画** → 先用旧视角把动效**完整播完**（`settleMs`）再 `lastView=viewTarget; requestRender()` 瞬间切；**纯获得（无以上任何旧坐标动画）** → **先瞬间切**，再在新视角里从中间飞入；**无动效** → 直接瞬间切。`runBoardMotions(..., flipped)` 中 `flipped` 只跳过旧坐标动效、保留从中间飞入。
-    - **通用规则（2026-10-03，防复发）**：**凡是"从旧视角位置开始"的动画都必须让 `holdView` 成立**：消耗/弃置/让位(removed)、生命变化、**攻击起步/攻击解决(attackChanging)**；**只有"从中间飞入的获得"才允许先切**。**真实事故**：影袭（技能发起、**不消耗骰子**的虚拟攻击）因"无 removed、无生命"被判成"无动画"→ **虚拟骰没飞到中间就切了玩家**（拔城/A01 等同类技能同病）。**新增任何"旧坐标"动画时，必须把它的判定加进 `holdView`**（P-C/P-D 的重投/区域互换/骰面翻转/存放骰/响应池各自登记）。
+  - **视角翻转硬约定（左右互搏）**：**"谁在下方"＝`viewOwnerOf(state)`**（现＝`actorOf`）。**联机（将来）只需把 `viewOwnerOf` 改成"本机玩家（固定）"** → `prevView===viewTarget` 恒成立、**永不触发切换**（其余逻辑不动）。**严禁在"视角切换那一帧"播放"旧坐标"动效**（让位 FLIP / 飞向中间残影），否则整盘骰子飞到镜像位；但**"从中间飞入"与朝向无关，切视角帧照常播**。做法＝**两阶段**：`lastView: WeakMap<GameState, PlayerId>` 记已显示视角；`holdView = 视角要变 && (骰子类旧坐标动画：removed 有骰子被消耗 ‖ **attackChanging（新发起攻击 isNewAttack ‖ 攻击被解决 isResolve）** ‖ 重掷/搬家/存放骰/响应池/气泡 …) && 真实布局`——⚠️ **生命浮动不算**（2026-11-08 改，见下条）；**凡"从旧视角坐标开始"的动画** → 先用旧视角把动效**完整播完**（`settleMs`）再 `lastView=viewTarget; requestRender()` 瞬间切；**纯获得（无以上任何旧坐标动画）** → **先瞬间切**，再在新视角里从中间飞入；**无动效** → 直接瞬间切。`runBoardMotions(..., flipped)` 中 `flipped` 只跳过旧坐标动效、保留从中间飞入。
+    - **通用规则（2026-10-03，防复发）**：**凡是"从旧视角位置开始"的动画都必须让 `holdView` 成立**：消耗/弃置/让位(removed)、**攻击起步/攻击解决(attackChanging)**；**只有"从中间飞入的获得"才允许先切**。**真实事故**：影袭（技能发起、**不消耗骰子**的虚拟攻击）因"无 removed、无生命"被判成"无动画"→ **虚拟骰没飞到中间就切了玩家**（拔城/A01 等同类技能同病）。**新增任何"旧坐标"动画时，必须把它的判定加进 `holdView`**（P-C/P-D 的重投/区域互换/骰面翻转/存放骰/响应池各自登记）。
+    - **⚠️ 生命浮动不算"必须等"（2026-11-08 用户实测后改，1v1 + 2v2 同口径）**：`-X` / `+N` 浮字**锚定在玩家面板 / 生命条上**——换视角之后再播，位置照样正确。所以 `holdView` 的括号里**不要** `lifeItems`（它仍留在 `willAnimate` 里：浮动照播）。**真实事故**：问「高塔铁幕·触发」/「灵能屏障·触发」时，上一帧的攻击伤害产生 `-X` → 旧逻辑等 900ms 才切 → 玩家看到"攻击动画都完了、视角也切了，才开始问"。
+      - **2v2 侧**：`battle2v2View.ts` 的 `diceFxNow`（≡ 1v1 的 `holdView` 条件）**必须**用清空前抓的 `initialPrevDice` / `initialPrevStored`（`root` 那时已被 `innerHTML=''` 清掉），并用 `fxPeek()`（只读）判断本帧 fx，**不能**调 `fxTake()`（会吃掉 `run2v2Motions` 要用的动画事件）；且**不能**用 `motion.ts` 的 `areaDiceChanged` / `storedIdsOf`（它们只遍历 1v1 的 `'A'/'B'`，2v2 会读到 `undefined`）。
+      - 门禁：`tests/hintGuwangSourceAndViewHold.test.ts`（纯生命变化 → 立即切；有骰子被消耗 → 仍等）。
   - **表现细节**：出牌＝骰残影飞向**池化点**（`poolPoint`：`.actionzone` 正中心，实时测量，无则 `.centerband`/视口中心）→ **顿 200ms** → 淡出；摸牌＝从池化点飞入 + **过冲回弹落定**；让位(FLIP)＝滑到位 + **落定**；掉血＝红 `-N`（弹出 180 + 停 300 + 上浮 400）+ **整个玩家面板抖动 260ms（±5px 左右）**；回血＝绿 `+N`（含满血 `+0`，待"事件通道"批）+ 生命条**平滑变长**（内层 `scaleX`）+ **绿光横扫**（`.fx-heal-sweep`）+ **泛光**（`.fx-heal-glow`）+ 轻脉冲（1.04）。生命/抖动反馈用 `Element.animate`（WAAPI，不可用则退化为淡出；减弱动效不抖/不位移）。
   - **全局"顿一下"约定（2026-10-03）**：**"位移/出现/消失"类动画结尾都要有停顿/落定**（`MOTION.hold` / `MOTION.settle`）；**纯变色类（药丸变色等）不强制**。新增同类动画默认遵守，除非用户说不用。
   - **动画速度**：设置项「动画速度」（`Prefs.animSpeed?: 'normal'|'fast'`，**可省略＝正常**；`fast`＝时长减半）。**不参与「预设组合」**（`PresetValues` 排除它；`usePreset` 保留它；`setAnimSpeed` 不置 preset 为自定义）。所有时长经 `motion.ts` 的 `ms()` 换算——**时长只改这一处**。
@@ -359,6 +435,16 @@
 - 声称完成前必须给出 `vitest` / `tsc` / `build` 的实际结果。
 - **验证只走自动化（2026-10-10 用户强制）**：只用 `tsc` / `vitest` / `vite build`；能 jsdom 断言的（提示文案、`fx` 事件、状态流转、DOM 结构）**写成测试**来锁。**严禁**用"起 dev 截图核对"当验证手段——它基本发现不了问题、纯费 token。纯动画/视觉层（jsdom 测不到）**不主动起 dev 核对**，交用户在实玩中反馈；测试只锁其**状态层与 `fx` 事件层**。
 - **排查用「诊断日志」（2026-10-16，用户要求）**：网址加 **`?diag=1`** 才记录（默认关闭、零开销）→ 设置面板出现「诊断日志」→ 一键复制（http 下剪贴板被禁 → 自动全选文本框，Ctrl+C）。实现＝`src/ui/diag.ts`（环形 800 条）。**全模式**：① `main.ts` 的 `dispatchAction` 记 `action` + `gameSnapshot`（双方三区/驱动骰/待决策/攻击队列；挑战专属字段有才带）；② `render.ts` 的 `hideLegendFlownDie` 记 `hide`（实际只会在挑战触发）；③ 每帧比对"数据里的骰子 id vs 画面上所有 `.die"[`querySelectorAll('.die[data-id]')`] → **数据有、画面没有**就记 **`DOM-MISSING`**（排除在 `legendGoneIds` 里的正常隐藏）；④ **`DOM-INVISIBLE`**（元素在 DOM 里但被 CSS 藏：`visibility:hidden`/`display:none`/`opacity:0`）；⑤ **`DOM-STALE`**（同一 id 的**画面 `data-value` ≠ 数据点数**＝"显示的是过时骰子"，2026-10-18 用户报的"5 颗只显示 2 颗、且可见的是 4/5"即此类）。`state` 快照带 **`gone`**（隐藏名单）。**★ 动画层"藏了要揭"（2026-10-18 真实事故）**：动画里给真骰加内联 `visibility:hidden` 后，**必须**有"必然执行"的揭出——统一走 `motion.ts` 的 **`revealDieEls(root, ids)`**（只清当前 DOM 里存在元素的样式；已使用/消耗/弃置的骰子没有元素 → 安全无操作，不会复活）。`deferIds`/`pendingAddIds` 在补播前必须先 `revealDieEls`（`playAdds` **不负责**清 visibility）。回归：`tests/motionVisibility.test.ts`。诊断日志**常驻**（`?diag=1` 才记录）：`hide-viz`/`reveal-viz`（ghost/spawn 的藏与揭）、`defer-hide`/`reveal`（延后获得）、`DOM-MISSING`/`DOM-INVISIBLE`/`DOM-STALE`、`state.gone`——排查时开 `?diag=1` 即可拿到完整链路，**不要临时加日志**。
+  - **「点了没反应」专用：2v2 点击链路（2026-11-07 立规）**。用户报 010 杀意 / 011 灵能脉冲「点了没反应」时，旧日志只有"派发之后"的记录，**点击这一段是全黑的**（174 秒无 `action` 也无法判断原因）。现在补齐（全部 `?diag=1`，默认零开销、**不改任何行为**）：
+    - `ui-rebuild {gen, prevStep, hadConfirmRow, hadSelector, hadActionBtns}`：整页重建（2v2 现在只有换队帧 `finishViewSwitch` 会重建）。
+    - `ui-down` / `ui-click {gen, tag, cls, act, choice, art, die, seat, txt, top, topOk, at}`：根节点**捕获阶段**各记一条。`top` ＝坐标下**最顶层元素**（`elementFromPoint`）→ `topOk:false` 即"被透明层/残影盖住"；只有 `ui-down` 没有 `ui-click` ＝按钮在按下与松开之间被换掉了。
+    - `ui-step`：每次重绘后的**步骤快照**（只在变化时记一条）——确认条文案 / `confirmInDom` / `confirmRect`（宽高 0 ＝在 DOM 里但看不见）/ 选目标 / 向导第几步 / 投票人数 / `legalTypes`（**引擎允许什么**）vs `buttons`（**画面摆了什么**）。
+    - `ui-propose` / `ui-dispatch`：提出待确认 / 真正派发。
+    - `ui-guard {where}`：静默忽略的原因——`preview-vote`（守方投票面板没出现）/ `defense-vote`（投票状态被清）/ `die`（点骰子无事发生）/ `start-wizard`（选择器构造失败）。
+    - `ui-throw`：`dispatch` 里被吞掉的异常 + 全局 `error` / `unhandledrejection`（**以前这类异常一个字节都不留**）。
+    - **导出摘取**：`setDumpProbe` 由 `render2v2Game` 注册 → 点「诊断日志 → 复制全部」时 `diagDump()` 末尾追加一条 **`ui-now`**（当下 UI 步骤 + 合法动作 + 确认条矩形）——**卡死时无需任何额外操作即可取证**；1v1 渲染前会 `setDumpProbe(null)` 清掉。
+    - **可本地重放**：`game-start {seed, setup}` 与每条 `action` 用 **`diagPin` 钉住**（不受 800 条上限淘汰）→ 拿 seed + 动作序列即可在本地把那一局逐步重放到卡死那一刻。
+    - 回归：`tests/diagClickTrace.test.ts`（默认关闭零日志 / 一次点击只记一条 / **重建不重复绑定** / 重建带走确认条 / `legalTypes` vs `buttons` / `ui-now` / 钉住条目不淘汰）。
   **排查渲染/骰子问题一律用它取证，不要靠 console.log 或截图**；用户贴日志即可复现分析。测试：`tests/diag.test.ts`。
 - **提「修复方案」必须附大白话（2026-10-06 用户要求）**：在同一条回复里写清 **现象 → 为什么（配生活化比喻，如"屏幕是一叠透明纸"）→ 怎么修**，**不要让用户再问"用大白话解释"**。（用户是非开发者。）
 21. **「使用能力骰」的边界（026 威压；2026-09-28 用户更正）**：威压的触发是**持有者本人**的「**使用**」（卡面："当**你**使用 1 个任意能力骰后…"）→ 算"使用"的**只有**：**攻击支付 / 抵挡支付 / 尘起的冥想骰支付**（尘起支付**也会**触发威压，顺序＝支付先、切换后，符合 FAQ 26.2.1）；**不算**：**「消耗」（技能代价，`paySlots` 的 `reason='skill'`）**、重掷、019 免费尘起、尘印支付。
@@ -384,6 +470,15 @@
     - **T04 末路 × L04 重开**：**先结算 T04 末路（真伤＋回血），再「重开」**（L04 继承生命 → 重开时的生命含末路回复）；**若末路先把某方打死 → 不再重开**。实现：`game.ts` 的 `case 'skill'` 对 `tata.mengjing` **在处理器之前**调 `applyMolu`；处理器里 `gameOver` 早退。测试 `tests/tacticsReset.test.ts`。
     - **T15 影子 × 010 真实之剑**：置换的 **2 颗源骰不算使用/消耗/弃置** → **不触发**影子；置换出的 **虚拟 5 算使用** → **触发**（「虚拟骰都可以触发」）。T15 只看 `effective`（已是现状）。测试 `tests/tacticsT15Sword.test.ts`。
     - **Z12 不动菩提（仅挑战）**：锁的只是「使用/消耗/弃置」——**真实之剑置换的源骰不受锁**；**置换出的有效 5 受锁**（V=5 → 置换按钮不出现、`canPayCosts` 为假）；**「点数下降」类（005 影袭）不受锁**（下降后的「使用」按新点数受锁）。实现：`paySlots` 对 2 颗置换跳过源骰封锁 + 校验 `effective.value`；`canPayFromPool` 在 V=5 时不走置换、并把「被锁但可作置换源」的骰用 `lockedConversionDice` 计入；`render.ts` 的 `convertAvailable` / 「2 颗顶 1」入口同步。测试 `tests/challengeZ12Sword.test.ts`。
+
+28. **真伤取消（009 高塔铁幕 / T09 慈悲）＝「板上被占就排队」，严禁静默跳过（2026-11-07 修，全模式）**
+    - **规则依据（FAQ v2.6）**：9.1.1 必杀用过仍可取消真伤；9.1.2 只能取消**真实伤害**（"不可抵挡"的攻击伤害不算）；7.1.2 取消需**消耗 1 个防御骰**（没有就不能取消）。
+    - **坑**：`dealTrueDamage` 原来要求 `g.pending === null` 才挂起——而很多技能是在**自己的待决策还没清空时**造成真伤的（004 锋芒＝`fengmang` / 031 恶兆·清算＝`activationResolve` / 技能内重掷 / T14 反弹），于是询问被**静默吞掉**、血直接扣。
+    - **唯一做法**：板上空 → 直接挂 `g.pending`；板上被占 → **`queuePending`（排队）**，伤害同样**延后**；当前那件事结算完由 `pumpPending` 自动接上。**不许**改成"直接扣血"。
+    - **固定顺序**：T09 慈悲（造成方，可选）→ 009（受害方，可选）→ 落血 → T14 赴火（**强制**，卡面没有"可以"，所以不弹窗）。
+    - **界面影响**：生命数字是"每帧生命差"（`motion.ts` 的 `diffLife` / 2v2 的 `teamLifeDeltas2v2`）→ 取消时这一帧只显示攻击伤害（少扣）；不取消时那 2 点会在**下一次决策**里单独显示。战报两行写清原因。
+    - 门禁：`tests/trueDamageCancelQueue.test.ts`（锋芒×009 取消/不取消、任意待决策占板→排队、027 技能内重掷、无防御骰不询问）、`tests/combat.test.ts`。
+    - **审计结论（真伤来源 → 能否被 009 取消）**：自伤类（014/017/019/024/031 血祭/032 等，`source===target`）不触发；其余来自对方的真伤在修复后都能响应（010 杀意 / A02 哀悼 / 011 脉冲 / L10 汝等罪人 / 031 清算 / 027 凛冽之音 / L04 无上剑术 / L11 邪灵序曲 / T04 末路 / T08 无情 / T14 赴火 / 挑战 Z 卡 / 004 锋芒）。
 ## 挑战模式（单人 vs 昔日传奇「自动机」）—— 2026-10-07 落地，勿违
 
 > 设计文档：`..\plans\挑战模式设计.md`；代决点清单：`..\plans\挑战模式-代为操作清单.md`；逐批计划：`..\plans\2026-10-07-挑战模式-Plan*.md`。**本轮只转写并打通 Z02（传说中的"永暗之刃"）**。
@@ -599,4 +694,252 @@
   1. **源码模式（推荐长期）**：`bash deploy/update.sh`（fetch → pull --ff-only 或 checkout tag → `npm ci` → `npm run build` → 重启中继 → **校验 dist 版本与 package.json 一致**）；
   2. **压缩包模式**：替换 `www/` + `relay/` → `systemctl restart dust-relay`（文档见 `deploy/README-部署.md` §9）。
 - 仓库为**公开仓库**：克隆/拉取无需 Collaborator/PAT；`deploy/README-源码部署.md` 不得再写"必须加协作者"。
+
+
+## 2v2 UI 对照与底座门禁（强制，2026-11-05）
+
+1. **先看 1v1，再动手**：列 1v1 实际 DOM/class/文字/颜色/流程/动画；禁止凭印象补 UI。
+2. **1v1 没有的不要造**：1v1 战斗界面无顶栏、无返回按钮、无阶段药丸；阶段只在 hint，返回只在结束弹窗。
+3. **开局按说明书**：2v2 测试/正式都必须 `startPhase: true`，从 initialReroll 开始；不得一进战斗就能攻击。
+4. **攻击按攻守标记**：attackPicks 攻方选目标、不投票；defensePicks 两守方投票；每次结算后翻面。
+5. **文字/确认复用**：`advanceLabel`（结束尘起阶段/结束回合）、`dustEntryLabel`、`propose`→`pendingConfirm`；禁止大量直接 dispatch。
+6. **样式/颜色对齐**：按钮 class、座位色、骰片 `.pay-die.die-A1/A2/B1/B2`、提示/日志玩家色与技能色。
+7. **动画只由真实状态差触发**：阶段推进、按钮/面板/布局变化不得播骰子动画。
+8. **动画先完整播完再切视觉**：中间→停顿/翻面→飞回→结束→再显示新状态；重掷复用 1v1 `playValueFlip`。
+9. **日志唯一来源**：`T{turn}·{phase}：`、倒序、完整滚动、座位色、真实 actor；禁止正则猜 actor / 两套日志。
+10. **设置共用**：1v1/2v2 共用面板；百分比输入是正式实装，不是临时。
+11. **禁止第二套 UI 真源**：2v2 只能做座位/目标适配；改完 grep `actionLabel`/`wizardPanel`/`startWizard`/第二套 `settingsPanel` 必须为 0。
+12. **测试验收流程**：断言开局阶段、动作顺序、按钮文字/class、骰片、确认/取消、动画前后、日志前缀；禁止只测元素存在。
+13. **底座优先、3 件一批**：底座 001–012 通过后，才按 3 件一批；每批用户实际点过才下一批。
+14. **临时 vs 实装**：只有用户批准的“测试2v2”入口算临时；设置/顶栏/操作栏/日志/动画都是实装，禁止标临时。
+15. **用户报错固定动作**：先找 1v1 对应实现→列差异→共享逻辑修→补测试→用户确认；1v1 无对应时先问，不自己发明。
+
+## 神器技能审计方法（2026-11-06，强制；后面每批照做）
+
+用户已经多次指出“只看入口、不看完整交互”的审计漏洞。以后每批神器技能必须按下面顺序，缺一项不算审完：
+
+1. **先读规则文档，不凭 1v1 猜 2v2**
+   - 初始重掷、每回合重掷、速度、准备阶段、首回合跳过等，必须分别查《规则实现文档》/裁决文档。
+   - 禁止把 1v1 的“重掷上限 = 速度”直接套到 2v2 初始重掷；初始重掷是准备阶段，规则是任意数量。
+   - 禁止再参考已废弃的 `尘起时刻_2v2战斗界面交接文档_v1.0.md`。
+
+2. **技能入口要看 5 个东西，不只是按钮存在**
+   - 按钮 class（1v1 `btn-skill`）
+   - 按钮文案（启动/激活/必杀）
+   - 按钮在操作列表中的顺序（技能在攻击骰之前）
+   - 目标候选是否等于该技能的裁决集合
+   - 完整走完选择/确认后，引擎状态和战报是否真的变化
+
+3. **目标候选必须逐技能核对**
+   - 只从 `SKILL_SELECTION` 的 seat 步骤/引擎 policy 取，不允许 `rosterOf` 全座位兜底。
+   - 攻击：攻守标记；真伤/弃骰：敌人；任意玩家：自己+敌人（不含队友）；025：不询问。
+   - 新增技能必须补“候选精确数组”测试，禁止 `toContain`。
+
+4. **所有“选择/确认”面板都要查间距和顺序**
+   - 不只“结束回合？确认取消”；seat/option/dice/pips/slots、目标行、投票、尘起、支付、结束弃骰全部查。
+   - 2v2 确认条复用 1v1 `.confirm-row`；`.option-row` 必须有明确 `display:flex/gap`。
+   - 列表/选项测试断言精确数组或数量，防止重复/漏项。
+
+5. **快速操作栏布局要按 1v1 的实际视觉检查**
+   - 尘落/提示在左，攻守标记在右；攻守标记占满操作栏默认高度。
+   - 提示第一行贴顶，不能被侧栏撑高。
+   - 操作列表不能被侧栏挤换行；同时不得为了不换行把攻守标记缩小。
+   - 1280/1366/1920 三档都要检查。
+
+6. **技能卡面状态用完整四态**
+   - `on / off / disabled / spent` 不能压成布尔值；充能满时充能行 disabled，必杀行仍 on。
+   - 1v1 是唯一状态真源；2v2 只能复用，不得自己写一套状态。
+
+7. **动画要对照 1v1 的完整时序**
+   - 裁雨流：停中间 → 决策 → 飞回/淡出；真骰必须由 `heldAttackDieId` 排除出通用获得动画，且 `releaseHeldAttackDie` 要在 `runBoardMotions` 之前。
+   - 任何“真骰已在区域、临时骰还在飞”的现象，优先查“是否漏 exclude”。
+   - 动画测试至少锁 `fx` 事件和隐藏/揭出顺序；视觉手测由用户完成。
+
+8. **用户报错后先查日志能否闭环，不要先猜**
+   - 日志要能回答“动作前有多少、动作选了什么、动作后剩多少”。
+   - 如果日志已能证明结算合法，先说明“不是 bug”，不要为了修而改规则。
+   - 如果日志缺关键前置状态，先补最小快照/步骤日志，再复现。
+
+9. **每批结束必须做“全量同类扫描”**
+   - 用户指出一个技能的目标/间距/动画问题 → 扫全部 `SKILL_SELECTION` seat 步骤、全部 `option-row`、全部 `releaseHeldAttackDie` 使用点。
+   - 禁止只修被点名的那一张卡。
+
+10. **技能名只有唯一来源 `skillBubbleName` / `artifactSkillName`（2026-11-06 立规）**
+   - **神器卡面文案 `ARTIFACT_TEXT` 没有 `key` 字段**（只有 `side` / `name` / `type` / `text`）→ **禁止**用 `skillKey` 去查它（永远查不到 → 退化成神器名，真实事故：2v2 把「影袭」显示成「影掠」）。
+   - 取名规则：`render.ts` 的 `artifactSkillName(artifactId, side, kind?)` —— 按「**侧 + 类型**」匹配 `ARTIFACT_TEXT[id].skills`；合写类型（`持续 / 触发`）按 `/` 拆开逐段匹配。`kind` 由 `skillKey` 反查（`shared/skillState.ts` 的 `kindFromType` / `findSkillKey`）。
+   - 气泡/按钮/战报/提示一律走 `skillBubbleName(state, player, artifactId, side, skillKey?)`；传奇面板走 `legendSkillNameOf`。**禁止**各写一份 `ARTIFACT_TEXT[...].name` 兜底。
+   - 门禁：`tests/artifactSkillName.test.ts` 全量扫「45 件神器 × 每条技能」正向 + 反向，任何一条取不到正确名字就红。
+
+11. **2v2 专用步骤必须显式处理下标，`buildParams` 只收 `compactNumbers` 后的 numbers（2026-11-06 立规）**
+   - 2v2 的 `legal` 动作里 `costSlots` 的下标语义与 1v1 不同（按座位展开）→ 任何「第几步取第几组骰」的映射**必须显式**写，**禁止**直接复用 1v1 的下标假设。
+   - 向导收集的 `numbers` 是「按步骤平铺的数组」，提交前**必须** `compactNumbers(steps, numbers)`（`ui/skillSelection.ts` 导出）→ 否则引擎收到多余/错位的数值（真实事故：005 影袭虚拟攻击报错）。
+
+12. **`BESPOKE_ACTS` 只能登记「循环外有专用渲染来源」的动作（2026-11-06 立规）**
+   - 通用循环开头的 `if (BESPOKE_ACTS.has(a.t)) continue;` 会把该动作**完全跳过**。
+   - 因此：**动作在通用循环内部专门处理的（`dustRise` 的 `seenDust` 去重 + `startDustFlowHost`），严禁加入该集合** —— 否则整个阶段的按钮全消失（真实事故：2v2 尘起阶段一个入口都没有）。
+   - 当前合法成员：`attack`（`renderChipRow` 的 `act:'attack'`）/ `block`（专用分支）/ `skill`（`b.dataset.act='skill'`）/ `fengmang`（`fengmangOpen` + `fengmangDecline`）。
+   - 新增专门入口时：先确认「它在循环外真的有一份渲染」，再登记；两者只能选一处。
+
+13. **虚拟攻击必须走共用 `beginDefensePreview`，禁止第二份预览（2026-11-06 立规）**
+   - 物理攻击与虚拟攻击（005 影袭 / A01 不败之王 / 拔城…）的守方流程**必须**共用 `battle2v2View.ts` 的 `beginDefensePreview(action, { value, virtual })`。
+   - 攻方选择顺序固定：**先选目标 → 再出动画 → 确认条 → 虚拟骰动画**（不要先飞同一刀再问目标，会造成同一刀飞两次）。
+   - 守方：**虚拟骰预览飞中间 → 两人投票 → 正式结算动画**。
+   - 例外：A01 例外（技能指定对象、无视攻守标记）。
+
+14. **动画"对齐 1v1"的判定法（2026-11-06 立规，防复发）**
+   - **唯一口径＝1v1 的同一段代码路径**。判定顺序固定：
+     1. 找到 1v1 里这段动画的**入口函数**（`fx` 事件 → `motion.ts` 播放器 → `render.ts` 的调用点）；
+     2. 看它**等多久、等谁**（时长必须来自 `motion.ts` 的共享函数，不能是新写的数字）；
+     3. 再看 2v2 缺哪一段（事件没消费 / 时长写死 / 骰子没排除）；
+     4. 抽成**共享纯函数**（1v1 与 2v2 同调），而不是在 2v2 里复制一份公式。
+   - **攻击起步只允许一个公式**：`motion.ts` 的 `attackWatchDelay({ costPresent, diceFx, resolveDur, extraDelay })`。
+     **严禁**在调用处写死 `costDur: 0`（真实事故：2v2 影袭灰骰与玩家色骰同时飞出 → 重影）。
+     唯一例外＝守方**预览**骰（`PREVIEW_COST_DUR`，投票前没有代价骰、不等任何动画）。
+   - **每个 `FxEvent.kind` 必须在 2v2 有交代**：要么消费，要么在 `tests/fxConsumers.test.ts` 的 `NOT_APPLICABLE` 登记「2v2 为什么没有这个机制」。新增 fx 事件不登记 → 该测试红。
+   - **2v2 面板不许有入场动画**：整块操作区每次操作都会重绘，`animation` 会反复复播 → 用户看到"闪一闪"。1v1 的 `.selector` 也没有。
+   - **动画测试只锁状态层与 fx 层**（`jsdom` 里 `canAnimate` 为 false，动画本身跳过）：锁「事件顺序 / 时长公式 / 排除名单 / DOM 结构」；视觉留给用户点测。
+
+15. **每批神器动画审计的 5 个固定问题（照抄，不许跳）**
+   1. 这个技能会发哪些 `fx`？2v2 全部消费了吗？（含 `attackJoin` / `gouhun` / `pay` / `move` / `weiju`）
+   2. 攻击起步等的时长从哪来？是不是 `attackWatchDelay`？（禁止字面量）
+   3. 有没有"同一颗骰走两套动画"？被池子接管的骰是否都进了 `exclude`？
+   4. 有没有"面板一重绘就复播"的 CSS 入场动画？
+   5. 三列神器是否都过了一遍（充能 → 必杀气泡顺序：先「充能」再技能名）？
+   审计结果登记到 `..\plans\2v2动画对齐矩阵.md`（每张卡一行：已审计 / 有差异 / 修法）。
+
+16. **「先选对象、再选骰」是唯一顺序（2026-11-06 用户定）**
+   - 2v2 凡"要作用到某个玩家"的技能/待决策：**第一步选发动对象（座位），第二步才列与该对象相关的骰/选项**。
+   - **禁止**把"两个敌人的骰铺成一排"让人猜归属（真实反馈：009 充能这样列，用户认为打乱了惯例）。
+   - 对象候选只来自引擎合法集合（`enemiesOnly` / `selfOrEnemy` / `anySeat`），**不许** UI 自己兜底成全座位。
+   - **只有一个候选时自动跳过对象步**（不留一个按钮的空步骤）。
+   - 已有 `seat` 步的技能（005 / 007 / 036 …）本来就是这形状；新增 pending 面板（如 009 充能）照此办。
+   - 门禁：`tests/render2v2Artifacts007to009.test.ts`（先对象后骰 + 单候选自动跳过）。
+
+17. **守方投票面板不许有「取消」（2026-11-06 用户定）**
+   - 投票是守方的决定；"取消"会把控制权退回攻击方，而停在中途的攻击骰会**一直卡着**（真实反馈）。
+   - **2026-11-07 改**：守方选择**不再有"派发前预览"**（不藏骰、不预演）——投票时源骰仍在骰区、什么都没消耗；投完才派发、才播动画。见第 22 条。
+
+18. **「纯选对象型待决策」＝一步摆完，按形状判定、不许按卡号（2026-11-07 用户定）**
+   - **判定**：`battle2v2View.ts` 的 `pureTargetPending(state, a)` ＝ `accept !== false` + 除 `t`/`accept`/`target` 外**没有任何字段** + 目标候选 > 1。
+   - **渲染**：合成**一行** `.option-row.option-row--decide`＝`目标 [玩家B1] [玩家B2] [不发动「X」]`；点目标**直接提出动作**（少一步"发动"），「不发动」走 `data-choice="decline"`。通用循环必须 `pureTargets.has(a.t) → continue`，**一个动作只能有一个渲染来源**。
+   - **反例（不得合并，保持原样）**：① 纯是/否**没有对象**（雷暴·重掷 / 慈悲 / 兽魂）→ 保留「发动」入口；② 还要选骰或选组合（009 高塔铁幕 / 011 灵能屏障 / 004 锋芒 / 026 威压）→ 不是"纯选对象"。
+   - **CSS**：`.board--2v2 .actionzone .option-row--decide { flex-wrap: nowrap }` + 子元素 `white-space: nowrap`（用户要求目标与「不发动」同一行）。
+   - 现成员：010 杀意 / 011 灵能脉冲 / A02 哀悼（对方无防御骰版）。**新增同形状 pending 不需要改代码**。
+   - 门禁：`tests/render2v2PendingShape.test.ts`（同形状 + 四个反例）。
+
+19. **待决策 / 触发类文案只有一个来源＝`render.ts` 的 `pendingActionLabel(state, a)`（2026-11-07 立规）**
+   - 1v1 的 `actionLabel` 内部调它；2v2 的 `actionLabel` 也调它，**只追加** ` → 玩家X`（打谁）。
+   - **禁止**在 `battle2v2View.ts` 再写一份待决策文案表（真实事故：合并按钮后「不发动」丢了技能名；两套文案会导致一边改一边不改）。
+   - 带骰子的变体（`defenseDieId` / `meditationDieId`…）在 1v1 由 `actionDieSegments` **先行接管**（渲染成骰片），所以 `pendingActionLabel` 只负责"纯文字"那一版；2v2 没有骰片分叉的（如 `aidao`）必须自己把语义写全（不能误报"对方无防御骰"）。
+   - 门禁：`tests/render2v2Artifacts010to012.test.ts`（提示栏格式 + 按钮文案精确断言）、`tests/render2v2PendingShape.test.ts`。
+
+20. **2v2「谁在下方」＝决策人那一队（与 1v1 的 `viewOwnerOf = actorOf` 同口径，2026-11-07 立规）**
+   - 优先级：**待决策人（`state.pending.player`）→ 防守方（`pendingAttack.defender`）→ 回合玩家**；再映射到"队"（`TEAM_OF[seat]`）。
+   - **`battle2v2View.ts` 的 `deciderSeat2v2` 是唯一实现**；禁止再写 `TEAM_OF[state.activePlayer]` 当视角（真实反馈：009 高塔铁幕·触发 / 011 灵能屏障 待决策时不切视角，而 1v1 会切）。
+   - ⚠️ **不能直接调 1v1 的 `actorOf`**：它在 1v1 缺省分支返回 `'A'/'B'`，在 2v2 里那不是座位（会是 `undefined` → 崩）。
+   - 门禁：`tests/render2v2ViewAndStepState.test.ts`（无待决策 / dunwuHalve / guwangCancel / 自己队的待决策不翻 / 待抵挡）。
+
+21. **2v2 的「进行中的操作」状态必须跨整页重建存活（2026-11-07 立规，1v1 同构）**
+   - 1v1 把 `pendingConfirm` / `selection` / `convertPick` / `dustFlow` … 存在 `main.ts` 的 `ui` 上；2v2 原来只放在 `render2v2Game` 的闭包里 → **换视角/派发的那次整页重建会把确认条、向导、投票全部清零**（用户看到"点了没反应"）。
+   - 唯一实现＝模块级 `WeakMap<GameState, Step2v2>`（`stepOf2v2`）：**进入渲染时恢复 → 每次 `draw()` 末尾 `syncStep()` 写回 → `dispatch()` 里先清空再写回**（`hooks.onAction` 会同步触发重建，顺序不能反）。
+   - 闭包里的旧定时器（守方预览→投票、换视角）**必须校验 `gen`**（本帧重建编号）：过期就自弃，别拿旧 DOM 覆盖新界面；被重建打断的投票由 `render2v2Game` 收尾处的 `pendingDefenseAction` 续跑接回。
+   - **派发只能走 `dispatch()`**：它会"先清空 + 写回持久层"再 `onAction`。**严禁**在别处直接 `hooks.onAction(...)`——否则持久层留着已作废的向导，重建后会画出"只有标题、一个按钮都没有"的僵尸面板，把整个操作栏挡掉（真实事故 2026-11-07：灵能脉冲·激活后操作栏全空；`finishWizard` 已改）。
+   - **恢复时兜底**：`wizard` 若"步骤数为 0 / 已跑完（`step >= steps.length`）"→ 直接丢弃。
+   - 门禁：`tests/render2v2ViewAndStepState.test.ts`（确认条跨重建仍在 + 派发后不复活；选目标行跨重建仍在）、`tests/render2v2WizardAndLine.test.ts`（灵能脉冲走完后必须是待决策行，不许是空面板）。
+
+22. **守方选择（`defensePicks`）＝三种攻击统一：投票 → 派发 → 动画（2026-11-07 用户定）**
+   - **普通攻击 / 置换攻击 / 技能攻击（005 等）走同一条路**：点攻击骰（或技能步骤跑完）→ **只开投票**（`beginDefenseVote`），不播任何预览、不藏骰、不预演。
+   - 投票面板先写清"这一刀"（点数/伤害/加成/不可抵挡），数值来自**引擎试算** `previewPendingAttack`（见第 27 条）。
+   - 投票完 → 用守方选中的座位派发 → 按 1v1 顺序播：骰子动画（起飞 / 2 颗合成灰 5 / 改点换区）→ 停在中间 → **黑线从攻方（下方）射出** → 播完再切到守方决定挡不挡。
+   - **`beginDefensePreview` / `previewHiddenIds` / `previewAttack2v2` 已全部删除**（禁止复活：那套"先演一遍再重播"会假演技能效果，还会让灰骰飞两次）。
+   - 门禁：`tests/render2v2Artifacts007to009.test.ts`（投票面板 + 无取消 + 不再有预览）、`tests/render2v2Artifacts004to006.test.ts`（005 守方选择进投票）。
+
+23. **`guwangCancel`（009 高塔铁幕·触发）发动时必须发 `skillFired`（2026-11-07 用户裁定，全模式）**
+   - 原实现漏发 → **1v1 本身也没有卡图气泡**（用户误以为是 2v2 漏做）；本次 1v1 一起补回（`game.ts` 的 `case 'guwangCancel'` 成功分支）。
+   - 通则：**触发式技能只要玩家"真的发动"了，就必须 `fxSkillFired(...)`**（参考 011 灵能屏障）；否则卡图无声。
+   - 门禁：`tests/skillBubbleGuwang.test.ts`（发动 → 有；不发动 → 没有）。
+
+24. **黑线在攻击起步时画，换视角等它播完（2026-11-07 第二次修正）**
+   - 用户要求：**攻方始终在下方**，黑线从**下方**射出。
+   - 做法：`attackStart({ line: true })`（起步就画）；若这一帧之后要换视角，`holdView` 会等 `settle`（含攻击动画与黑线）播完再整盘镜像——**禁止**"切完再补画"（那样线会从上方射出，用户已明确否掉）。
+   - `deferLine` / `finishViewSwitch` 里的 `drawAttackLine` 已删除；`run2v2Motions` 只保留 `deferAdds`。
+   - 覆盖：普通 / 置换 / 技能攻击、守方选择投票后，全部同一条路。
+   - 门禁：`tests/render2v2WizardAndLine.test.ts`（源码锁：无 `deferLine`、`line: true`、切换等 `settle`）。
+
+25. **「真实之剑」置换攻击的目标＝**同一行**，且不回退到普通攻击界面（2026-11-07 用户定）**
+   - 选满 2 颗后**保持 `convertPick`**（不要 `convertPick = null`、更不要 `selected = 动作`），否则会退回"置换入口 + 攻击骰片 + 通用目标行"这一级（真实反馈：交互很奇怪）。
+   - 目标组通过 `renderConvertPickHost` 的**可选 `extra`** 追加到按钮行里；1v1 不传 → DOM 完全不变。
+   - **2v2 专用两行布局**：`renderConvertPickHost(..., extra, { layout: 'stacked' })` → `convertpick--stacked`＝第 1 行 `.convertpick-head`（标题 + 简化提示）、第 2 行 `.convertpick-row`（骰片 + 目标 + 取消）。**1v1 不传 layout → 仍是单行 DOM**。面板 padding/gap 用紧凑值，**不得改 `--actionzone-min-h`**。
+   - 提示文案（简化后）：`选 2 颗能力骰（视为 5 点）· 已选 N/2`。
+   - 判定现算：`kind==='attack' && dieIds.length===2 && stance!=='defensePicks' && 敌人数>1`；点掉一颗自动收起。
+   - 确认条文案**唯一来源**＝`CONVERT_ATTACK_LABEL` / `CONVERT_BLOCK_LABEL`（与 1v1 `dispatchConvertPick` 逐字一致），2v2 只追加 ` → 玩家X`。**禁止**用 `actionLabel()`（它按普通攻击描述，会说成"用某颗真实骰子攻击"）。
+   - 守方选择（`defensePicks`）→ 选满 2 颗直接 `beginDefenseVote`（投票先行），不摆目标。
+   - 门禁：`tests/render2v2Artifacts010to012.test.ts`（不回退 + 同行目标精确 `['B1','B2']` + 两行结构 + 简化文案 + 文案含"置换"与"→ 玩家B2" + 守方选择走投票）。
+
+26. **置换支付动画：抵挡走攻击池、其余支付在有"停放攻击骰"时右移（2026-11-07 立规）**
+   - **抵挡支付**必须像 1v1 一样识别成 `blockPay`，并从 `otherPays` 里排除 → 交给 `attackResolve({substitution})`，与停在中间的攻击骰**左右并排**（否则会在中间合并成灰 5、盖住攻击骰）。
+   - **其余支付**（011 灵能屏障 / 009 触发 / 023 畏惧 用「真实之剑」置换时）不属于抵挡结算 → 仍走 `playPayments`；`playPayments` **默认**在 `attackPool` 非空时整笔右移一格（`(DIE_W+DIE_GAP)/2`）——**1v1 / 2v2 共用**（1v1 同样会盖住，用户 2026-11-07 同意一起修）。**不要**再加调用方参数。
+   - 门禁：`tests/render2v2WizardAndLine.test.ts`（源码锁：`blockSub` / `substitution: blockSub` / `blockPay` 排除 / `shift = attackPool ? …`）。
+
+27. **守方投票前的"这一刀"＝引擎试算 `previewPendingAttack`（2026-11-07 立规，防伤害公式分叉）**
+   - 投票发生在**派发之前**，但守方要先看到点数/伤害/加成/不可抵挡 → 在**状态副本**上跑一次真实的 `applyAction`（临时指定第一个敌人），读出 `pendingAttack`。
+   - **禁止**在 UI 里另写一份伤害公式（`attackDamageBonus` / 028 视为 6 / L06 ±1 / 023 减半 / L07 不可抵挡…任何一条分叉都会让面板数字和实际结算不一致）。
+   - 隔离要求（`src/ui/attackPreview.ts` 已做）：① 真局一个字节不改；② 骰子 id 计数器用 `get/setDieIdCounter` 快照复原；③ 副本产生的旁路事件用 `fxTake()` 丢弃（调用点必须保证此刻没有待消费事件——只在"开投票"时调用一次）。
+   - 门禁：`tests/attackPreview.test.ts`（试算 = 真结算、真局不变、计数器复原）。
+
+28. **「攻击信息」文案只有一个来源＝`render.ts` 的 `attackInfoParts`（2026-11-07 立规）**
+   - 1v1 提示栏与 2v2 守方投票面板**共用同一份**：`attackInfoParts(state, pa, nameOf, { showAttacker?, estimated? })`。
+   - 1v1 不传 opts → 输出与历史逐字一致（分段更细只为给数字加粗，文本拼接后完全相同）。
+   - 2v2 传 `{ showAttacker: true, estimated: true }`：前面加攻击方名字、`本次`→`预计`、**不显示减半**（屏障/野火属于"被选中座位"之后的事）、不显示"目标 X；请选择"。
+   - 数字段带 `strong: true`：2v2 渲染成**黑色加粗**（`.b2v2-strong`），1v1 忽略。
+   - **禁止**再写第二份文案（曾有一份 `attackPreviewText`，已删）。
+   - 门禁：`tests/attackPreview.test.ts`（1v1 原文 / 2v2 预计且无减半）、`tests/render2v2Real.test.ts`（投票面板两行）、`tests/render.test.ts`（1v1 提示不变）。
+
+29. **投票面板＝两行（2026-11-07 用户定）**
+   - 第 1 行独立：`.b2v2-vote-info`（"这一刀"）。
+   - 第 2 行一行排开：`.b2v2-vote-tip`（`请两位守方玩家投票决定由谁承受本次攻击；投票不一致会重新选择。`，**不再写"谁发起攻击"**）+ 每位投票人 `玩家Bx ▸ [玩家B1] [玩家B2]`（标签座位色）。窄屏才折行。
+   - 门禁：`tests/render2v2Artifacts007to009.test.ts`（tip 精确文案 + 两个投票人 + 无取消）。
+
+30. **「行动中」药丸 + 黄框跟"决策人"（2026-11-07 立规）**
+   - `buildRealView` 的 `activeSeat` 必须与视角同源：**待决策人 → 防守方 → 回合玩家**；**禁止**只看 `state.activePlayer`（否则 009/011 待决策时标记还停在攻方）。
+   - 门禁：`tests/render2v2ViewAndStepState.test.ts`。
+
+31. **投票结束后、派发前必须先还原视觉并重排（2026-11-07 立规，真实事故）**
+   - 投票期间用 `combatView='defender'` 把守方放下面；若直接派发，新帧的 `prevDice` 会在**投票布局**下量取 → 骰子"飞出在上、飞回在下"、黑线从错误一侧出。
+   - 做法：`combatView='attacker'` + `viewTeam=攻方` + `lastViewTeam2v2.set(state, 攻方)` + `draw()`，**然后**才 `dispatch`（同步执行，浏览器不会中间绘制）。
+   - 门禁：源码锁（`onDefenseVote` 里 `draw()` 在 `dispatch` 之前）。
+
+32. **`guwangCancel` 必须带 `source` 且天罚卡名按 key 取（2026-11-07）**
+   - 009「不取消」原来用 `opponentOf(g, player)` 求真伤来源 → 2v2 有 2 个敌人直接抛 `expected exactly one enemy`。**创建 pending 时记下 `source`**，结算用它。
+   - 028/A05 的卡名**禁止按 `blockKind` 硬编码**（A05「深空之火」会被写成「白昼之火」）：统一 `combat.ts` 的 `tianfaSkillName(g, seat)`（按 `g.tianfa[seat].key` 映射），`attackPointNote` 与提示文案都读它。
+   - 「不可抵挡」要写来源：`PendingAttack.unblockableLabel`（001 中央突破 / 022 处刑通牒 / L07 无尽追猎）→ `（不可抵挡·「中央突破」）`。
+   - 门禁：`tests/twoVTwoFixes1107.test.ts`、`tests/combat.test.ts`、`tests/skills.test.ts`。
+
+33. **触发式询问必须写清「谁 · 做了什么 · 这一刀是什么」（2026-11-08 用户定，全模式）**
+   - **009「高塔铁幕·触发」**：`dealTrueDamage` 建 pending 时把 `fxCurrentSource()` 的结果存进 **`Pending.sourceCard`**（神器＝`{player, artifactId, side, skillKey?}` / 战术＝`{player, tacticId}`）。
+     - **为什么必须存**：玩家是**下一个动作**才点"取消/不取消"，那时 `fxReset()` 已经把 `curSource` 清了；不存就只能写"受到 N 点真实伤害"，玩家不知道挨了什么。
+     - **提示文案**（`render.ts` 的 `phaseHintInner`）：`玩家A 发动「锋芒」，对你造成 2 点真实伤害；高塔铁幕：可消耗 1 个防御骰取消。`（技能名按**所属方**上色；战术牌走 `TACTIC_BY_ID[...].name`）
+     - **无来源信息**（老存档 / 直接调 `dealTrueDamage`）→ **退回原文案** `高塔铁幕：受到 N 点真实伤害，可消耗 1 个防御骰取消。`（绝不出现"发动「」"空名）。
+   - **011「灵能屏障·触发」**：提示栏先摆"这一刀"，**复用 `attackInfoParts(state, pa, nameOf, { showAttacker: true, estimated: true })`**（与 2v2 守方投票**同一份**），再 `　｜　灵能屏障：可消耗 1 个冥想骰，使本次攻击伤害减半。`
+     - **禁止**另写一份攻击信息文案（第 28 条的"唯一来源"同样适用）。
+   - 门禁：`tests/hintGuwangSourceAndViewHold.test.ts`（神器来源 / 战术来源 / 无来源三种；011 双段顺序）、`tests/skills.test.ts`（007 战争横扫打真伤 → `sourceCard` 精确断言）。
+
+34. **2v2 禁止自写待决策文案/面板 + 文案/顺序 parity 门禁（2026-11-08 用户强制；新神器必过）**
+   - **事故**：2v2 自己写了一份 009/011 面板（`「高塔铁幕」：消耗 1 个防御骰取消真实伤害` / `不取消`），与 1v1 的骰片行 `发动「高塔铁幕」取消（消耗 防N）` / `不发动「高塔铁幕」` 不一致；「锋芒」的 发动/不发动 **顺序**也反了（2v2 照引擎枚举顺序画，1v1 把「不发动」收集到最后画）。用户要求：**这种按钮样式/文字/顺序/换行的差异以后不许再出现**。
+   - **硬规则**：2v2 的待决策入口**一律复用 1v1**：
+     - 文案 → `render.ts` 的 **`actionLabelOf(state, a)`**（内部先 `actionDieSegmentsOf`，再 `pendingActionLabel`）；2v2 只允许追加「→ 玩家X」。
+     - 骰片行结构/标题 → **`actionDieSegmentsOf(state, a)`**（`parts[0]` 作标题、`parts[last]` 作后缀），骰片文字用 `dieText2v2`；1v1 的 `actionDieSegments` 就是它的薄包装。
+     - 「发动/不发动」顺序 → **发动先画、不发动收集到操作列表最后再画**（照 1v1 的 `plain` 口径）。
+   - **惩罚性门禁 `tests/pendingParity1v1v2v2.test.ts`**：同一局面分别用 `renderGame` / `render2v2Game` 渲染，断言 `.actionlist` 内按钮与骰片的 **文字 + class + 顺序 + 数量**、以及 `.hint-phase` 文本**完全一致**（唯一允许：座位名归一化 `玩家A1→玩家A`、`die-A2→die-A`）。覆盖：009 取消 / 011 减半 / 锋芒（含顺序）。**新神器只要在 2v2 手写一句文案，这条测试就红。**
+   - 边界：2v2 的「纯选对象型待决策」合并成一行（`目标 [B1][B2][不发动「X」]`）是**刻意的 2v2 形状**（第 18 条），不在本 parity 门禁内。
+
+35. **换视角那一帧的「受伤浮动/抖动」时长必须计入 `settle`（2026-11-08 修，2v2 专项）**
+   - **事故**：2v2 把攻击帧的受伤浮动**单独**排在攻击动画之后（`playLifeFloats(…, attackDur, …)`），但 `settle` 只算了 `attackDur`，没算浮动本身 → 换视角的整页重建正好切在浮动/抖动刚开始时：`-X` 数字在独立 fx 层还能看到，**面板抖动作用在已被替换的旧元素上 → 抖动丢失**（日志：每次"不抵挡"后 438/690/421ms 的第二次重建）。
+   - **口径**：`run2v2Motions` 必须 `lifeFxDur = playLifeFloats(...)` 并把 `lifeFxDur` 并入最后的 `Math.max(...)`。1v1 的对应时长由 `runBoardMotions` 的返回值（`motion.ts` 的 `lifeSpan`）携带，所以 1v1 不需要改。
+   - 门禁：`tests/render2v2MotionAlign.test.ts`（源码锁：`lifeFxDur = playLifeFloats(` + 返回值含 `lifeFxDur`）。
+
+
+
+
+
 

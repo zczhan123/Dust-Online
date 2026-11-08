@@ -44,7 +44,7 @@ describe('真伤白墨线 · trueLine 事件（发动即报，落血唯一处发
   it('延后真伤（applyDeferredTrueDamage）不重发（避免 009 与原始技能重复飞线）', () => {
     const g = createGame({ seed: 1, firstPlayer: 'A' });
     fxReset();
-    applyDeferredTrueDamage(g, 'B', 4);
+    applyDeferredTrueDamage(g, 'B', 4, 'A');
     expect(lines(fxTake())).toHaveLength(0);
   });
 

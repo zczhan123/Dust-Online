@@ -177,6 +177,11 @@ export function fxSetSource(s: FxSource | null): void {
   curSource = s;
 }
 
+/** 读"当前正在结算的发动卡"（只读；供 009「高塔铁幕」把来源技能记进待决策）。 */
+export function fxCurrentSource(): FxSource | null {
+  return curSource;
+}
+
 /** 每次动作开始前清空（由 `applyAction` 调用）。 */
 export function fxReset(): void {
   buf = [];
@@ -190,6 +195,14 @@ export function fxTrueLine(source: PlayerId, target: PlayerId, amount: number, d
 
 export function fxPush(e: FxEvent): void {
   buf.push(e);
+}
+
+/**
+ * **只读**查看本帧缓冲区（不消费）——供界面在 `fxTake()` **之前**判断
+ * "这一帧有没有骰子类动画"（2v2 的 `holdView` 需要它：它是先判视角、后进 `draw()` 取事件的）。
+ */
+export function fxPeek(): readonly FxEvent[] {
+  return buf;
 }
 
 /** 战术效果生效：发一条 tacticFired（tacticId 取持有者当前战术牌；无则不记）。 */

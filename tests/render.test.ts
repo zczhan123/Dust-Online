@@ -3182,6 +3182,40 @@ describe('026/027 归属与提示（用户反馈回归）', () => {
     expect(hooks.ui.pendingConfirm!.label).toBe('重掷 2 颗（「凛冽之音」：将受 2 点真实伤害）');
   });
 
+  it('反应类待决策（009 取消 / 011 屏障 / 011 脉冲 / T09 慈悲）期间：不显示「凛冽之音」常驻行与攻击提示；平时照常', () => {
+    const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['022', '026', '027'], heroB: ['001', '002', '003'] });
+    skipInitialReroll(state);
+    state.phase = 'main';
+    state.activePlayer = 'A';
+    state.rerollPunish.A = true;
+    // 022「处刑通牒」计数 ≥1 → 攻击提示行本该有内容（作为"被误伤"的对照）
+    const a022 = state.players.A.artifacts.find((a) => a.id === '022')!;
+    a022.activeMarkerSide = 'right';
+    a022.count = 2;
+    const hooks = hooksFor();
+
+    // 平时（无待决策）→ 都能看到
+    renderGame(state, root, hooks);
+    expect(root.querySelector('.hint-global')?.textContent ?? '').toContain('「凛冽之音」生效中');
+    expect(root.querySelector('.hint-notes')).not.toBeNull();
+
+    const reactionPendings = [
+      { kind: 'guwangCancel', player: 'A', amount: 2, source: 'B' },
+      { kind: 'dunwuHalve', player: 'A' },
+      { kind: 'dunwuPulse', player: 'A', amount: 2 },
+      { kind: 'ciBei', player: 'A', target: 'B', amount: 2 },
+    ] as NonNullable<GameState['pending']>[];
+
+    for (const p of reactionPendings) {
+      state.pending = p;
+      renderGame(state, root, hooks);
+      expect(root.querySelector('.hint-global')?.textContent ?? '').not.toContain('凛冽之音');
+      expect(root.querySelector('.hint-notes')).toBeNull();
+      // 主提示行仍是"这一笔怎么处理"的文案（没有被误伤）
+      expect(root.querySelector('.hint-phase')?.textContent ?? '').not.toBe('');
+    }
+  });
+
   it('A07 历王之血之印：生效期提示栏常驻 + 双方持续技能行/激活徽标转灰', () => {
     const state = createGame({ seed: 1, firstPlayer: 'A', heroA: ['001', '002', 'A07'], heroB: ['004', '005', '006'] });
     skipInitialReroll(state);

@@ -41,7 +41,6 @@ const runSkill = (g: GameState, who: PlayerId, id: string, key: string, params: 
     rng: new SeededRng(1),
     params,
     endMainPhase: () => {},
-    reportConsumed: () => {},
   });
 };
 

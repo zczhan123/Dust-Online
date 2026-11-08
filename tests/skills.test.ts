@@ -1187,9 +1187,8 @@ describe('011 灵能脉冲·触发', () => {
 
   it('通过技能消耗 2 颗能力骰后挂起 dunwuPulse（数量=消耗骰数）', () => {
     const g = setupPulse();
-    expect(g.skillConsumedThisAction).toBe(0);
+    expect(g.skillConsumedThisAction).toEqual({});
     useBreakthrough2(g);
-    expect(g.skillConsumedThisAction).toBe(2);
     expect(g.pending).toEqual({ kind: 'dunwuPulse', player: 'A', amount: 2 });
     const legal = getLegalActions(g);
     expect(legal).toContainEqual({ t: 'dunwuPulse', accept: true });
@@ -1203,7 +1202,7 @@ describe('011 灵能脉冲·触发', () => {
     applyAction(g, { t: 'dunwuPulse', accept: true });
     expect(g.players.B.life).toBe(lifeBefore - 2);
     expect(g.pending).toBeNull();
-    expect(g.dunwuPulseUsedThisTurn).toBe(true);
+    expect(g.dunwuPulseUsed.A).toBe(true);
     expect(g.log.some((e) => e.text.includes('灵能脉冲'))).toBe(true);
   });
 
@@ -1216,8 +1215,8 @@ describe('011 灵能脉冲·触发', () => {
       { id: 'a2', value: 3, kind: 'attack' },
     ];
     applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }, { dieIds: ['a2'] }] } });
-    expect(g.skillConsumedThisAction).toBe(2);
-    expect(g.pending).toBeNull();
+    expect(g.players.A.areas.attack).toEqual([]); // 骰子确实被消耗了
+    expect(g.pending).toBeNull(); // 但本回合已用过 → 不再挂起
   });
 
   it('放弃后可本回合再次触发（used 保持 false）', () => {
@@ -1225,7 +1224,7 @@ describe('011 灵能脉冲·触发', () => {
     useBreakthrough2(g);
     applyAction(g, { t: 'dunwuPulse', accept: false });
     expect(g.pending).toBeNull();
-    expect(g.dunwuPulseUsedThisTurn).toBe(false);
+    expect(g.dunwuPulseUsed.A ?? false).toBe(false);
     g.players.A.areas.attack = [{ id: 'a1', value: 2, kind: 'attack' }];
     applyAction(g, { t: 'skill', artifactId: '011', side: 'right', params: { costSlots: [{ dieIds: ['a1'] }] } });
     expect(g.pending).toEqual({ kind: 'dunwuPulse', player: 'A', amount: 1 });
@@ -1272,7 +1271,14 @@ describe('011 灵能脉冲·触发', () => {
         discard: { attack: 'ba1', defense: 'bd1', meditation: 'bm1' },
       },
     });
-    expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 9 });
+    expect(g.pending).toEqual({
+      kind: 'guwangCancel',
+      player: 'B',
+      amount: 9,
+      source: 'A',
+      // 2026-11-08：待决策带上"谁发动了什么"（供 009 询问的来源句；这里＝007 战争横扫·左）
+      sourceCard: { player: 'A', artifactId: '007', side: 'left', skillKey: 'zhuzai.sweep' },
+    });
   });
 });
 

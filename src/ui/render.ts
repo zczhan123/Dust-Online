@@ -13,6 +13,7 @@ import type {
 } from '../core/model/types';
 import { ARTIFACT_TEXT } from '../core/content/artifactText';
 import { isAltArtifact, SPECIAL_ARTIFACT_NOTE } from '../core/content/artifacts';
+import { artifactDetailNote, artifactDetailTitle } from './shared/artifactDetail';
 import { legendImageUrl, LEGENDS } from '../core/content/legends';
 import { TACTIC_BY_ID, tacticImageUrl, tacticDisplayText, isTacticId } from '../core/content/tactics';
 import { LEGEND_TEXT } from '../core/content/legendText';
@@ -23,17 +24,20 @@ import { getLegalActions, legendSkillReady, quanzhiRemainderHasGroup, tacticBarS
 import { effectiveSpeed, effectiveWill, rerollAllowance, emptyDistribution } from '../core/engine/derive';
 import { areaOf } from '../core/model/dice';
 import { hasActiveSkill, skillUseKey } from '../core/engine/skill-state';
-import { artifactWithSkill, attackDamageBonus, attackPointNote } from '../core/engine/combat';
+import { artifactWithSkill, attackDamageBonus, attackPointNote, tianfaSkillName } from '../core/engine/combat';
 import { battleNotes } from '../core/engine/battleNotes';
+import { isReactionPending } from '../core/engine/pending';
 import { lidichengfoRegions } from '../core/engine/skills';
 import { SKILL_SELECTION, hasSword, isDirectCost, type SelectStep } from './skillSelection';
+import { activeSideSpent, findSkillKey, isActivatableType, kindFromType, skillPartState, zhihaiForcedFrame } from './shared/skillState';
 import { DEFAULT_PREFS, applyPreset, clonePrefs, speedOf, type Prefs } from './prefs';
-import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, moveFxDuration, playBanner, playBubble, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, removalGroupMs, runBoardMotions, setMotionSpeed, resetMotionRuntime, restoreInFlightHides, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type BubbleOpts, type BubbleVariant, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
+import { MOTION, anyRemoved, areaDiceChanged, areaDieIds, attackHold, attackJoin, attackResolve, attackStart, attackWatchDelay, bumpEl, canAnimate, diceSetChanged, diffLife, drawTrueLine, heldAttackDieId, playBanner, createBubbleQueue, playGouhun, playLegendConsume, playLegendSpawn, playPayments, playUltimate, releaseHeldAttackDie, runBoardMotions, setMotionSpeed, resetMotionRuntime, restoreInFlightHides, setScaleX, snapshotDice, snapshotStored, storedIdsOf, weijuHold, weijuResolve, weijuStart, bubbleDuration, addsDuration, type DiceMoveFx, type LegendConsumeItem, type LifeDelta, type PayDie, type PayInfo, type Rect } from './motion';
 import { turnTimerTick } from './turnTimer';
 import { showSettleTip, hideSettleTip } from './settleTip';
 import { diag, isDiagEnabled, missingDiceInDom, gameSnapshot, staleDice, diagDump, diagClear, diagCount } from './diag';
 import { STANDARD_PHASES } from '../core/engine/turnFlow';
 import { fxTake, type FxEvent, type FxSource } from '../core/engine/fx';
+import { renderChipRow, renderRerollButton } from './shared/actionControls';
 
 const AREA_LABEL: Record<DiceKind, string> = {
   attack: '攻击骰区',
@@ -45,7 +49,7 @@ const AREA_ORDER: DiceKind[] = ['defense', 'attack', 'meditation'];
 // 敌方区域镜像：为贴合中央战场做上下翻转（与 AREA_ORDER 相反）
 const AREA_ORDER_MIRRORED: DiceKind[] = ['meditation', 'attack', 'defense'];
 
-const PHASE_LABEL: Record<Phase, string> = {
+export const PHASE_LABEL: Record<Phase, string> = {
   setup: '准备',
   tactics: '战前',
   initialReroll: '初始重掷',
@@ -230,7 +234,7 @@ export interface OnlineUi {
   /** **旁观者**：全程只读（不能操作/不能发言）；点玩家面板切换视角 */
   spectator?: boolean;
   /** A/B → 昵称 */
-  names: Record<PlayerId, string>;
+  names: Record<string, string>;
   /** 胜利弹窗「回大厅」 */
   onLeaveLobby: () => void;
   /** 开/关聊天浮层（战斗界面用；由宿主持有 shell） */
@@ -270,6 +274,9 @@ function playerName(ctx: Ctx, id: PlayerId): string {
 
 interface Ctx {
   state: GameState;
+  /** 2v2 复用提示壳时跳过仍按 A/B 建模的全局提示/battleNotes，避免读 players.A 崩溃。 */
+  noGlobalHint?: boolean;
+  noBattleNotes?: boolean;
   legal: Action[];
   hooks: RenderHooks;
   maxReroll: number;
@@ -328,6 +335,18 @@ function findDie(state: GameState, id: string): Die | undefined {
   return undefined;
 }
 
+/** `findDie` 的**座位无关**版（1v1 的 'A'/'B' 与 2v2 的 A1/A2/B1/B2 都能查）。 */
+function findDieOf(state: GameState, id: string): Die | undefined {
+  for (const p of Object.values(state.players)) {
+    if (!p) continue;
+    for (const k of AREA_ORDER) {
+      const d = p.areas[k].find((x) => x.id === id);
+      if (d) return d;
+    }
+  }
+  return undefined;
+}
+
 function dieValue(state: GameState, id: unknown): number | undefined {
   return typeof id === 'string' ? findDie(state, id)?.value : undefined;
 }
@@ -345,15 +364,24 @@ function heldDiceOfKind(state: GameState, player: PlayerId, kind: DiceKind): { i
   return out;
 }
 
-/** 某 id 是否为「神器上存放的骰」→ 骰片改中性样式、只显示点数 */
-function heldDieValue(state: GameState, id: string): number | null {
-  for (const pid of ['A', 'B'] as PlayerId[]) {
-    for (const a of state.players[pid].artifacts) {
+/** 某 id 是否为「神器上存放的骰」→ 骰片改中性样式、只显示点数。
+ *  ⚠️ **不能只遍历 `'A'/'B'`**：2v2 只有 A1/A2/B1/B2（会读到 undefined 崩）。 */
+export function heldDieValueOf(state: GameState, id: string): number | null {
+  for (const p of Object.values(state.players)) {
+    if (!p) continue;
+    for (const a of p.artifacts) {
       const h = (a.heldDice ?? []).find((x) => x.id === id);
       if (h) return h.value;
     }
+    const t = p.tacticHeldDie;
+    if (t && t.id === id) return t.value;
   }
   return null;
+}
+
+/** 1v1 内部沿用（与 `heldDieValueOf` 等价）。 */
+function heldDieValue(state: GameState, id: string): number | null {
+  return heldDieValueOf(state, id);
 }
 
 function diceListLabel(state: GameState, ids: string[]): string {
@@ -376,114 +404,80 @@ const COST_KIND_LABEL: Record<string, string> = {
   'dunwu.pulse.activate': '攻击',
 };
 
-function kindFromType(type: string): SkillDef['kind'] | undefined {
-  if (type.includes('激活')) return 'activation';
-  if (type.includes('启动')) return 'activate';
-  if (type.includes('必杀')) return 'ultimate';
-  if (type.includes('充能')) return 'charge';
-  if (type.includes('持续')) return 'continuous';
-  if (type.includes('触发')) return 'trigger';
-  return undefined;
-}
-
-function isActivatableType(type: string): boolean {
-  return type.includes('启动') || type.includes('激活') || type.includes('必杀');
-}
-
-function findSkillKey(a: Artifact, side: SkillDef['side'], type: string): string | undefined {
-  const kind = kindFromType(type);
-  if (kind) {
-    const def = a.skills.find((s) => s.side === side && s.kind === kind);
-    if (def) return def.key;
-  }
-  return a.skills.find((s) => s.side === side)?.key;
-}
-
 function skillLabel(
   a: Artifact | undefined,
   side: 'left' | 'right' | 'only',
   kind: SkillDef['kind'] | undefined,
 ): string | undefined {
   if (!a || !kind) return undefined;
-  const text = ARTIFACT_TEXT[a.id];
-  const t = text?.skills.find((s) => s.side === side && kindFromType(s.type) === kind);
-  return t?.name;
+  return artifactSkillName(a.id, side, kind);
 }
 
-/** 激活侧是否为「激活」类技能、且当前已不可用（用于「已激活·xx」徽标变灰）；或无剩余生效能力 */
-function activeSideSpent(ctx: Ctx, a: Artifact): boolean {
-  const side = a.activeMarkerSide;
-  if (!side) return false;
-  // 该神器已无生效能力（持续失效、必杀用尽）→「已激活」徽标同样转灰
-  // A07 异相·历王之血之印：本回合临时持续失效 → 徽标同样转灰
-  if (a.continuousLost || a.continuousLostThisTurn) return true;
-  const skills = ARTIFACT_TEXT[a.id]?.skills;
-  const t =
-    skills?.find((s) => s.side === side && s.type.includes('激活')) ??
-    skills?.find((s) => s.side === 'only' && s.type.includes('激活'));
-  if (!t) return false;
-  return skillPartState(ctx, a, t) === 'spent';
-}
-
-/** 该神器某侧显示名（不区分技能类型），用于名称兜底 */
-function sideDisplayName(a: Artifact | undefined, side: 'left' | 'right' | 'only'): string | undefined {
+/** 该神器某侧显示名（不区分技能类型），用于名称兜底。 */
+function sideDisplayName(
+  a: Artifact | undefined,
+  side: 'left' | 'right' | 'only',
+): string | undefined {
   if (!a) return undefined;
   return ARTIFACT_TEXT[a.id]?.skills.find((s) => s.side === side)?.name;
 }
 
-/** 内部 key 形如 `wansha.ultimate`，绝不应出现在界面上 */
+/** `SkillDef.kind` → 卡面文案用的类型词（`ARTIFACT_TEXT[].skills[].type`）。 */
+const KIND_TYPE_WORD: Record<SkillDef['kind'], string> = {
+  activate: '启动',
+  activation: '激活',
+  trigger: '触发',
+  continuous: '持续',
+  charge: '充能',
+  ultimate: '必杀',
+};
+
+/**
+ * 神器某侧技能显示名 —— **全项目唯一取名来源**（1v1 / 2v2 / 战报 / 按钮 / 气泡都必须走这里）。
+ *  - 给 `kind`：按「侧 + 类型」精确查；合写类型（如「持续 / 触发」）按 `/` 拆开逐段匹配；
+ *  - 不给 `kind`：该侧第一条（同侧同名，历史口径）。
+ *
+ * ⚠️ **神器文案没有 `key` 字段** → 禁止用 `skillKey` 去 `ARTIFACT_TEXT` 里找（永远找不到 →
+ *    退化成神器名。真实事故：2v2 技能名显示成「影掠」）。
+ */
+export function artifactSkillName(
+  artifactId: string,
+  side: 'left' | 'right' | 'only',
+  kind?: SkillDef['kind'],
+): string | undefined {
+  const text = ARTIFACT_TEXT[artifactId];
+  if (!text) return undefined;
+  const onSide = text.skills.filter((s) => s.side === side);
+  if (!kind) return onSide[0]?.name;
+  const word = KIND_TYPE_WORD[kind];
+  return onSide.find((s) => s.type.split('/').some((t) => t.trim() === word))?.name;
+}
+
+/**
+ * 技能名（气泡 / 操作列表 / 提示通用）：
+ * 神器 → `artifactSkillName`（按「侧 + 类型」）；传奇 → `legendSkillNameOf`（按 `key`，因为传奇文案才有 key）。
+ * 2v2 与 1v1 必须共用本函数，**禁止各自取名**。
+ */
+export function skillBubbleName(
+  state: GameState,
+  player: PlayerId,
+  artifactId: string,
+  side: 'left' | 'right' | 'only',
+  skillKey?: string,
+): string {
+  const pl = state.players[player];
+  const a = pl.artifacts.find((x) => x.id === artifactId);
+  if (a) {
+    const kind = skillKey ? a.skills.find((s) => s.key === skillKey)?.kind : undefined;
+    return artifactSkillName(a.id, side, kind) ?? sideDisplayName(a, side) ?? a.name;
+  }
+  if (pl.legend && pl.legend.id === artifactId) return legendSkillNameOf(pl.legend, skillKey);
+  return '';
+}
+
+/** 内部 key 形如 `wansha.ultimate`，绝不应出现在界面上。 */
 function looksLikeInternalKey(s: string): boolean {
   return /^[a-z0-9]+(\.[a-z0-9]+)+$/i.test(s.trim());
-}
-
-/** 单条技能行的展示状态：可用(绿) / 未激活(浅灰) / 不能再使用(深灰) / 激活侧但本次已用完(灰底绿边) */
-/** 018 至黑：必杀「强制发动」进行中（计数达 5 被引擎强制启动，尚在选择重掷骰） */
-function zhihaiForcedFrame(ctx: Ctx, a: Artifact, s: { type: string }): boolean {
-  const pd = ctx.state.pending;
-  if (!pd || pd.kind !== 'zhihaiReroll' || !pd.forced) return false;
-  if (!s.type.includes('必杀')) return false;
-  return ctx.state.players[pd.player].artifacts.includes(a);
-}
-
-/** 该神器属于哪名玩家（双方可能持有同名神器，故记录键必须带玩家前缀） */
-function ownerIdOfArtifact(state: GameState, a: Artifact): PlayerId | undefined {
-  return (['A', 'B'] as PlayerId[]).find((id) => state.players[id].artifacts.includes(a));
-}
-
-function skillPartState(
-  ctx: Ctx,
-  a: Artifact,
-  s: { side: SkillDef['side']; type: string },
-): 'on' | 'off' | 'disabled' | 'spent' {
-  const key = findSkillKey(a, s.side, s.type);
-  const owner = ownerIdOfArtifact(ctx.state, a);
-  const markerOk =
-    a.allSidesActiveThisTurn === true ||
-    (a.activeMarkerSide != null && (s.side === a.activeMarkerSide || s.side === 'only'));
-  // 必杀「强制发动」进行中：该行临时显示为绿色（发动的一瞬间）
-  if (zhihaiForcedFrame(ctx, a, s)) return 'on';
-  if (key != null && s.type.includes('必杀') && owner != null && ctx.state.ultimatesUsed.includes(skillUseKey(owner, key))) return 'disabled';
-  // 「在接下来的游戏中失去持续式效果」（018 必杀用后）／A07「历王之血之印」本回合临时持续失效：该持续技能行转深灰
-  if ((a.continuousLost || a.continuousLostThisTurn) && s.type.includes('持续')) return 'disabled';
-  if (key === 'buxiang.cuilian' && a.count >= 3) return 'disabled';
-  if (a.column === 3 && s.type.includes('充能') && a.chargeLayer >= (a.chargeReq ?? 0)) return 'disabled';
-  // L08 传奇面板·没有怜悯：024「狂舞」的必杀在尘落 ≥4 时**无需激活/充能**即可启动 → 该行显示为可用
-  if (
-    key === 'kuangwu.ultimate' &&
-    owner != null &&
-    hasActiveSkill(ctx.state.players[owner], 'xiva.meiyoulianmin') &&
-    ctx.state.dustfall >= 4
-  ) {
-    return 'on';
-  }
-  // 「激活」类：只有被“切入该侧”的当回合、且本回合未用过时才可用；否则为“已用完”（灰底 + 保留绿色左边线）
-  if (s.type.includes('激活') && markerOk) {
-    const armedNow =
-      a.armedTurn === ctx.state.turnIndex && a.armedSide === (s.side === 'only' ? 'left' : s.side);
-    const used = key != null && owner != null && ctx.state.skillsUsedThisTurn.includes(skillUseKey(owner, key));
-    if (!armedNow || used) return 'spent';
-  }
-  return markerOk ? 'on' : 'off';
 }
 
 type DustRiseAction = Extract<Action, { t: 'dustRise' }>;
@@ -505,7 +499,7 @@ function dustSideSkillName(artifactId: string, side: 'left' | 'right'): string {
   return text?.skills.find((s) => s.side === side)?.name ?? (side === 'left' ? '左侧' : '右侧');
 }
 
-function dustEntryLabel(a: Artifact, free = false): string {
+export function dustEntryLabel(a: Artifact, free = false): string {
   if (a.column === 3 && a.chargeLayer >= (a.chargeReq ?? 0)) {
     return `续充「${a.name}」（计数 +1、回复生命）`;
   }
@@ -722,7 +716,7 @@ function deltaSpan(player: PlayerState, delta: number): HTMLElement {
 
 /** 神器属性摘要片段：第N列 / 速度 / 意志 / 生命 / 充能 / 分布 / 计数（卡头与卡图浮窗共用一处来源）
  *  - 速度/意志带补正（玩家色）；充能与「生命」同一样式、位于徽标之前；计数带上限。 */
-function metaParts(art: Artifact, player: PlayerState | null, animState?: GameState): (string | HTMLElement)[] {
+export function metaParts(art: Artifact, player: PlayerState | null, animState?: GameState): (string | HTMLElement)[] {
   const parts: (string | HTMLElement)[] = [`第${art.column}列`];
   if (art.speed !== undefined) {
     parts.push(`速度 ${art.speed}`);
@@ -781,13 +775,13 @@ function countCapOf(art: Artifact, player: PlayerState | null): number | undefin
 }
 
 /** 计数文案的唯一来源（计数与充能是两种属性：计数用独立徽标、会升会降） */
-function countText(art: Artifact, player: PlayerState | null = null): string {
+export function countText(art: Artifact, player: PlayerState | null = null): string {
   const cap = countCapOf(art, player);
   return cap !== undefined ? `计数 ${art.count}/${cap}` : `计数 ${art.count}`;
 }
 
 /** 以全角空格连接文本/节点片段（药丸类补正/充能紧贴前一个值，不插分隔） */
-function appendParts(parent: HTMLElement, parts: (string | HTMLElement)[]): void {
+export function appendParts(parent: HTMLElement, parts: (string | HTMLElement)[]): void {
   for (const [i, p] of parts.entries()) {
     const inline =
       typeof p !== 'string' && (p.classList.contains('sub-delta') || p.classList.contains('sub-charge'));
@@ -1836,6 +1830,114 @@ function lifeBar(player: PlayerState, name?: string, status?: 'on' | 'off'): HTM
 interface HintPart {
   text: string;
   color?: PlayerId;
+  /** 2v2 守方投票面板里要**黑色加粗**的段（1v1 忽略） */
+  strong?: boolean;
+}
+
+/**
+ * 「本次攻击」的提示分段——**1v1 提示栏与 2v2 守方投票面板共用同一份文案**（唯一来源）。
+ *
+ * - 1v1：不传 opts → 输出与历史逐字一致。
+ * - 2v2 投票：`{ showAttacker: true, estimated: true }`
+ *   → 前面加攻击方名字、`本次`→`预计`、**不显示减半**（屏障/野火属于"被选中者"之后的事）、
+ *     不显示"目标 X；请选择"（还没选座位）。
+ */
+export function attackInfoParts(
+  state: GameState,
+  pa: PendingAttack,
+  nameOf: (id: PlayerId) => string,
+  opts?: { showAttacker?: boolean; estimated?: boolean },
+): HintPart[] {
+  const estimated = opts?.estimated === true;
+  const showAttacker = opts?.showAttacker === true;
+  const dmgWord = estimated ? '预计' : '本次';
+  const sep = estimated ? ' · ' : '，';
+  const bonus =
+    pa.bonusValue !== undefined
+      ? { value: pa.bonusValue, label: pa.bonusLabel }
+      : attackDamageBonus(state, pa.attacker);
+  const parts: HintPart[] = [];
+  const pointNote = attackPointNote(state, pa);
+  if (pa.sourceValue !== undefined) {
+    if (showAttacker) {
+      parts.push({ text: nameOf(pa.attacker), color: pa.attacker });
+      parts.push({ text: ' 用 ' });
+      parts.push({ text: `${pa.sourceValue} 点`, strong: true });
+      parts.push({ text: `攻击骰${pointNote ? `（${pointNote}）` : ''}攻击` });
+    } else {
+      parts.push({ text: '被 ' });
+      parts.push({ text: `${pa.sourceValue} 点`, strong: true });
+      parts.push({ text: `攻击骰${pointNote ? `（${pointNote}）` : ''}攻击` });
+    }
+    parts.push({ text: sep });
+    parts.push({ text: `${dmgWord} ` });
+    parts.push({ text: `${pa.value} 伤害`, strong: true });
+  } else if (pa.sourceSkill) {
+    // 技能发起的攻击：写明"由该技能引起"，并区分「持有者自己发起 / 他人因该效果发起」
+    parts.push({ text: nameOf(pa.attacker), color: pa.attacker });
+    parts.push({ text: pa.sourceSkillOwner === pa.attacker ? '「' : ' 因对方「' });
+    parts.push({ text: pa.sourceSkill, color: pa.sourceSkillOwner });
+    const noDie = `无攻击骰${pointNote ? `，${pointNote}` : ''}`;
+    parts.push({ text: pa.sourceSkillOwner === pa.attacker ? '」发起攻击' : '」效果而发起攻击' });
+    parts.push({ text: sep });
+    parts.push({ text: `${dmgWord} ` });
+    parts.push({ text: `${pa.value} 伤害`, strong: true });
+    parts.push({ text: `（${noDie}）` });
+  } else {
+    parts.push({ text: estimated ? '预计 ' : '本次 ' });
+    parts.push({ text: `${pa.value} 伤害`, strong: true });
+    parts.push({ text: `（技能攻击，无攻击骰${pointNote ? `，${pointNote}` : ''}）` });
+  }
+  if (bonus.value > 0) {
+    parts.push({ text: '（' });
+    if (bonus.label) parts.push({ text: `「${bonus.label}」`, color: pa.attacker });
+    parts.push({ text: `加成 ` });
+    parts.push({ text: `${bonus.value} 伤害`, strong: true });
+    parts.push({ text: '）' });
+  }
+  // 减半只在 1v1 提示栏显示：投票时座位未定，屏障/野火都还没发生（2v2 `estimated` 跳过）
+  if (pa.halveReason && !estimated) {
+    parts.push({ text: '（「' });
+    parts.push({ text: pa.halveReason, color: oppOf(pa.attacker) });
+    parts.push({ text: '」减半）' });
+  }
+  if (pa.unblockable) {
+    parts.push({ text: pa.unblockableLabel ? `（不可抵挡·「${pa.unblockableLabel}」）` : '（不可抵挡）' });
+  }
+  // 028 / A05：说明"受哪张卡影响、只能用哪类骰抵挡"——卡名按 `tianfa` 真实 key 取（A05 不能写成白昼之火）
+  if (pa.blockKind) {
+    const skillName = tianfaSkillName(state, pa.attacker) ?? (pa.blockKind === 'meditation' ? '白昼之火' : '陨落');
+    const kindCn = pa.blockKind === 'meditation' ? '冥想' : '攻击';
+    parts.push({ text: '（受 ' });
+    parts.push({ text: nameOf(pa.attacker), color: pa.attacker });
+    parts.push({ text: ' 的「' });
+    parts.push({ text: skillName, color: pa.attacker }); // 该技能属**攻击方**的天罚
+    parts.push({ text: `」影响：只能用${kindCn}骰抵挡）` });
+  }
+  if (estimated) return parts; // 投票阶段：没有"目标/请选择"，也没有挑战模式的组序号
+  // 挑战模式"因多组触发的攻击"：显示「（第 K / N 组 · 本组第 j / m 次）」
+  if (pa.legendGroup) {
+    const lg = pa.legendGroup;
+    if (lg.total <= 1 && lg.sub != null) {
+      parts.push({ text: `（第 ${lg.sub} / ${lg.subTotal} 次）` });
+    } else if (lg.sub != null) {
+      parts.push({ text: `（第 ${lg.index} / ${lg.total} 组 · 本组第 ${lg.sub} / ${lg.subTotal} 次）` });
+    } else {
+      parts.push({ text: `（第 ${lg.index} / ${lg.total} 组）` });
+    }
+  }
+  // Z06「冥界行走·白」（本回合）：其攻击造成伤害 → 回复该点数一半（提示挑战者"让它伤到会回血"）
+  if (state.mode === 'challenge' && pa.attacker === 'B' && state.challenge?.mingjieHeal) {
+    parts.push({ text: '（造成伤害后「' });
+    parts.push({ text: '冥界行走·白', color: 'B' });
+    parts.push({ text: '」回复该攻击点数一半的生命（向上取整））' });
+  }
+  if (pa.defender) {
+    parts.push({ text: '；目标 ' });
+    parts.push({ text: nameOf(pa.defender), color: pa.defender });
+  }
+  parts.push({ text: '；请选择' });
+  return parts;
 }
 
 const weiyaReasonCn = (r: 'attack' | 'defense' | 'dustRise' | 'skill'): string =>
@@ -1853,7 +1955,11 @@ function globalHint(ctx: Ctx): HintPart[] {
   const { state } = ctx;
   if (state.phase === 'gameOver') return [];
   const out: HintPart[] = [];
-  if (state.rerollPunish.A || state.rerollPunish.B) {
+  // 027「凛冽之音」惩罚生效期：常驻提醒。
+  // ⚠️ 但在**「即时反应」类待决策**（009 取消真伤 / 011 屏障减半 / 011 脉冲选目标 / T09 慈悲）期间**不显示**——
+  //    那时玩家要回答的是"这一笔伤害要不要处理"，旁边挂着"任何人重掷都会受伤"极易误读成"这一刀跟重掷有关"。
+  //    其它时候（重掷阶段 / 主要阶段 / 等操作）照常显示。
+  if (!isReactionPending(state.pending) && (state.rerollPunish.A || state.rerollPunish.B)) {
     const owner: PlayerId = state.rerollPunish.A ? 'A' : 'B';
     out.push({ text: `${playerName(ctx, owner)}「凛冽之音」生效中——任何玩家重掷能力骰后，被重掷方受到等量真实伤害`, color: owner });
   }
@@ -2051,6 +2157,26 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     ];
   }
   if (pd && pd.kind === 'guwangCancel') {
+    const parts: HintPart[] = [];
+    // 先写清"谁发动了什么、造成多少真伤"——否则玩家只看到"受到 N 点真伤"不知道挨了什么
+    const card = pd.sourceCard;
+    if (card && card.player !== pd.player) {
+      const nm = card.tacticId
+        ? (TACTIC_BY_ID[card.tacticId]?.name ?? '')
+        : skillBubbleName(state, card.player, card.artifactId ?? '', card.side ?? 'only', card.skillKey);
+      parts.push({ text: playerName(ctx, card.player), color: card.player });
+      if (nm) {
+        parts.push({ text: ' 发动「' });
+        parts.push({ text: nm, color: card.player });
+        parts.push({ text: '」，' });
+      } else {
+        parts.push({ text: ' ' });
+      }
+      parts.push({ text: `对你造成 ${pd.amount} 点真实伤害；` });
+      parts.push({ text: '高塔铁幕', color: pd.player });
+      parts.push({ text: '：可消耗 1 个防御骰取消。' });
+      return parts;
+    }
     return [
       { text: '高塔铁幕', color: pd.player },
       { text: `：受到 ${pd.amount} 点真实伤害，可消耗 1 个防御骰取消。` },
@@ -2075,15 +2201,25 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
     ];
   }
   if (pd && pd.kind === 'dunwuHalve') {
-    return [
-      { text: '灵能屏障', color: pd.player },
-      { text: '：可消耗 1 个冥想骰，使本次攻击伤害减半。' },
-    ];
+    // 先摆"这一刀"（与 2v2 守方投票**同一份**文案 `attackInfoParts`），再写屏障怎么用
+    const parts: HintPart[] = [];
+    if (state.pendingAttack) {
+      parts.push(
+        ...attackInfoParts(state, state.pendingAttack, (id) => playerName(ctx, id), {
+          showAttacker: true,
+          estimated: true,
+        }),
+      );
+      parts.push({ text: '　｜　' });
+    }
+    parts.push({ text: '灵能屏障', color: pd.player });
+    parts.push({ text: '：可消耗 1 个冥想骰，使本次攻击伤害减半。' });
+    return parts;
   }
   if (pd && pd.kind === 'dunwuPulse') {
     return [
       { text: '灵能脉冲', color: pd.player },
-      { text: `：可造成 ${pd.amount} 点真实伤害（本回合消耗 ${pd.amount} 颗能力骰）。` },
+      { text: `：可造成 ${pd.amount} 点真实伤害（本次消耗 ${pd.amount} 颗能力骰）。` },
     ];
   }
   if (state.pending && state.pending.kind === 'leibaoReroll') {
@@ -2129,73 +2265,7 @@ function phaseHintInner(ctx: Ctx): HintPart[] {
   }
   if (pd && pd.kind === 'hanguangPick') return []; // 面板已说明，不再重复（避免与「轮到X操作」连读）
   if (state.pendingAttack) {
-    const pa = state.pendingAttack;
-    const bonus = pa.bonusValue !== undefined ? { value: pa.bonusValue, label: pa.bonusLabel } : attackDamageBonus(state, pa.attacker);
-    const parts: HintPart[] = [];
-    // 点数被改判（028「视为6」/ L06 ±1）→ 提示栏也要写明，别只说"被 3 点攻击骰攻击"却按 6 算
-    const pointNote = attackPointNote(state, pa);
-    if (pa.sourceValue !== undefined) {
-      parts.push({ text: `被 ${pa.sourceValue} 点攻击骰${pointNote ? `（${pointNote}）` : ''}攻击，本次 ${pa.value} 伤害` });
-    } else if (pa.sourceSkill) {
-      // 技能发起的攻击：写明"由该技能引起"，并区分「持有者自己发起 / 他人因该效果发起」
-      // 技能名**按所属方取色**（昔传=B 红；将来涉及挑战者则是 A 蓝）——不按名字，避免重名串色
-      parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
-      parts.push({ text: pa.sourceSkillOwner === pa.attacker ? '「' : ' 因对方「' });
-      parts.push({ text: pa.sourceSkill, color: pa.sourceSkillOwner });
-      const noDie = `无攻击骰${pointNote ? `，${pointNote}` : ''}`;
-      parts.push({
-        text:
-          pa.sourceSkillOwner === pa.attacker
-            ? `」发起攻击，本次 ${pa.value} 伤害（${noDie}）`
-            : `」效果而发起攻击，本次 ${pa.value} 伤害（${noDie}）`,
-      });
-    } else {
-      parts.push({ text: `本次 ${pa.value} 伤害（技能攻击，无攻击骰${pointNote ? `，${pointNote}` : ''}）` });
-    }
-    if (bonus.value > 0) {
-      parts.push({ text: '（' });
-      // 加成归属＝**发起攻击方**（昔传攻击＝B 红）；技能名按所属方取色
-      if (bonus.label) parts.push({ text: `「${bonus.label}」`, color: pa.attacker });
-      parts.push({ text: `加成 ${bonus.value} 伤害）` });
-    }
-    if (pa.halveReason) {
-      // 减半来自**防守方**的卡（411 灵能屏障 / 023 畏惧 / 021 满计数）→ 按防守方取色
-      parts.push({ text: '（「' });
-      parts.push({ text: pa.halveReason, color: oppOf(pa.attacker) });
-      parts.push({ text: '」减半）' });
-    }
-    if (pa.unblockable) parts.push({ text: '（不可抵挡）' });
-    // 028 天罚：说明"受哪张卡影响、只能用哪类骰抵挡"
-    if (pa.blockKind) {
-      const skillName = pa.blockKind === 'meditation' ? '白昼之火' : '陨落';
-      const kindCn = pa.blockKind === 'meditation' ? '冥想' : '攻击';
-      parts.push({ text: `（受 ` });
-      parts.push({ text: playerName(ctx, pa.attacker), color: pa.attacker });
-      parts.push({ text: ' 的「' });
-      parts.push({ text: skillName, color: pa.attacker }); // 该技能属**攻击方**的天罚
-      parts.push({ text: `」影响：只能用${kindCn}骰抵挡）` });
-    }
-    // 挑战模式"因多组触发的攻击"：显示「（第 K / N 组 · 本组第 j / m 次）」
-    //（遁入暗影每组 1 段 → 只有"（第 K / N 组）"；数罪并罚 2 段 / 电刑 3 段 → 带组内序号）
-    if (pa.legendGroup) {
-      const lg = pa.legendGroup;
-      if (lg.total <= 1 && lg.sub != null) {
-        // 只有 1 组（Z06 虚无形态的 5 段）→ 不写"组"，只显组内序号
-        parts.push({ text: `（第 ${lg.sub} / ${lg.subTotal} 次）` });
-      } else if (lg.sub != null) {
-        parts.push({ text: `（第 ${lg.index} / ${lg.total} 组 · 本组第 ${lg.sub} / ${lg.subTotal} 次）` });
-      } else {
-        parts.push({ text: `（第 ${lg.index} / ${lg.total} 组）` });
-      }
-    }
-    // Z06「冥界行走·白」（本回合）：其攻击造成伤害 → 回复该点数一半（提示挑战者"让它伤到会回血"）
-    if (state.mode === 'challenge' && pa.attacker === 'B' && state.challenge?.mingjieHeal) {
-      parts.push({ text: '（造成伤害后「' });
-      parts.push({ text: '冥界行走·白', color: 'B' });
-      parts.push({ text: '」回复该攻击点数一半的生命（向上取整））' });
-    }
-    parts.push({ text: '；请选择' });
-    return parts;
+    return attackInfoParts(state, state.pendingAttack, (id) => playerName(ctx, id));
   }
   if (pd) {
     if (pd.kind === 'kuyu') {
@@ -2305,7 +2375,7 @@ export function actorOf(state: GameState): PlayerId {
   // 待决策**优先**：它才是当前必须做决定的人。
   // （026 威压这类待决策会与「待抵挡」同时存在，且决策人可能是**攻击方**——旧的先判 pendingAttack 会把它算成防守方）
   if (state.pending) return state.pending.player;
-  if (state.pendingAttack) return state.pendingAttack.attacker === 'A' ? 'B' : 'A';
+  if (state.pendingAttack) return state.pendingAttack.defender ?? (state.pendingAttack.attacker === 'A' ? 'B' : 'A');
   return state.activePlayer;
 }
 
@@ -2375,7 +2445,7 @@ function hintBox(ctx: Ctx): HTMLElement {
   }
   left.appendChild(phase);
   // 全场常驻提醒（独立元素；不与「轮到X操作」连读）
-  const glob = globalHint(ctx);
+  const glob = ctx.noGlobalHint ? [] : globalHint(ctx);
   if (glob.length > 0) {
     const owner = glob[0].color;
     const g = el('span', `hint-global${owner ? ` player-${owner}` : ''}`);
@@ -2383,7 +2453,7 @@ function hintBox(ctx: Ctx): HTMLElement {
     left.appendChild(g);
   }
   // 主要阶段的「攻击提示」：只列出此刻可用的攻击相关修正（独占一行，由 .hint-notes 的 flex:1 1 100% 保证）
-  const notes = battleNotes(ctx.state, actor);
+  const notes = ctx.noBattleNotes ? [] : battleNotes(ctx.state, actor);
   if (notes.length > 0) {
     const line = el('div', 'hint-notes');
     line.dataset.role = 'battle-notes';
@@ -2429,6 +2499,31 @@ function hintBox(ctx: Ctx): HTMLElement {
 }
 
 /** 中央操作区：把「轮到谁 + 阶段提示」与下方的操作栏合并为一块 */
+/** 2v2 复用 1v1 的提示栏（阶段提示 / 全局提示 / battleNotes / 尘落）。 */
+export function renderHintHost(state: GameState, prefs: Prefs, error: string | null): HTMLElement {
+  const ctx = {
+    state,
+    legal: [],
+    maxReroll: 0,
+    selectionStep: null,
+    selectionOwner: null,
+    slotsStepOpen: false,
+    dustFlowOpen: false,
+    areaPick: null,
+    prefs,
+    noGlobalHint: true,
+    noBattleNotes: false,
+    hooks: {
+      ui: { rerollSelected: new Set<string>(), error, prefs },
+      onAction: () => {},
+      propose: () => {},
+      requestRender: () => {},
+      onRestart: () => {},
+    },
+  } as unknown as Ctx;
+  return hintBox(ctx);
+}
+
 function actionZone(ctx: Ctx): HTMLElement {
   const zone = el('div', 'actionzone');
   // 联机：行动倒计时进度条（细紫、融进下框线；两端同一条）
@@ -2622,7 +2717,7 @@ function confirmRow(ctx: Ctx): HTMLElement | null {
   return row;
 }
 
-function advanceLabel(phase: Phase): string {
+export function advanceLabel(phase: Phase): string {
   switch (phase) {
     case 'dustRise':
       return '结束尘起阶段';
@@ -2637,26 +2732,17 @@ function advanceLabel(phase: Phase): string {
   }
 }
 
-function actionLabel(ctx: Ctx, a: Action): string | null {
-  // 025 屠虎·奇袭：把能力骰「视为攻击骰」发起攻击 → 文案必须点明「视为」，不可与真攻击骰混淆
-  if (a.t === 'attack' && a.costSlots[0]?.treated === true) {
-    const d = findDie(ctx.state, a.costSlots[0].dieIds[0]);
-    return d ? `将 ${KIND_SHORT[d.kind]}${d.value} 视为攻击骰发起攻击` : '将能力骰视为攻击骰发起攻击';
-  }
-  const segs = actionDieSegments(ctx, a);
-  if (segs) return segsToText(ctx, segs);
-  const { state } = ctx;
+/**
+ * **待决策 / 触发类动作的文案唯一来源**（1v1 与 2v2 共用）。
+ *
+ * 返回 `null` ＝ 这个动作不归这里管（调用方走自己的分支）。
+ * ⚠️ 新增待决策动作时，文案写**这里**；禁止在 `battle2v2View.ts` 另写一份
+ * （那样「不发动「X」」这类文案会出现两套，2v2 的按钮就会缺技能名）。
+ * ⚠️ 带骰子的变体（`defenseDieId` / `meditationDieId` …）在 1v1 由 `actionDieSegments`
+ * 先行接管（渲染成骰片），所以这里的分支只负责"纯文字"那一版。
+ */
+export function pendingActionLabel(state: GameState, a: Action): string | null {
   switch (a.t) {
-    case 'advance':
-      return advanceLabel(state.phase);
-    case 'block':
-      return '不抵挡';
-    case 'dustRise': {
-      const owner: PlayerId =
-        a.fuchou && state.pending?.kind === 'fuchouRise' ? state.pending.player : state.activePlayer;
-      const art = state.players[owner].artifacts.find((x) => x.id === a.artifactId);
-      return art ? dustEntryLabel(art) : '尘起';
-    }
     case 'caiyuliu':
       return a.to === 'defense' ? '「裁雨流」移到防御骰区' : a.to === 'meditation' ? '「裁雨流」移到冥想骰区' : '不发动「裁雨流」';
     case 'c01Caiyuliu':
@@ -2681,7 +2767,7 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'guwangCancel':
       return '不发动「高塔铁幕」';
     case 'dunwuHalve':
-      return '不发动「灵能屏障」';
+      return a.accept ? '发动「灵能屏障」（伤害减半）' : '不发动「灵能屏障」';
     case 'fengmang': {
       if (!a.accept) return '不发动';
       const pd = state.pending;
@@ -2693,8 +2779,10 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
     case 'shenhongKill':
       return a.accept ? '发动「杀意」（3 真伤 + 回2）' : '不发动「杀意」';
     case 'aidao':
-      // 带 defenseDieId 的变体已由 actionDieSegments 走骰片（"弃置对方 防X"）；裸 accept 只在对方无防御骰时出现
-      return a.accept ? '发动「哀悼」（对方无防御骰）' : '不发动「哀悼」';
+      // 带 defenseDieId 的变体在 1v1 由 actionDieSegments 走骰片（"弃置对方 防X"）；裸 accept 只在对方无防御骰时出现。
+      // 2v2 没有骰片分叉（未审计）→ 这里必须自己写出"弃置防御骰"，否则会误报"对方无防御骰"。
+      if (!a.accept) return '不发动「哀悼」';
+      return a.defenseDieId ? '发动「哀悼」（弃置对方 1 个防御骰）' : '发动「哀悼」（对方无防御骰）';
     case 'duanexing':
       return a.accept ? '发动「闻我名者断恶行」' : '不发动「闻我名者断恶行」';
     case 'ciBei': {
@@ -2720,6 +2808,41 @@ function actionLabel(ctx: Ctx, a: Action): string | null {
       return null;
     default:
       return null;
+  }
+}
+
+function actionLabel(ctx: Ctx, a: Action): string | null {
+  return actionLabelOf(ctx.state, a);
+}
+
+/**
+ * 动作文案（**state 版**，1v1 与 2v2 共用同一份；2v2 只允许追加「→ 玩家X」）。
+ * 带骰子的变体优先走骰片分段文案（如 `发动「高塔铁幕」取消（消耗 防6）`），
+ * 其余走 `pendingActionLabel`（待决策文案唯一来源）。
+ */
+export function actionLabelOf(state: GameState, a: Action): string | null {
+  // 025 屠虎·奇袭：把能力骰「视为攻击骰」发起攻击 → 文案必须点明「视为」，不可与真攻击骰混淆
+  if (a.t === 'attack' && a.costSlots[0]?.treated === true) {
+    const d = findDie(state, a.costSlots[0].dieIds[0]);
+    return d ? `将 ${KIND_SHORT[d.kind]}${d.value} 视为攻击骰发起攻击` : '将能力骰视为攻击骰发起攻击';
+  }
+  // 带骰子的变体（骰片文案）必须先于"纯文字待决策文案"判定，否则会拿到错的那一版
+  const segs = actionDieSegmentsOf(state, a);
+  if (segs) return segsToTextOf(state, segs);
+  switch (a.t) {
+    case 'advance':
+      return advanceLabel(state.phase);
+    case 'block':
+      return '不抵挡';
+    case 'dustRise': {
+      const owner: PlayerId =
+        a.fuchou && state.pending?.kind === 'fuchouRise' ? state.pending.player : state.activePlayer;
+      const art = state.players[owner].artifacts.find((x) => x.id === a.artifactId);
+      return art ? dustEntryLabel(art) : '尘起';
+    }
+    default:
+      // 待决策 / 触发类：文案唯一来源（2v2 共用同一个函数）
+      return pendingActionLabel(state, a);
   }
 }
 
@@ -2762,24 +2885,19 @@ function rerollButton(ctx: Ctx): HTMLButtonElement | null {
   const reroll = ctx.legal.find((x): x is Extract<Action, { t: 'reroll' }> => x.t === 'reroll');
   if (!reroll) return null;
   const count = ctx.hooks.ui.rerollSelected.size;
-  // 027 凛冽之音：惩罚生效期内，重掷按钮/确认条直接写明会掉多少血（避免"忽然被扣血"）
   const punished = ctx.state.rerollPunish.A || ctx.state.rerollPunish.B;
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'btn btn-reroll';
-  b.dataset.act = 'reroll';
-  b.textContent = punished ? `重掷选中(${count})（将受 ${count} 点真实伤害）` : `重掷选中(${count})`;
-  if (punished) b.title = '「凛冽之音」生效中：重掷多少颗，被重掷方就受到多少点真实伤害';
-  b.disabled = count === 0;
-  b.addEventListener('click', () => {
-    const n = ctx.hooks.ui.rerollSelected.size;
-    if (n === 0) return;
-    ctx.hooks.propose(
-      { t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] },
-      punished ? `重掷 ${n} 颗（「凛冽之音」：将受 ${n} 点真实伤害）` : `重掷 ${n} 颗`,
-    );
+  return renderRerollButton({
+    selectedCount: count,
+    punished,
+    onClick: () => {
+      const n = ctx.hooks.ui.rerollSelected.size;
+      if (n === 0) return;
+      ctx.hooks.propose(
+        { t: 'reroll', dieIds: [...ctx.hooks.ui.rerollSelected] },
+        punished ? `重掷 ${n} 颗（「凛冽之音」：将受 ${n} 点真实伤害）` : `重掷 ${n} 颗`,
+      );
+    },
   });
-  return b;
 }
 
 function dustEntryButton(ctx: Ctx, a: Artifact, free = false, fuchou = false): HTMLButtonElement {
@@ -2802,9 +2920,9 @@ interface DieSeg {
 }
 
 /** 动作的“文本片段 + 骰子”分段（parts.length === dice.length + 1）；无骰返回 null。
- *  统一规则：凡文案指向具体骰子，一律用骰片呈现，不得写成文字。 */
-function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg[] } | null {
-  const { state } = ctx;
+ *  统一规则：凡文案指向具体骰子，一律用骰片呈现，不得写成文字。
+ *  **state 版**：1v1 与 2v2 共用同一份（避免两边各写一套文案/顺序）。 */
+export function actionDieSegmentsOf(state: GameState, a: Action): { parts: string[]; dice: DieSeg[] } | null {
   const opponent = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
   switch (a.t) {
     case 'attack':
@@ -2817,18 +2935,6 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       if (ids.length === 0) return null; // 「不抵挡」按文字处理
       const owner = state.pendingAttack ? opponent(state.pendingAttack.attacker) : state.activePlayer;
       return { parts: ['抵挡', ''], dice: ids.map((id) => ({ id, owner })) };
-    }
-    case 'guwangCancel': {
-      if (!a.cancel || !a.defenseDieId) return null;
-      const pd = state.pending;
-      const owner: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
-      return { parts: ['发动「高塔铁幕」取消（消耗 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
-    }
-    case 'dunwuHalve': {
-      if (!a.accept || !a.meditationDieId) return null;
-      const pd = state.pending;
-      const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
-      return { parts: ['发动「灵能屏障」伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
     }
     case 'aidao': {
       // A02 深红（异相）·哀悼：弃置的是**对方区域内**的防御骰 → owner = 持有者之对手
@@ -2844,6 +2950,46 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const owner: PlayerId = pd && pd.kind === 'duanexing' ? opponent(pd.player) : state.activePlayer;
       return { parts: ['发动「闻我名者断恶行」（弃置对方 ', '）'], dice: [{ id: a.dieId, owner }] };
     }
+    case 'guwangCharge': {
+      // 009 充能：改的是**对方**的攻击骰（1v1 只有一个对方；2v2 走自己的"先选对象"面板）
+      if (!a.dieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'guwangCharge' ? opponent(pd.player) : state.activePlayer;
+      return { parts: ['改为 1 点 ', ''], dice: [{ id: a.dieId, owner }] };
+    }
+    default:
+      // 其余（骰子归属＝决策人自己的那几种）走**共享实现**，保证 1v1 / 2v2 同一份文案
+      return pendingDieSegmentsOf(state, a);
+  }
+}
+
+/** 1v1 内部薄包装（等价于 `actionDieSegmentsOf(ctx.state, a)`）。 */
+function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg[] } | null {
+  return actionDieSegmentsOf(ctx.state, a);
+}
+
+/**
+ * 待决策的骰片分段（**state 版，1v1 / 2v2 共用**）。
+ * 只覆盖「骰子归属就是决策人自己」的几种；`哀悼 / 断恶行` 的骰在**对方区域**，
+ * 归属要按"对方是谁"推（1v1 才有唯一对方）→ 留在 1v1 的 `actionDieSegments` 里。
+ */
+export function pendingDieSegmentsOf(
+  state: GameState,
+  a: Action,
+): { parts: string[]; dice: DieSeg[] } | null {
+  switch (a.t) {
+    case 'guwangCancel': {
+      if (!a.cancel || !a.defenseDieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'guwangCancel' ? pd.player : state.activePlayer;
+      return { parts: ['发动「高塔铁幕」取消（消耗 ', '）'], dice: [{ id: a.defenseDieId, owner }] };
+    }
+    case 'dunwuHalve': {
+      if (!a.accept || !a.meditationDieId) return null;
+      const pd = state.pending;
+      const owner: PlayerId = pd && pd.kind === 'dunwuHalve' ? pd.player : state.activePlayer;
+      return { parts: ['发动「灵能屏障」伤害减半（消耗 ', '）'], dice: [{ id: a.meditationDieId, owner }] };
+    }
     case 'weijuPay': {
       // 023 畏惧：对方被迫消耗的那颗骰 → 1 颗用内联骰片
       if (!a.dieId) return null;
@@ -2851,30 +2997,27 @@ function actionDieSegments(ctx: Ctx, a: Action): { parts: string[]; dice: DieSeg
       const owner: PlayerId = pd && pd.kind === 'weijuPay' ? pd.player : state.activePlayer;
       return { parts: ['消耗 1 颗能力骰 ', ''], dice: [{ id: a.dieId, owner }] };
     }
-    case 'guwangCharge': {
-      if (!a.dieId) return null;
-      const pd = state.pending;
-      const owner: PlayerId = pd && pd.kind === 'guwangCharge' ? opponent(pd.player) : state.activePlayer;
-      return { parts: ['改为 1 点 ', ''], dice: [{ id: a.dieId, owner }] };
-    }
     default:
       return null;
   }
 }
 
-/** 骰子的文字形式（如 防6） */
-function segDieText(ctx: Ctx, seg: DieSeg): string {
-  const d = findDie(ctx.state, seg.id);
+/** 骰子的文字形式（如 防6）——`state` 版，1v1 / 2v2 共用 */
+export function dieSegTextOf(state: GameState, seg: { id: string }): string {
+  // 034 破障 / 027 寒光：骰在**神器上**（不在任何区域）→ 先查存放骰，否则会写成「?」
+  const held = heldDieValueOf(state, seg.id);
+  if (held != null) return String(held);
+  const d = findDieOf(state, seg.id);
   return d ? `${KIND_SHORT[d.kind]}${d.value}` : '?';
 }
 
 /** 文本片段 + 骰子的分段（契约：`parts.length === dice.length + 1`，逐位拼接 → 用于纯文字标签）。
  *  注意：**骰片行**（`actionChipRow`）会把「同一文案、不同骰子」的多个动作合并成一行，
  *  那里的后缀必须只渲染一次、位于整行末尾，不能按本函数的逐位规则。 */
-function segsToText(ctx: Ctx, segs: { parts: string[]; dice: DieSeg[] }): string {
+export function segsToTextOf(state: GameState, segs: { parts: string[]; dice: DieSeg[] }): string {
   let out = segs.parts[0] ?? '';
   segs.dice.forEach((s, i) => {
-    out += segDieText(ctx, s) + (segs.parts[i + 1] ?? '');
+    out += dieSegTextOf(state, s) + (segs.parts[i + 1] ?? '');
   });
   return out;
 }
@@ -2885,42 +3028,30 @@ function actionChipRow(
   parts: string[],
   items: { a: Action; die: DieSeg }[],
 ): HTMLElement {
-  const row = el('div', 'actionlist-chips');
-  const lead = el('span', 'chip-label');
-  lead.textContent = parts[0] ?? '';
-  row.appendChild(lead);
-  items.forEach(({ a, die }) => {
+  const chips = items.map(({ a, die }) => {
     const d = findDie(ctx.state, die.id);
     const heldValue = heldDieValue(ctx.state, die.id);
     const treated = a.t === 'attack' && a.costSlots[0]?.treated === true;
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className =
-      heldValue != null
-        ? 'pay-die clickable pay-die--held'
-        : `pay-die clickable die-${die.owner}${treated ? ' pay-die--treated' : ''}`;
-    chip.dataset.id = die.id;
-    chip.dataset.act = a.t;
-    if (treated) chip.dataset.treated = '1';
-    chip.textContent =
-      heldValue != null
-        ? String(heldValue)
-        : d
-          ? treated
-            ? `${KIND_SHORT[d.kind]}${d.value} → 攻击`
-            : `${KIND_SHORT[d.kind]}${d.value}`
-          : '?';
-    chip.addEventListener('click', () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? ''));
-    row.appendChild(chip);
+    return {
+      id: die.id,
+      act: a.t,
+      treated,
+      className:
+        heldValue != null
+          ? 'pay-die clickable pay-die--held'
+          : `pay-die clickable die-${die.owner}${treated ? ' pay-die--treated' : ''}`,
+      text:
+        heldValue != null
+          ? String(heldValue)
+          : d
+            ? treated
+              ? `${KIND_SHORT[d.kind]}${d.value} → 攻击`
+              : `${KIND_SHORT[d.kind]}${d.value}`
+            : '?',
+      onClick: () => ctx.hooks.propose(a, actionLabel(ctx, a) ?? ''),
+    };
   });
-  // 同一行是把「同一文案、不同骰子」的多个动作合并成一行 → 后缀（如「）」）只出现一次、位于整行末尾
-  const tail = parts[parts.length - 1] ?? '';
-  if (tail) {
-    const t = el('span', 'chip-label');
-    t.textContent = tail;
-    row.appendChild(t);
-  }
-  return row;
+  return renderChipRow(parts[0] ?? '', chips, parts[parts.length - 1] ?? '');
 }
 
 type HanguangAction = Extract<Action, { t: 'hanguangPick' }>;
@@ -3732,11 +3863,28 @@ function slotsStepView(ctx: Ctx, sel: ActiveSelection, step: SlotsStep): HTMLEle
   return box;
 }
 
-/** 技能选择器「dice」步骤的骰片（与骰区点选共享同一选中状态；双入口） */
-function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLElement {
-  const actor = actorOf(ctx.state);
-  const ownerId = step.owner === 'self' ? actor : oppOf(actor);
-  const owner = ctx.state.players[ownerId];
+/** 供 2v2 多座位界面复用 1v1 的 slots 支付面板（含 010 置换 / 034 存放骰）。 */
+export function renderSlotsStepHost(
+  state: GameState,
+  slots: string[][],
+  slotModes: ('real' | 'convert')[],
+  kinds: DiceKind[],
+  onChange: () => void,
+): HTMLElement {
+  const sel = { slots, slotModes } as unknown as ActiveSelection;
+  const ctx = { state, hooks: { requestRender: onChange } } as unknown as Ctx;
+  return slotsStepView(ctx, sel, { kind: 'slots', label: '', kinds });
+}
+
+/** 技能选择器「dice」步骤的骰片；1v1 与 2v2 共用同一 DOM 来源。 */
+export function renderDiceChips(
+  state: GameState,
+  ownerId: PlayerId,
+  step: { areas: DiceKind[]; filter?: (d: { id: string; value: number; kind: DiceKind }) => boolean; ignoreLock?: boolean; allowArtifact?: boolean; ownerSeat?: PlayerId; owner?: 'self' | 'opponent' },
+  selected: Set<string>,
+  onToggle: (d: { id: string; value: number; kind: DiceKind }) => void,
+): HTMLElement {
+  const owner = state.players[ownerId];
   const box = el('div', 'pay-dice');
   for (const k of AREA_ORDER) {
     if (!step.areas.includes(k)) continue;
@@ -3746,12 +3894,10 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
       die.dataset.kind = d.kind;
       die.dataset.value = String(d.value);
       die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
-      if (sel.currentSel.has(d.id)) {
-        die.classList.add('selected');
-      }
-      if ((step.ignoreLock || !isValueLocked(ctx.state, ownerId, d.value)) && (!step.filter || step.filter(d))) {
+      if (selected.has(d.id)) die.classList.add('selected');
+      if ((step.ignoreLock || !isValueLocked(state, ownerId, d.value)) && (!step.filter || step.filter(d))) {
         die.classList.add('clickable');
-        die.addEventListener('click', () => toggleSelDie(ctx.hooks, step, d));
+        die.addEventListener('click', () => onToggle(d));
       } else {
         die.classList.add('pay-die--used');
       }
@@ -3760,20 +3906,24 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
   }
   // 034/A03 破障（持续）：神器上存放的骰当作能力骰「使用/消耗」→ 仅限走 paySlots 的支付步（allowArtifact）
   // 只附**与本步类型相符**的存放骰（类型按第二列分布判定），避免出现"类型不符"的假可选项。
-  if (step.allowArtifact === true && step.owner === 'self' && hasActiveSkill(owner, 'jingang.pozhang.continuous')) {
+  const allowHeld =
+    step.allowArtifact === true &&
+    (step.ownerSeat ? step.ownerSeat === ownerId : step.owner === 'self') &&
+    hasActiveSkill(owner, 'jingang.pozhang.continuous');
+  if (allowHeld) {
     for (const k of AREA_ORDER) {
       if (!step.areas.includes(k)) continue;
-      for (const h of heldDiceOfKind(ctx.state, ownerId, k)) {
+      for (const h of heldDiceOfKind(state, ownerId, k)) {
         const hd = { id: h.id, value: h.value, kind: k };
         const chip = el('span', 'pay-die pay-die--held');
         chip.dataset.id = h.id;
         chip.dataset.value = String(h.value);
         chip.textContent = String(h.value);
         chip.title = `「金刚·破障」：神器上存放的骰（${h.value} 点，视为${KIND_NAMES[k]}骰）`;
-        if (sel.currentSel.has(h.id)) chip.classList.add('selected');
-        if ((step.ignoreLock || !isValueLocked(ctx.state, ownerId, h.value)) && (!step.filter || step.filter(hd))) {
+        if (selected.has(h.id)) chip.classList.add('selected');
+        if ((step.ignoreLock || !isValueLocked(state, ownerId, h.value)) && (!step.filter || step.filter(hd))) {
           chip.classList.add('clickable');
-          chip.addEventListener('click', () => toggleSelDie(ctx.hooks, step, hd));
+          chip.addEventListener('click', () => onToggle(hd));
         } else {
           chip.classList.add('pay-die--used');
         }
@@ -3782,6 +3932,13 @@ function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLE
     }
   }
   return box;
+}
+
+/** 技能选择器「dice」步骤的骰片（与骰区点选共享同一选中状态；双入口） */
+function chooserDiceChips(ctx: Ctx, sel: ActiveSelection, step: DiceStep): HTMLElement {
+  const actor = actorOf(ctx.state);
+  const ownerId = step.ownerSeat ?? (step.owner === 'self' ? actor : oppOf(actor));
+  return renderDiceChips(ctx.state, ownerId, step, sel.currentSel, (d) => toggleSelDie(ctx.hooks, step, d as Die));
 }
 
 function chooserPanel(ctx: Ctx): HTMLElement | null {
@@ -3832,6 +3989,27 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
       row.appendChild(b);
     }
     head.appendChild(row);
+  } else if (step.kind === 'seat') {
+    const row = el('div', 'option-row');
+    for (const cand of step.candidates) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn option-btn';
+      b.dataset.seat = cand;
+      if (sel.options[sel.stepIndex] === cand) b.classList.add('option-btn--on');
+      b.textContent = step.labels?.[cand] ?? cand;
+      b.addEventListener('click', () => {
+        sel.options[sel.stepIndex] = cand;
+        hooks.requestRender();
+      });
+      row.appendChild(b);
+    }
+    head.appendChild(row);
+    if (step.hint) {
+      const hint = el('div', 'selector-hint');
+      hint.textContent = step.hint;
+      head.appendChild(hint);
+    }
   } else if (step.kind === 'number') {
     const nums = el('div', 'number-row');
     for (let n = step.min; n <= step.max; n++) {
@@ -3897,6 +4075,8 @@ function chooserPanel(ctx: Ctx): HTMLElement | null {
     satisfied = allSelSlotsFilled(sel, step);
   } else if (step.kind === 'pips') {
     satisfied = sel.currentSel.size >= step.min && sel.currentSel.size <= step.max;
+  } else if (step.kind === 'seat') {
+    satisfied = step.candidates.includes(sel.options[sel.stepIndex] as PlayerId);
   } else {
     satisfied = Number.isInteger(chosenNum) && chosenNum >= step.min && chosenNum <= step.max;
   }
@@ -3956,6 +4136,12 @@ function confirmSelection(ctx: Ctx): void {
     }
     sel.chosenDice.push([...sel.currentSel]);
     sel.currentSel = new Set<string>();
+  } else if (step.kind === 'seat') {
+    if (!step.candidates.includes(sel.options[sel.stepIndex] as PlayerId)) {
+      hooks.requestRender();
+      return;
+    }
+    sel.chosenDice.push([]);
   }
   sel.stepIndex += 1;
 
@@ -5086,8 +5272,28 @@ function challengeRulesPanel(ctx: Ctx): HTMLElement {
   return overlay;
 }
 
-function settingsPanel(ctx: Ctx): HTMLElement {
-  const ui = ctx.hooks.ui;
+/**
+ * 设置面板的唯一实现。1v1 传自己的 Ctx，2v2 传显式回调；禁止再复制一份。
+ * `onChange` 负责把新 prefs 写回宿主并重绘；关闭时调用 `onClose`。
+ */
+export function renderSettingsPanel(
+  state: GameState,
+  initialPrefs: Prefs,
+  onChange: (next: Prefs) => void,
+  onClose: () => void,
+): HTMLElement {
+  const ui = { prefs: initialPrefs, settingsOpen: true } as UiState;
+  const ctx = {
+    state,
+    hooks: {
+      ui,
+      onPrefsChange: (next: Prefs) => onChange(next),
+      requestRender: () => {
+        if (!ui.settingsOpen) onClose();
+        else onChange(ui.prefs);
+      },
+    },
+  } as unknown as Ctx;
   const overlay = el('div', 'settings-overlay');
   const box = el('div', 'settings-panel');
 
@@ -5130,7 +5336,7 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   };
 
   // 传奇模式：战报常驻中段战报格（无"收起"概念）→ 战报栏设置无效
-  const legendMode = !!(ctx.state.players.A.legend || ctx.state.players.B.legend);
+  const legendMode = Object.values(ctx.state.players).some((p) => !!p.legend);
 
   row('显示技能描述', [
     { text: '隐藏', on: !ui.prefs.showSkillText, onClick: () => setPref(ctx, 'showSkillText', false) },
@@ -5182,11 +5388,19 @@ function settingsPanel(ctx: Ctx): HTMLElement {
       b.className = 'btn settings-opt';
       b.textContent = text;
       b.addEventListener('click', () =>
-        setPref(ctx, 'zoomPercent', Math.min(100, Math.max(10, ui.prefs.zoomPercent + delta))),
+        setPref(ctx, 'zoomPercent', Math.min(150, Math.max(10, ui.prefs.zoomPercent + delta))),
       );
       wrap.appendChild(b);
     };
     mk('缩小', -5);
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'settings-zoom-input';
+    input.min = '10';
+    input.max = '150';
+    input.value = String(ui.prefs.zoomPercent);
+    input.addEventListener('change', () => setPref(ctx, 'zoomPercent', Math.min(150, Math.max(10, Number(input.value) || ui.prefs.zoomPercent))));
+    wrap.appendChild(input);
     mk('放大', +5);
     r.appendChild(wrap);
     box.appendChild(r);
@@ -5215,6 +5429,22 @@ function settingsPanel(ctx: Ctx): HTMLElement {
   });
   overlay.appendChild(box);
   return overlay;
+}
+
+function settingsPanel(ctx: Ctx): HTMLElement {
+  return renderSettingsPanel(
+    ctx.state,
+    ctx.hooks.ui.prefs,
+    (next) => {
+      ctx.hooks.ui.prefs = next;
+      ctx.hooks.onPrefsChange?.(clonePrefs(next));
+      ctx.hooks.requestRender();
+    },
+    () => {
+      ctx.hooks.ui.settingsOpen = false;
+      ctx.hooks.requestRender();
+    },
+  );
 }
 
 /** 【排查·?diag=1】诊断日志浮层（复用设置浮层样式；一键复制，http 下浏览器禁用剪贴板 → 自动全选，Ctrl+C）。 */
@@ -5370,9 +5600,10 @@ function detailSkillList(ctx: Ctx, art: Artifact, owner: PlayerId): HTMLElement 
     box.appendChild(wrap);
   }
   // 特典神器：技能描述**之后**追加一行提示（浮窗本来就带描述 → 恒显示）
-  if (art.special) {
+  const specialNote = artifactDetailNote(art.id);
+  if (specialNote) {
     const note = el('div', 'card-special-note');
-    note.textContent = SPECIAL_ARTIFACT_NOTE;
+    note.textContent = specialNote;
     box.appendChild(note);
   }
   return box;
@@ -5488,15 +5719,21 @@ function tacticDetailPopover(
   return overlay;
 }
 
-function detailPopover(ctx: Ctx): HTMLElement | null {
-  const d = ctx.hooks.ui.detail;
-  if (!d) return null;
-  if (isTacticId(d.artifactId)) return tacticDetailPopover(ctx, d);
+type ArtifactDetailState = NonNullable<UiState['detail']>;
+
+/**
+ * 神器详情浮窗的唯一 DOM 来源。1v1 与 2v2 都调用这里，禁止另写一份。
+ * `onClose` 只负责调用方自己的关闭状态；内容仍按传入 `state + owner` 实时读取。
+ */
+function artifactDetailOverlay(
+  ctx: Ctx,
+  d: ArtifactDetailState,
+  onClose: () => void,
+): HTMLElement | null {
   const found = findArtifactAnywhere(ctx.state, d.artifactId, d.player);
   if (!found) return null;
   const { art } = found;
   const isLegend = /^L\d{2}$/.test(art.id);
-  const ui = ctx.hooks.ui;
 
   const overlay = el('div', 'detail-overlay');
   const box = el('div', 'detail-popover');
@@ -5505,19 +5742,14 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
 
   const head = el('div', 'detail-head');
   const title = el('div', 'detail-title');
-  title.textContent = isLegend
-    ? art.name
-    : `${art.name}${art.weapon ? `（${art.weapon}）` : ''}${art.special ? '　〔特典〕' : ''}`;
+  title.textContent = isLegend ? art.name : artifactDetailTitle(art);
   head.appendChild(title);
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'btn btn-cancel detail-close';
   close.dataset.act = 'detailClose';
   close.textContent = '✕';
-  close.addEventListener('click', () => {
-    ui.detail = null;
-    ctx.hooks.requestRender();
-  });
+  close.addEventListener('click', onClose);
   head.appendChild(close);
   box.appendChild(head);
 
@@ -5541,17 +5773,37 @@ function detailPopover(ctx: Ctx): HTMLElement | null {
   box.appendChild(detailSkillList(ctx, art, found.owner));
 
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      ui.detail = null;
-      ctx.hooks.requestRender();
-    }
+    if (e.target === overlay) onClose();
   });
   overlay.appendChild(box);
-  attachDetailOverlayForward(overlay, ctx);
   return overlay;
 }
 
-function convertAvailable(state: GameState, payer: PlayerId): boolean {
+/** 2v2 等外部视图用的详情浮窗入口：不写进 1v1 的 UiState。 */
+export function renderArtifactDetailOverlay(
+  state: GameState,
+  d: ArtifactDetailState,
+  onClose: () => void,
+): HTMLElement | null {
+  const ctx = { state } as unknown as Ctx;
+  return artifactDetailOverlay(ctx, d, onClose);
+}
+
+function detailPopover(ctx: Ctx): HTMLElement | null {
+  const d = ctx.hooks.ui.detail;
+  if (!d) return null;
+  if (isTacticId(d.artifactId)) return tacticDetailPopover(ctx, d);
+  const close = (): void => {
+    ctx.hooks.ui.detail = null;
+    ctx.hooks.requestRender();
+  };
+  const overlay = artifactDetailOverlay(ctx, d, close);
+  if (overlay) attachDetailOverlayForward(overlay, ctx);
+  return overlay;
+}
+
+/** 「真实之剑」(010) 置换入口是否可用：已激活 + 至少 2 颗能力骰 + 5 点未被锁。1v1 / 2v2 共用。 */
+export function convertAvailable(state: GameState, payer: PlayerId): boolean {
   if (!hasActiveSkill(state.players[payer], 'shenhong.sword')) return false;
   // Z12「不动菩提」：置换出的有效点数是 5 → 5 点被封锁时置换不可用
   if (isValueLocked(state, payer, 5)) return false;
@@ -5834,18 +6086,60 @@ function quanzhiPanel(ctx: Ctx): HTMLElement {
   return panel;
 }
 
-function convertPickPanel(ctx: Ctx): HTMLElement {
-  const cp = ctx.hooks.ui.convertPick!;
-  const payer = ctx.state.players[convertPickOwner(ctx.state)];
+/** 供 2v2 复用 1v1 的 029「全知」分配面板。 */
+export interface QuanzhiHostState {
+  groups: { kind: DiceKind; dieIds: string[] }[];
+  selected: string[];
+  preview: boolean;
+}
+
+export function renderQuanzhiHost(
+  state: GameState,
+  qz: QuanzhiHostState,
+  onChange: () => void,
+  onAction: (a: Action) => void,
+): HTMLElement {
+  const ctx = {
+    state,
+    hooks: { ui: { quanzhi: qz }, requestRender: onChange, onAction },
+  } as unknown as Ctx;
+  return quanzhiPanel(ctx);
+}
+
+/**
+ * 「真实之剑」置换选骰面板（**1v1 / 2v2 共用同一份 DOM / 文案 / 顺序**）。
+ * 付款方统一由 `convertPickOwner(state)` 推导（待决策 > 抵挡方 > 当前行动方）。
+ * 选满 2 颗后做什么由调用方决定（1v1 立即提出待确认动作；2v2 同样走 `propose`）。
+ */
+export function renderConvertPickHost(
+  state: GameState,
+  cp: { kind: 'attack' | 'block'; dieIds: string[] },
+  onToggle: (d: { id: string; value: number; kind: DiceKind }) => void,
+  onCancel: () => void,
+  /**
+   * 2v2 专用：追加到**同一行**的尾部内容（例如 `目标 [玩家B1] [玩家B2]`）。
+   * 1v1 不传 → DOM 完全不变（同一个面板、同一份文案）。
+   */
+  extra?: HTMLElement | null,
+  /**
+   * 2v2 专用布局：`stacked`＝第 1 行文字（标题+提示）、第 2 行按钮（骰片+目标+取消）。
+   * 不传＝`inline`（1v1 原样，单行）。
+   */
+  opts?: { layout?: 'inline' | 'stacked' },
+): HTMLElement {
+  const payer = state.players[convertPickOwner(state)];
   const isAtk = cp.kind === 'attack';
-  const kindName = isAtk ? '攻击' : '防御';
-  const wrap = el('div', 'convertpick');
+  const stacked = opts?.layout === 'stacked';
+  const wrap = el('div', `convertpick${stacked ? ' convertpick--stacked' : ''}`);
+  const head = stacked ? el('div', 'convertpick-head') : null;
   const title = el('span', 'convertpick-title');
   title.textContent = `使用「真实之剑」置换进行${isAtk ? '攻击' : '抵挡'}`;
-  wrap.appendChild(title);
+  (head ?? wrap).appendChild(title);
   const hint = el('span', 'convertpick-hint');
-  hint.textContent = `请选择 2 颗能力骰（每 2 颗顶 1 颗${kindName}骰，点数按 5；已选 ${cp.dieIds.length}/2）`;
-  wrap.appendChild(hint);
+  // 简化文案（2026-11-07 用户要求）：别把"每 2 颗顶 1 颗、点数按 5"重复两遍
+  hint.textContent = `选 2 颗能力骰（视为 5 点）· 已选 ${cp.dieIds.length}/2`;
+  (head ?? wrap).appendChild(hint);
+  if (head) wrap.appendChild(head);
   const diceBox = el('div', 'pay-dice');
   for (const k of AREA_ORDER) {
     for (const d of payer.areas[k]) {
@@ -5855,22 +6149,35 @@ function convertPickPanel(ctx: Ctx): HTMLElement {
       die.dataset.value = String(d.value);
       die.textContent = `${KIND_SHORT[d.kind]}${d.value}`;
       if (cp.dieIds.includes(d.id)) die.classList.add('selected');
-      die.addEventListener('click', () => toggleConvertDie(ctx.hooks, d));
+      die.addEventListener('click', () => onToggle({ id: d.id, value: d.value, kind: d.kind }));
       diceBox.appendChild(die);
     }
   }
-  wrap.appendChild(diceBox);
+  const row = stacked ? el('div', 'convertpick-row') : null;
+  (row ?? wrap).appendChild(diceBox);
+  // 2v2 的"打谁"与骰片/取消**同一行**（面板本身 flex-wrap）
+  if (extra) (row ?? wrap).appendChild(extra);
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'btn btn-cancel';
   cancel.dataset.act = 'convertCancel';
   cancel.textContent = '取消';
-  cancel.addEventListener('click', () => {
-    ctx.hooks.ui.convertPick = null;
-    ctx.hooks.requestRender();
-  });
-  wrap.appendChild(cancel);
+  cancel.addEventListener('click', onCancel);
+  (row ?? wrap).appendChild(cancel);
+  if (row) wrap.appendChild(row);
   return wrap;
+}
+
+function convertPickPanel(ctx: Ctx): HTMLElement {
+  return renderConvertPickHost(
+    ctx.state,
+    ctx.hooks.ui.convertPick!,
+    (d) => toggleConvertDie(ctx.hooks, d),
+    () => {
+      ctx.hooks.ui.convertPick = null;
+      ctx.hooks.requestRender();
+    },
+  );
 }
 
 /** 锋芒（触发）：操作列表入口按钮 */
@@ -5888,7 +6195,7 @@ function fengmangButton(ctx: Ctx): HTMLButtonElement {
 }
 
 /** 锋芒面板：选 1 颗攻击骰 + 1 颗冥想骰（不再枚举组合） */
-function fengmangPanel(ctx: Ctx): HTMLElement {
+export function fengmangPanel(ctx: Ctx): HTMLElement {
   const fp = ctx.hooks.ui.fengmangPick!;
   const pd = ctx.state.pending;
   const owner: PlayerId = pd && pd.kind === 'fengmang' ? pd.player : ctx.state.activePlayer;
@@ -6257,6 +6564,69 @@ function dustFlowView(ctx: Ctx): HTMLElement {
   return box;
 }
 
+export type DustFlowState = NonNullable<UiState['dustFlow']>;
+
+export interface DustFlowHostOpts {
+  state: GameState;
+  legal: Action[];
+  flow: DustFlowState | null;
+  setFlow: (flow: DustFlowState | null) => void;
+  onAction: (a: Action) => void;
+  requestRender: () => void;
+}
+
+/** 2v2 启动尘起：复用 1v1 `openDustFlow`，不复制选侧/支付/尘印逻辑。 */
+export function startDustFlowHost(
+  opts: Omit<DustFlowHostOpts, 'flow'>,
+  artifactId: string,
+  free = false,
+  fuchou = false,
+): DustFlowState | null {
+  const ui = { dustFlow: null } as UiState;
+  const ctx = {
+    state: opts.state,
+    legal: opts.legal,
+    hooks: {
+      ui,
+      onAction: (a: Action) => {
+        opts.setFlow(ui.dustFlow);
+        opts.onAction(a);
+      },
+      requestRender: () => {
+        opts.setFlow(ui.dustFlow);
+        opts.requestRender();
+      },
+    },
+  } as unknown as Ctx;
+  const art = opts.state.players[actorOf(opts.state)]?.artifacts.find((a) => a.id === artifactId);
+  if (!art) return null;
+  openDustFlow(ctx, art, free, fuchou);
+  opts.setFlow(ui.dustFlow);
+  return ui.dustFlow;
+}
+
+/** 2v2 渲染尘起：复用 1v1 `dustFlowView`（选侧/支付/尘印/置换同一套 DOM）。 */
+export function renderDustFlowHost(opts: DustFlowHostOpts): HTMLElement | null {
+  if (!opts.flow) return null;
+  const ui = { dustFlow: opts.flow } as UiState;
+  const ctx = {
+    state: opts.state,
+    legal: opts.legal,
+    hooks: {
+      ui,
+      onAction: (a: Action) => {
+        opts.setFlow(ui.dustFlow);
+        opts.onAction(a);
+      },
+      requestRender: () => {
+        opts.setFlow(ui.dustFlow);
+        opts.requestRender();
+      },
+    },
+  } as unknown as Ctx;
+  return dustFlowView(ctx);
+}
+
 /**
  * 本帧要播的**阶段横幅序列**（纯函数，便于测试）。
  *
@@ -6486,11 +6856,16 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     !!weijuPay ||
     hasBubble ||
     hasAttackJoin;
+  /**
+   * 换视角要不要"先播完这一帧的动画再切"。
+   * ⚠️ **只有骰子类动画才值得等**：生命浮动 `-X`/`+N` 是锚定在玩家面板/生命条上的，
+   * 换视角后再播位置照样正确——若把 `lifeItems` 也算进来，会出现
+   * 「待决策已经弹出、画面却还停在上一方」将近 1 秒（真实事故 2026-11-08：高塔铁幕询问）。
+   */
   const holdView =
     prevView !== viewTarget &&
     willAnimate &&
     (removed ||
-      lifeItems.length > 0 ||
       attackChanging ||
       storedChanged ||
       diceVisualChanging ||
@@ -6932,8 +7307,6 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
       }
     }
   }
-  const costDur = Math.max(costPresent ? removalGroupMs() : 0, moveFxDuration(diceFx));
-
   // 上一段（多段攻击的中间段）本帧先收尾：攻击骰 + 防御骰并排消失；随后本段攻击骰再起步。
   // （有 attackJoin（011/034）时由 join 接管，不走这里，避免抢掉池子）
   const resolveDur =
@@ -6945,6 +7318,14 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
           hold: holdAttackDie ? { dieId: holdAttackDie.dieId } : null,
         })
       : 0;
+
+  // 攻击"等待时长"（1v1/2v2 共用唯一口径）：上一段收尾 + 本段代价（消耗组 / 搬家组）+ 挑战模式延迟。
+  const watchDur = attackWatchDelay({
+    costPresent,
+    diceFx,
+    resolveDur,
+    extraDelay: legendAttackDelay,
+  });
 
   // 001/C01 裁雨流：还在等玩家决定 → 攻击骰继续停在中间；待决策已解决 → 收尾
   //（已落区＝发动 → 中间翻面后飞回该区那颗真骰；不发动 → 淡出）
@@ -6967,14 +7348,14 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
         ? (prevDice.get(pa!.sourceDieId)?.rect ?? prevStored.get(pa!.sourceDieId)?.rect ?? null)
         : null,
       fromCard: pa!.sourceDieId ? prevStored.has(pa!.sourceDieId) : false,
-      costDur: resolveDur + costDur + legendAttackDelay, // 先等上一段收尾（整组播完），再等本段代价；挑战模式再等"先出骰后攻击"
+      costDur: watchDur, // 先等上一段收尾（整组播完），再等本段代价；挑战模式再等"先出骰后攻击"
       substitution: subOf(attackPay, pa!.sourceDieId ?? undefined),
     });
     // 挑战模式「枭首」：这颗骰**开飞那一刻**起就不该再出现在攻击骰区（数据层排除；不用 CSS hidden）
     if (state.mode === 'challenge' && pa!.sourceDieId) {
       const id = pa!.sourceDieId;
       // 与 attackStart 的"开飞时刻"完全一致（costDur 到点）
-      const at = resolveDur + costDur + legendAttackDelay;
+      const at = watchDur;
       window.setTimeout(() => {
         // 定时器真正触发时校验：只有"这颗仍是**当前待抵挡**的源骰"才隐藏。
         // 若攻击已结算（`pendingAttack` 清空——尤其 Z01「裁雨流」把源骰搬回防御区），
@@ -7097,36 +7478,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     root.querySelector<HTMLElement>(`.player[data-player="${player}"] .card-legend[data-legend="${artifactId}"] .card-legend-art`) ??
     root.querySelector<HTMLElement>(`.player[data-player="${player}"] .card[data-artifact="${artifactId}"] .card-head`) ??
     root.querySelector<HTMLElement>(`.player[data-player="${player}"]`);
-  const skillNameOf = (
-    player: PlayerId,
-    artifactId: string,
-    side: 'left' | 'right' | 'only',
-    skillKey?: string,
-  ): string => {
-    const pl = state.players[player];
-    const a = pl.artifacts.find((x) => x.id === artifactId);
-    if (a) return sideDisplayName(a, side) ?? a.name; // 神器：按"侧"取名（同侧同名）
-    if (pl.legend && pl.legend.id === artifactId) return legendSkillNameOf(pl.legend, skillKey); // 传奇：按 key 精确定名
-    return '';
-  };
-  let bubbleDur = 0;
-  const bubbleBusy = new Map<string, number>(); // key → 可再弹的最早时刻（performance.now）
-  const schedule = (
-    key: string,
-    target: HTMLElement | null,
-    text: string,
-    variant: BubbleVariant,
-    opts: BubbleOpts = {},
-  ): void => {
-    const dur = bubbleDuration(variant);
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const free = bubbleBusy.get(key) ?? 0;
-    const delay = Math.max(0, free - now);
-    // 元素**立即创建**、只用 WAAPI `delay` 延后出场 → 不跨重绘持旧元素（否则换视角/重绘时气泡会被吞）
-    playBubble(root, target, text, variant, { ...opts, delayMs: delay });
-    bubbleBusy.set(key, Math.max(now, free) + dur);
-    bubbleDur = Math.max(bubbleDur, delay + dur);
-  };
+  const bubbles = createBubbleQueue(root);
   // 开＝单字（白底）；用＝技能名（黑底）。（同一动作内去重；同卡自动串行）
   const seenRise = new Set<string>();
   for (const e of rises) {
@@ -7134,7 +7486,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     if (seenRise.has(k)) continue;
     seenRise.add(k);
     const verb = e.mode === 'switch' ? '切换' : e.mode === 'activate' ? '激活' : '充能';
-    schedule(k, artElOf(e.player, e.artifactId), verb, 'open');
+    bubbles.play(k, artElOf(e.player, e.artifactId), verb, 'open');
   }
   let ultimateDur = 0;
   const cardBubbleDur = new Map<PlayerId, number>(); // 本帧已排的卡图气泡时长（供"跨卡顺序"：先气泡、后必杀横幅）
@@ -7145,14 +7497,14 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     const k = `${e.player}:${e.artifactId}:${e.side}:${e.skillKey ?? ''}`;
     if (seenFire.has(k)) continue;
     seenFire.add(k);
-    const name = skillNameOf(e.player, e.artifactId, e.side, e.skillKey) || '技能';
+    const name = skillBubbleName(state, e.player, e.artifactId, e.side, e.skillKey) || '技能';
     if (skillKindOf(state, e.player, e.artifactId, e.skillKey) === 'ultimate') {
       // 必杀 → 大横幅；若同帧该玩家已有卡图气泡（如「没有怜悯」）→ 横幅延后到气泡之后（先气泡、再必杀）
       const delay = cardBubbleDur.get(e.player) ?? 0;
       ultimateDur = Math.max(ultimateDur, playUltimate(root, name, delay));
     } else {
       // 与「开」共用同一 key → 激活/充能时先「激活/充能」、再技能名（同卡自动串行）
-      schedule(`${e.player}:${e.artifactId}`, artElOf(e.player, e.artifactId), name, 'use');
+      bubbles.play(`${e.player}:${e.artifactId}`, artElOf(e.player, e.artifactId), name, 'use');
       cardBubbleDur.set(e.player, (cardBubbleDur.get(e.player) ?? 0) + bubbleDuration('use'));
     }
   }
@@ -7173,7 +7525,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
     const left = nr.left;
     const right = pr ? pr.right : nr.right;
     const tname = TACTIC_BY_ID[e.tacticId]?.name ?? e.tacticId;
-    schedule(k, nameEl, tname, 'tactic', {
+    bubbles.play(k, nameEl, tname, 'tactic', {
       width: Math.max(nr.width, right - left),
       center: { x: (left + right) / 2, y: nr.top + nr.height / 2 },
     });
@@ -7195,7 +7547,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 
   // 切换等待：普通动效 / 支付整体 / 攻击池 / 畏惧响应池 / 气泡 … 取最大（整组播完才切 AB）
   // 注：阶段横幅**不计入** settle（切换不去等横幅）；横幅在「切换之后」另起延后播。
-  const settle = Math.max(settleDice, payDur, attackDur, weijuDur, bubbleDur, joinDur, ultimateDur, trueLineDur, heldReleaseDur, gouhunDur, legendDur);
+  const settle = Math.max(settleDice, payDur, attackDur, weijuDur, bubbles.total, joinDur, ultimateDur, trueLineDur, heldReleaseDur, gouhunDur, legendDur);
   let frameEnd = settle;
   if (bannerSegs.length > 0) {
     let at = settle + 30;
@@ -7267,7 +7619,7 @@ export function renderGame(state: GameState, root: HTMLElement, hooks: RenderHoo
 }
 
 /** 整屏缩放：关 / 自动（内容高于视口时缩到一屏，下限 0.8）/ 手动 */
-function applyZoom(stage: HTMLElement, prefs: Prefs): void {
+export function applyZoom(stage: HTMLElement, prefs: Prefs): void {
   if (prefs.zoomMode === 'off') {
     stage.style.transform = '';
     stage.style.width = '';
@@ -7277,7 +7629,7 @@ function applyZoom(stage: HTMLElement, prefs: Prefs): void {
   }
   stage.style.transformOrigin = 'top left';
   if (prefs.zoomMode === 'manual') {
-    const k = Math.min(1, Math.max(0.1, prefs.zoomPercent / 100));
+    const k = Math.min(1.5, Math.max(0.1, prefs.zoomPercent / 100));
     stage.style.transform = k === 1 ? '' : `scale(${k})`;
     stage.style.width = k === 1 ? '' : `${100 / k}%`;
     return;

@@ -14,7 +14,7 @@ export interface Prefs {
   logCollapsed: boolean;
   /** 整屏缩放：关 / 自动 / 手动 */
   zoomMode: 'off' | 'auto' | 'manual';
-  /** 手动缩放百分比（80–100） */
+  /** 手动缩放百分比（10–150） */
   zoomPercent: number;
   /** 动画速度：正常 / 快（时长减半）。可省略＝正常；不参与「预设组合」 */
   animSpeed?: AnimSpeed;
@@ -109,7 +109,7 @@ export function loadPrefs(): Prefs {
       out.zoomMode = data.zoomMode;
     }
     if (typeof data?.zoomPercent === 'number') {
-      out.zoomPercent = Math.min(100, Math.max(10, Math.round(data.zoomPercent)));
+      out.zoomPercent = Math.min(150, Math.max(10, Math.round(data.zoomPercent)));
     }
     if (data?.animSpeed === 'normal' || data?.animSpeed === 'fast') {
       out.animSpeed = data.animSpeed;

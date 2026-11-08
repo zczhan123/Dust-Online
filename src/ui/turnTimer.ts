@@ -86,7 +86,7 @@ export function turnTimerTick(): void {
       startedKey = key;
       fired = false;
       cur = { actor, startAt: Date.now(), ms: turnMs };
-      session?.sendTimer(actor, cur.startAt, cur.ms);
+      if (actor === 'A' || actor === 'B') session?.sendTimer(actor, cur.startAt, cur.ms);
     }
   } else {
     const rt = session?.state.timer;

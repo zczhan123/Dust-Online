@@ -78,7 +78,7 @@ describe('T13「远见」· 触发与奖励', () => {
   it('猜对：生命首个降到 ≤20 → 发 1 个任意点数能力骰并放入任意区域（只发一次）', () => {
     const g = guessed('A', 'B');
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 3); // 21 → 18（≤20）
+    applyLifeLoss(g, 'B', 3, 'A'); // 21 → 18（≤20）
     pumpPending(g); // 真实对局里由 applyAction 收尾自动 pump
     expect(g.tacticLowFirst).toBe('B');
     expect(g.pending?.kind).toBe('yuanjianGain');
@@ -89,7 +89,7 @@ describe('T13「远见」· 触发与奖励', () => {
 
     // 只发一次：之后 A 也降到 ≤20 → 不再触发
     g.players.A.life = 21;
-    applyLifeLoss(g, 'A', 3);
+    applyLifeLoss(g, 'A', 3, 'B');
     pumpPending(g);
     expect(g.tacticLowFirst).toBe('B'); // 仍是"第一个"
     expect(g.pending ?? null).toBeNull();
@@ -98,7 +98,7 @@ describe('T13「远见」· 触发与奖励', () => {
   it('猜错：另一人先降到 ≤20 → 不发奖；此后即便猜中的人也降下来也不发', () => {
     const g = guessed('A', 'A'); // A 猜自己
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 3); // B 先降到 ≤20（猜错）
+    applyLifeLoss(g, 'B', 3, 'A'); // B 先降到 ≤20（猜错）
     pumpPending(g);
     expect(g.tacticLowFirst).toBe('B');
     expect(g.pending ?? null).toBeNull();
@@ -106,14 +106,14 @@ describe('T13「远见」· 触发与奖励', () => {
 
     // 之后 A 也降到 ≤20 → 仍不发（对错已在第一人触线时定死）
     g.players.A.life = 21;
-    applyLifeLoss(g, 'A', 3);
+    applyLifeLoss(g, 'A', 3, 'B');
     pumpPending(g);
     expect(g.pending ?? null).toBeNull();
   });
 
   it('致死的一击（游戏结束）→ 不发奖、不记录', () => {
     const g = guessed('A', 'B');
-    applyLifeLoss(g, 'B', g.players.B.life); // B → 0（判负）
+    applyLifeLoss(g, 'B', g.players.B.life, 'A'); // B → 0（判负）
     pumpPending(g);
     expect(g.phase).toBe('gameOver');
     expect(g.tacticLowFirst).toBeNull();
@@ -123,7 +123,7 @@ describe('T13「远见」· 触发与奖励', () => {
   it('非法奖励选择 → 抛错', () => {
     const g = guessed('A', 'B');
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 5); // 21 → 16（≤20）
+    applyLifeLoss(g, 'B', 5, 'A'); // 21 → 16（≤20）
     pumpPending(g);
     expect(g.pending?.kind).toBe('yuanjianGain');
     expect(() => applyAction(g, { t: 'yuanjianGain', value: 7, area: 'attack' })).toThrow();
@@ -137,7 +137,7 @@ describe('T13「远见」· 横条三态 / L04 重开', () => {
     const g = guessed('A', 'B');
     expect(tacticBarState(g, 'A')).toBe('active');
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 5);
+    applyLifeLoss(g, 'B', 5, 'A');
     pumpPending(g);
     expect(tacticBarState(g, 'A')).toBe('spent');
   });
@@ -156,13 +156,13 @@ describe('T13「远见」· 横条三态 / L04 重开', () => {
   it('L04 重开（已触线后）：记录保留，不会重复发奖', () => {
     const g = guessed('A', 'B');
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 3);
+    applyLifeLoss(g, 'B', 3, 'A');
     pumpPending(g);
     applyAction(g, { t: 'yuanjianGain', value: 2, area: 'attack' }); // 用掉奖励
     resetToBattleStart(g, 'A');
     expect(g.tacticLowFirst).toBe('B'); // 记录保留
     g.players.B.life = 21;
-    applyLifeLoss(g, 'B', 5);
+    applyLifeLoss(g, 'B', 5, 'A');
     pumpPending(g);
     expect(g.pending ?? null).toBeNull(); // 不再发
   });

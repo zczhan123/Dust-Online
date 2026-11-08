@@ -60,7 +60,7 @@ describe('T15「影子」', () => {
     const g = mk();
     applyAction(g, { t: 'yingziPick', value: 5 });
     g.players.A.areas.attack = [{ id: 'a5', value: 5, kind: 'attack' }];
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], undefined, 'skill');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], 'skill');
     expect(g.players.A.tacticHeldDie).toEqual({ id: expect.any(String), value: 5 });
     expect(g.players.A.tacticOnceUsed).toBe(false);
   });

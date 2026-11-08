@@ -24,7 +24,7 @@ const mk = (lock: number | null): GameState => {
 };
 
 const convert = (g: GameState) =>
-  paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+  paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], 'attack');
 
 describe('Z12 不动菩提 × 真实之剑 / 影袭', () => {
   it('封锁 3 点：源骰是 3,3 → **置换可用**（源骰不受锁，有效点是 5）', () => {
@@ -61,7 +61,6 @@ describe('Z12 不动菩提 × 真实之剑 / 影袭', () => {
       params: { dieId: 'd5', x: 2 },
       rng: () => 1,
       endMainPhase: () => {},
-      reportConsumed: () => {},
     } as never);
     const all = [...g.players.A.areas.attack, ...g.players.A.areas.defense, ...g.players.A.areas.meditation];
     const d = all.find((x) => x.id === 'd5');

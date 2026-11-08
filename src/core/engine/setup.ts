@@ -8,6 +8,8 @@ import { hasActiveSkill } from './skill-state';
 import { logLine, pname } from './log';
 import { fxSkillFired } from './fx';
 import type { GameState, PlayerId, PlayerState } from '../model/types';
+import { ONE_V_ONE_ROSTER, nextSeat, rosterOf } from '../model/participants';
+import type { TwoVTwoSeat, TwoVTwoSetup } from '../model/twoVTwo';
 
 export interface SetupOptions {
   seed: number;
@@ -24,7 +26,7 @@ export interface SetupOptions {
   tacticB?: string;
 }
 
-function makePlayer(
+export function makePlayer(
   id: PlayerId,
   hero: [string, string, string],
   legendId?: string | null,
@@ -98,6 +100,13 @@ export function setupGame(opts: SetupOptions): GameState {
 
   const g: GameState = {
     players: { A: playerA, B: playerB },
+    roster: [...ONE_V_ONE_ROSTER],
+    teamOf: { A: 'A', B: 'B' },
+    teams: {
+      A: { id: 'A', members: ['A'], life: playerA.life, lifeMax: playerA.lifeMax },
+      B: { id: 'B', members: ['B'], life: playerB.life, lifeMax: playerB.lifeMax },
+    },
+    rules: { id: '1v1', lifeModel: 'perSeat' },
     activePlayer: opts.firstPlayer,
     firstPlayer: opts.firstPlayer,
     initialRerollQueue: [],
@@ -120,8 +129,8 @@ export function setupGame(opts: SetupOptions): GameState {
     ultimatesUsed: [],
     legendOnceUsed: [],
     winner: null,
-    skillConsumedThisAction: 0,
-    dunwuPulseUsedThisTurn: false,
+    skillConsumedThisAction: {},
+    dunwuPulseUsed: {},
     attackQueue: null,
     virtualQueue: null,
     extraReroll: null,
@@ -141,7 +150,7 @@ export function setupGame(opts: SetupOptions): GameState {
 
   // 开局设置类技能写入战报（约定：以后同类"开局就要设置"的技能都必须写战报）
   applyFirstPlayer(g, opts.firstPlayer); // 先手 + 尘印（后手持有）
-  for (const id of ['A', 'B'] as PlayerId[]) {
+  for (const id of rosterOf(g)) {
     const p = g.players[id];
     if (hasActiveSkill(p, 'batton.wudi')) {
       logLine(
@@ -161,11 +170,115 @@ export function setupGame(opts: SetupOptions): GameState {
   return g;
 }
 
+/** 2v2 建局：四人座位、团队共享生命、各自初始骰区。种子/骰子可显式指定。 */
+export function setupTwoVTwoGame(setup: TwoVTwoSetup): GameState {
+  resetDieIdCounter();
+  const roster: TwoVTwoSeat[] = ['A1', 'B1', 'A2', 'B2'];
+  const rng = new SeededRng(setup.seed ?? 1);
+  const players: Record<string, PlayerState> = {};
+  for (const seat of roster) {
+    const p = makePlayer(seat, setup.seats[seat]);
+    for (const [artifactId, side] of Object.entries(setup.active?.[seat] ?? {})) {
+      const art = p.artifacts.find((a) => a.id === artifactId);
+      if (art) art.activeMarkerSide = side;
+    }
+    for (const [artifactId, count] of Object.entries(setup.counts?.[seat] ?? {})) {
+      const art = p.artifacts.find((a) => a.id === artifactId);
+      if (art) art.count = count;
+    }
+    players[seat] = p;
+  }
+
+  const teamLife: Record<'A' | 'B', number> = { A: 0, B: 0 };
+  for (const seat of roster) {
+    const value = initialLife(players[seat]);
+    players[seat].life = players[seat].lifeMax = value;
+    teamLife[seat[0] as 'A' | 'B'] += value;
+  }
+  const teams = [...new Set(roster.map((seat) => seat[0]))] as ('A' | 'B')[];
+  for (const team of teams) {
+    teamLife[team] = Math.max(1, teamLife[team]);
+    for (const seat of roster.filter((s) => s[0] === team)) {
+      players[seat].life = players[seat].lifeMax = teamLife[team];
+      players[seat].lifeTens = Math.floor(teamLife[team] / 10);
+    }
+  }
+
+  for (const seat of roster) {
+    const explicit = setup.dice?.[seat];
+    if (explicit) {
+      for (const kind of ['attack', 'defense', 'meditation'] as const) {
+        for (const value of explicit[kind]) {
+          players[seat].areas[kind].push(createDie(newDieId(`${seat}-`), value));
+        }
+      }
+    } else {
+      fillInitialDice(players[seat], rng);
+    }
+  }
+
+  const firstPlayer: PlayerId = setup.firstTeam === 'A' ? 'A1' : 'B1';
+  const g: GameState = {
+    players,
+    roster: [...roster],
+    teamOf: { A1: 'A', A2: 'A', B1: 'B', B2: 'B' },
+    teams: {
+      A: { id: 'A', members: ['A1', 'A2'], life: teamLife.A, lifeMax: teamLife.A },
+      B: { id: 'B', members: ['B1', 'B2'], life: teamLife.B, lifeMax: teamLife.B },
+    },
+    rules: { id: '2v2', lifeModel: 'perTeam' },
+    stance: 'attackPicks',
+    activePlayer: firstPlayer,
+    firstPlayer,
+    initialRerollQueue: [],
+    phase: 'setup',
+    mode: 'standard',
+    dustfall: 0,
+    turnIndex: 0,
+    firstRound: { A1: true, A2: true, B1: true, B2: true },
+    rngState: rng.state(),
+    log: [],
+    pendingAttack: null,
+    pending: null,
+    unblockableThisTurn: false,
+    caiyuliuUsed: 0,
+    dustRiseNormalCount: 0,
+    dustRiseActed: false,
+    freeDustRise: 0,
+    rerollUsed: 0,
+    skillsUsedThisTurn: [],
+    ultimatesUsed: [],
+    legendOnceUsed: [],
+    winner: null,
+    skillConsumedThisAction: {},
+    dunwuPulseUsed: {},
+    attackQueue: null,
+    virtualQueue: null,
+    extraReroll: null,
+    tacticPool: [],
+    tacticQueue: [],
+    tacticHand: [],
+    tacticStartDone: false,
+    tacticLowFirst: null,
+    pendingQueue: [],
+    chenaiUsed: { A1: false, A2: false, B1: false, B2: false },
+    freeNoCostRise: 0,
+    attacksThisTurn: { A1: 0, A2: 0, B1: 0, B2: 0 },
+    hunhunGained: { A1: 0, A2: 0, B1: 0, B2: 0 },
+    rerollPunish: { A1: false, A2: false, B1: false, B2: false },
+    tianfa: { A1: null, A2: null, B1: null, B2: null },
+  };
+  applyFirstPlayer(g, firstPlayer);
+  return g;
+}
+
 /** 设先手：`firstPlayer` + 尘印标记归**另一位**（正常开局与 T02「先机」共用） */
 export function applyFirstPlayer(g: GameState, who: PlayerId): void {
-  const other: PlayerId = who === 'A' ? 'B' : 'A';
   g.firstPlayer = who;
-  g.players.A.hasDustSeal = false;
-  g.players.B.hasDustSeal = false;
-  g.players[other].hasDustSeal = true;
+  for (const id of rosterOf(g)) g.players[id].hasDustSeal = false;
+  let holder: PlayerId = who;
+  // 2v2：尘印归第 4 个行动者；1v1 归后手（nextSeat）
+  const steps = g.rules?.id === '2v2' ? 3 : 1;
+  for (let i = 0; i < steps; i += 1) holder = nextSeat(g, holder);
+  g.players[holder].hasDustSeal = true;
 }

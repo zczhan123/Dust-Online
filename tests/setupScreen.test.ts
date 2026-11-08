@@ -202,7 +202,17 @@ describe('renderHeroSetup（预设模式 · 3 栏）', () => {
       '轮选模式',
       '预设模式',
       '构筑模式',
+      '团队作战',
     ]);
+  });
+
+  it('「左右互搏」→「团队作战」进入 2v2 选择界面，返回仍在子菜单', () => {
+    renderSetup(root, () => {});
+    clickEl(q(root, '.menu-item[data-act="jubai"]'));
+    clickEl(q(root, '.menu-item[data-act="team2v2"]'));
+    expect(q(root, '.pick-prep-title')?.textContent).toBe('选择先手队伍');
+    clickEl(q(root, '.pick-back'));
+    expect(q(root, '.menu-item[data-act="team2v2"]')).not.toBeNull();
   });
 });
 

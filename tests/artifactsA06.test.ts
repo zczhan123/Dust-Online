@@ -202,7 +202,7 @@ describe('A06「幽魂不散」（右激活·持续）', () => {
     clear(g, 'A');
     g.players.A.areas.meditation = [{ id: 'm1', value: 3, kind: 'meditation' }];
 
-    paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['m1'] }], undefined, 'skill');
+    paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['m1'] }], 'skill');
 
     expect(g.players.A.areas.attack).toEqual([]);
     expect(g.hunhunGained.A).toBe(0);

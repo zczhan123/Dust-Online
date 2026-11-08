@@ -34,7 +34,6 @@ export function runChargeSkill(
         rng,
         params: {},
         endMainPhase,
-        reportConsumed: () => {},
       }),
     );
     // 动效旁路："充能"发动其技能 → 第二条气泡（技能名）；先由 rise 弹「充能」。

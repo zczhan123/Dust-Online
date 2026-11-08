@@ -257,7 +257,6 @@ describe('挑战模式 · Z05 效果', () => {
       rng: new SeededRng(1),
       params: {},
       endMainPhase: () => {},
-      reportConsumed: () => {},
     });
     expect(g.players.B.life).toBe(20);
     expect(g.challenge!.damagedDuringChallengerTurn).toBeFalsy();
@@ -277,7 +276,7 @@ describe('挑战模式 · Z05 效果', () => {
   it('真实伤害仍触发绝境天神额外投骰（回归）', () => {
     const g = make();
     g.activePlayer = 'A';
-    applyLifeLoss(g, 'B', 5);
+    applyLifeLoss(g, 'B', 5, 'A');
     expect(g.challenge!.damagedDuringChallengerTurn).toBe(true);
     g.activePlayer = 'B';
     beginTurn(g);

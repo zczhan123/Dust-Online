@@ -69,7 +69,6 @@ describe('Z12 不动菩提 · 非使用/消耗/弃置的选骰步骤', () => {
       rng: new SeededRng(1),
       params: { dieId: 'd3', x: 1 },
       endMainPhase: () => {},
-      reportConsumed: () => {},
     });
     const after = [...g.players.A.areas.attack, ...g.players.A.areas.defense, ...g.players.A.areas.meditation].find(
       (d) => d.id === 'd3',

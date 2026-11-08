@@ -1,5 +1,6 @@
 import type { GameState, PlayerId } from '../core/model/types';
 import { diag } from './diag';
+import { SEAT_COLOR } from './seatColors';
 
 /**
  * 战斗界面动效。
@@ -120,6 +121,13 @@ export interface PrevDie {
 
 export type PrevDice = Map<string, PrevDie>;
 
+function ownerFromDieEl(el: HTMLElement): PlayerId | null {
+  for (const id of ['A1', 'A2', 'B1', 'B2', 'A', 'B'] as const) {
+    if (el.classList.contains(`die-${id}`)) return id;
+  }
+  return null;
+}
+
 export function snapshotDice(root: HTMLElement): PrevDice {
   const map: PrevDice = new Map();
   root.querySelectorAll<HTMLElement>('.die[data-id]').forEach((el) => {
@@ -128,11 +136,7 @@ export function snapshotDice(root: HTMLElement): PrevDice {
     const r = el.getBoundingClientRect();
     const clone = el.cloneNode(true) as HTMLElement;
     clone.removeAttribute('style');
-    const owner: PlayerId | null = el.classList.contains('die-A')
-      ? 'A'
-      : el.classList.contains('die-B')
-        ? 'B'
-        : null;
+    const owner = ownerFromDieEl(el);
     const kind = (el.closest('.area') as HTMLElement | null)?.dataset.kind as
       | 'attack'
       | 'defense'
@@ -259,11 +263,11 @@ interface LifeSnap {
   max: number;
 }
 
-const lastLife = new WeakMap<GameState, Record<PlayerId, LifeSnap>>();
+const lastLife = new WeakMap<GameState, Record<string, LifeSnap>>();
 
 export function diffLife(state: GameState): LifeDelta[] {
   const prev = lastLife.get(state);
-  const cur: Record<PlayerId, LifeSnap> = {
+  const cur: Record<string, LifeSnap> = {
     A: { life: state.players.A.life, max: state.players.A.lifeMax },
     B: { life: state.players.B.life, max: state.players.B.lifeMax },
   };
@@ -302,7 +306,7 @@ function rectCenter(r: Rect): { x: number; y: number } {
 }
 
 /** 玩家色（硬编码，与骰子/骰片一致；黑白世界里唯一的彩色点缀）。 */
-export const PLAYER_COLOR: Record<PlayerId, string> = { A: '#2563eb', B: '#dc2626' };
+export const PLAYER_COLOR: Record<string, string> = { A: '#2563eb', B: '#dc2626', ...SEAT_COLOR };
 
 /** 骰子视觉尺寸与并排缝隙——**所有"并排"共用**：骰宽 + 8px 缝、居中排开。 */
 const DIE_W = 26;
@@ -334,6 +338,8 @@ export interface AttackStartInfo {
   costDur: number;
   /** 本次攻击由"真实之剑置换"支付：先 2 骰并排→中间→停顿→合并成灰 5 停住（不另建攻击骰） */
   substitution?: { rects: Rect[]; values: number[] } | null;
+  /** 是否在攻击骰起步时画黑线；2v2 守方投票前先 false，投票后再补画。 */
+  line?: boolean;
 }
 
 interface AttackPool {
@@ -444,7 +450,7 @@ function ghostifyDie(el: HTMLElement): { el: HTMLElement; reveal: () => void } {
   if (el.closest('#fx-layer')) return { el, reveal: () => {} };
   const r = el.getBoundingClientRect();
   if (r.width === 0 && r.height === 0) return { el, reveal: () => {} };
-  const player: PlayerId | null = el.classList.contains('die-A') ? 'A' : el.classList.contains('die-B') ? 'B' : null;
+  const player = ownerFromDieEl(el);
   const value = Number(el.textContent) || Number(el.dataset.value) || 1;
   const g = makeFlyingDie('solid', player ?? 'A', value);
   g.style.left = `${r.left}px`;
@@ -525,13 +531,59 @@ function drawConnLine(
 }
 
 /** 攻击**连接线**（攻击方攻击骰区中心 → 被攻击方生命条中心）；不是骰子的运动路径。 */
-function drawLinkLine(layer: HTMLElement, atk: HTMLElement | null, def: HTMLElement | null): number {
+function seatTeamOf(seat: PlayerId): 'A' | 'B' | null {
+  if (seat === 'A1' || seat === 'A2') return 'A';
+  if (seat === 'B1' || seat === 'B2') return 'B';
+  return null;
+}
+
+function seatIsLeft(seat: PlayerId): boolean {
+  return seat === 'A2' || seat === 'B1';
+}
+
+/** 生命条端点：2v2 按目标座位取框的左/右端；1v1 仍取生命条中心。 */
+function lifelineAnchor(root: ParentNode, target: PlayerId): { x: number; y: number } | null {
+  const team = seatTeamOf(target);
+  if (!team) {
+    const line =
+      root.querySelector<HTMLElement>(`.player[data-player="${target}"] .lifeline`) ??
+      root.querySelector<HTMLElement>(`.lifeline[data-player="${target}"]`);
+    if (!line) return null;
+    const r = line.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  const line =
+    root.querySelector<HTMLElement>(`.lifeline[data-team="${team}"]`) ??
+    root.querySelector<HTMLElement>(`.lifeline[data-player="${team}"]`);
+  if (!line) return null;
+  const r = line.getBoundingClientRect();
+  return { x: seatIsLeft(target) ? r.left : r.right, y: r.top + r.height / 2 };
+}
+
+function drawLinkLine(
+  layer: HTMLElement,
+  atk: HTMLElement | null,
+  def: HTMLElement | null,
+  target?: PlayerId,
+): number {
   if (!atk || !def) return 0;
   const start = atk.querySelector<HTMLElement>('.area[data-kind="attack"]') ?? atk;
-  const end = def.querySelector<HTMLElement>('.lifeline') ?? def;
   const s = start.getBoundingClientRect();
-  const e = end.getBoundingClientRect();
+  const end = target ? lifelineAnchor(atk.ownerDocument, target) : null;
+  if (end) return drawConnLine(layer, s.left + s.width / 2, s.top + s.height / 2, end.x, end.y, 'fx-line');
+  const fallback = def.querySelector<HTMLElement>('.lifeline') ?? def;
+  const e = fallback.getBoundingClientRect();
   return drawConnLine(layer, s.left + s.width / 2, s.top + s.height / 2, e.left + e.width / 2, e.top + e.height / 2, 'fx-line');
+}
+
+/** 2v2 投票后补画攻击黑线（与 attackStart 同一套连接线）。 */
+export function drawAttackLine(root: HTMLElement, attacker: PlayerId, target: PlayerId): number {
+  if (!canAnimate(root)) return 0;
+  const layer = ensureFxLayer();
+  if (!layer) return 0;
+  const atk = root.querySelector<HTMLElement>(`.player[data-player="${attacker}"]`);
+  const def = root.querySelector<HTMLElement>(`.player[data-player="${target}"]`);
+  return drawLinkLine(layer, atk, def, target);
 }
 
 /**
@@ -539,18 +591,24 @@ function drawLinkLine(layer: HTMLElement, atk: HTMLElement | null, def: HTMLElem
  * 与攻击线同一编排（画 160 / 停 200 / 淡出 180），只换颜色与锚点。返回时长（供"整组播完才切视角"取 max）。
  * 位置**当场量取 DOM**、按**身份**取元素 → 联机 / 左右互搏都正确（不写死朝向）。
  */
-export function drawTrueLine(root: HTMLElement, fromEl: HTMLElement | null, toEl: HTMLElement | null): number {
+export function drawTrueLine(
+  root: HTMLElement,
+  fromEl: HTMLElement | null,
+  toEl: HTMLElement | null,
+  target?: PlayerId,
+): number {
   if (!canAnimate(root) || !fromEl || !toEl) return 0;
   const layer = ensureFxLayer();
   if (!layer) return 0;
   const s = fromEl.getBoundingClientRect();
+  const end = target ? lifelineAnchor(root, target) : null;
   const e = toEl.getBoundingClientRect();
   return drawConnLine(
     layer,
     s.left + s.width / 2,
     s.top + s.height / 2,
-    e.left + e.width / 2,
-    e.top + e.height / 2,
+    end ? end.x : e.left + e.width / 2,
+    end ? end.y : e.top + e.height / 2,
     'fx-line fx-line--truth',
   );
 }
@@ -604,7 +662,7 @@ export function attackStart(root: HTMLElement, info: AttackStartInfo): number {
   window.setTimeout(() => {
     const atkNow = root.querySelector<HTMLElement>(`.player[data-player="${info.attacker}"]`);
     const defNow = root.querySelector<HTMLElement>(`.player[data-player="${defId}"]`);
-    drawLinkLine(layer, atkNow, defNow);
+    if (info.line !== false) drawLinkLine(layer, atkNow, defNow, defId);
     die.style.transition = `opacity ${inDur}ms linear, transform ${flyDur}ms ${EASE.move}`;
     die.style.opacity = '1';
     const p = poolPoint(root);
@@ -652,7 +710,7 @@ function attackStartSubstituted(root: HTMLElement, layer: HTMLElement, info: Att
   window.setTimeout(() => {
     const atkNow = root.querySelector<HTMLElement>(`.player[data-player="${info.attacker}"]`);
     const defNow = root.querySelector<HTMLElement>(`.player[data-player="${defId}"]`);
-    drawLinkLine(layer, atkNow, defNow);
+    if (info.line !== false) drawLinkLine(layer, atkNow, defNow, defId);
     grey.style.transition = `opacity ${popDur}ms linear, transform ${popDur}ms ${EASE.pop}`;
     grey.style.opacity = '1';
     grey.style.transform = 'scale(1)';
@@ -1197,6 +1255,11 @@ export function playPayments(root: HTMLElement, list: PayInfo[]): number {
   const popDur = ms(MOTION.micro);
   const fadeDur = ms(MOTION.fade);
   const pool = poolPoint(root);
+  /**
+   * 攻击池里还有一颗"停在中间等响应"的攻击骰时，整笔支付**右移一格**，
+   * 避免合并出的灰 5 盖住那颗攻击骰（1v1 / 2v2 共用；1v1 的灵能屏障置换同样会盖住）。
+   */
+  const shift = attackPool ? (DIE_W + DIE_GAP) / 2 : 0;
   const tConverge = moveDur + holdDur; // 并排到中间 + 停顿
   const tMerge = tConverge + popDur; // 收拢合并
   const tFade = tMerge + popDur; // 开始淡出
@@ -1219,6 +1282,7 @@ export function playPayments(root: HTMLElement, list: PayInfo[]): number {
     const total = pay.dice.length;
     const centerX =
       pool.x +
+      shift +
       (list.length > 1
         ? (payIdx - (list.length - 1) / 2) * (Math.max(total, 2) * (DIE_W + DIE_GAP) + 40)
         : 0);
@@ -1298,9 +1362,35 @@ export function playPayments(root: HTMLElement, list: PayInfo[]): number {
 }
 
 /**
+ * 把「本帧获得的骰」按归属拆成**现在播**与**切视角后再播**。
+ *
+ * - `defer` 为 `null` → 全部现在播（本帧不换视角）；
+ * - `defer` 是一个玩家 / 一组玩家 → 属于他们的延后，其余现在播。
+ *
+ * 1v1 传**新视角那一方**；2v2 传**新视角那一队的全部座位**（四席里可能两个人都拿到骰）。
+ * 纯函数：不碰 DOM，便于单测。
+ */
+export function splitDeferredAdds(
+  addedIds: string[],
+  defer: PlayerId | readonly PlayerId[] | null,
+  ownerOf: (id: string) => PlayerId | null,
+): { now: string[]; deferred: string[] } {
+  if (defer == null) return { now: addedIds, deferred: [] };
+  const list: readonly PlayerId[] = typeof defer === 'string' ? [defer] : defer;
+  const set = new Set<string>(list);
+  const now: string[] = [];
+  const deferred: string[] = [];
+  for (const id of addedIds) {
+    const owner = ownerOf(id);
+    (owner != null && set.has(owner) ? deferred : now).push(id);
+  }
+  return { now, deferred };
+}
+
+/**
  * 主入口（`renderGame` 收尾、`applyZoom` 之后调用）。
  * @param flipped 本帧相对上一帧切换了视角（左右互搏换手）。
- * @param deferAddOwner 本帧要换视角时＝**新视角那一方**：**它的获得延后到切换后再播**；
+ * @param deferAddOwners 本帧要换视角时＝**新视角那一方（或那一队）**：**它的获得延后到切换后再播**；
  *   其余（旧视角那方，如"你这回合技能给的骰"）的获得**在切换前随阶段③播完**。`null`＝本帧不换视角 → 所有获得照旧随阶段③播。
  * @returns 本次动效最长时长（ms），供"两阶段：播完再切"计时。
  */
@@ -1309,7 +1399,7 @@ export function runBoardMotions(
   prev: PrevDice,
   lifeDeltas: LifeDelta[],
   flipped = false,
-  deferAddOwner: PlayerId | null = null,
+  deferAddOwners: PlayerId | readonly PlayerId[] | null = null,
   excludeIds: string[] = [],
   prevStored: StoredDice = new Map(),
   rerollIds: Set<string> = new Set(),
@@ -1323,6 +1413,13 @@ export function runBoardMotions(
    * 通用"获得骰"动画**不要碰**它们（避免两套动画抢同一颗骰子 → 挤格/跳格）。
    */
   skipAddIds: Set<string> = new Set(),
+  /** 2v2 等布局会随操作栏变化的视图：只播真实骰子变化，不播纯位置让位 FLIP。 */
+  skipLayoutFlips = false,
+  /**
+   * 生命变化要抖动的面板（缺省＝`.player[data-player="X"]`）。
+   * **2v2 必须传**：`X` 是**队**（A/B），要映射到该队全部座位（A1/A2），否则找不到面板 → 不抖。
+   */
+  lifePanelsOf?: (player: string) => HTMLElement[],
 ): number {
   if (!canAnimate(root)) return 0;
   const layer0 = ensureFxLayer();
@@ -1371,11 +1468,7 @@ export function runBoardMotions(
       const p = prev.get(id);
       if (!p) return;
       const val = Number(el.dataset.value);
-      const owner: PlayerId | null = el.classList.contains('die-A')
-        ? 'A'
-        : el.classList.contains('die-B')
-          ? 'B'
-          : null;
+      const owner = ownerFromDieEl(el);
       const kind = (el.closest('.area') as HTMLElement | null)?.dataset.kind ?? null;
       if ((Number.isFinite(p.value) && p.value !== val) || p.owner !== owner || p.kind !== kind) {
         visualChanged = true;
@@ -1417,12 +1510,12 @@ export function runBoardMotions(
   // （普通攻击的支付骰在 excludeIds 里、重掷阶段无移除 → 顺序不变）。
   const removedCount = [...prev.keys()].filter((id) => !curIds.has(id) && !exAll.has(id)).length;
   const removalDur = !flipped && removedCount > 0 ? removalGroupMs() : 0;
-  const lifeSpan = playLifeFloats(root, layer0, lifeDeltas, removalDur); // 生命排在"消失"之后
+  const lifeSpan = playLifeFloats(root, layer0, lifeDeltas, removalDur, lifePanelsOf); // 生命排在"消失"之后
   let dur = Math.max(removalDur, lifeSpan);
   // 「翻面（重掷/改点）」接在"消失 + 生命"之后；**只有本帧真有移除（代价）时才延后**，
   // 无代价时保持原行为（翻面与生命同播），避免影响其它卡。
   const flipsDelay = removalDur > 0 ? Math.max(removalDur, lifeSpan) : 0;
-  if (!flipped) dur = Math.max(dur, playRemovalsAndFlip(root, layer0, prev, curIds, pool0, [...exAll], rerollIds, flipsDelay));
+  if (!flipped) dur = Math.max(dur, playRemovalsAndFlip(root, layer0, prev, curIds, pool0, [...exAll], rerollIds, flipsDelay, skipLayoutFlips));
   dur = Math.max(dur, beforeAddsMs);
   const leaveDur = dur;
 
@@ -1434,16 +1527,15 @@ export function runBoardMotions(
   dur = leaveDur + moveDur;
 
   // 阶段③：获得——排在「离开 + 搬家」之后。**按归属拆分**：
-  //   · **新视角那一方**（`deferAddOwner`，如"下家的回合开始补充"）→ 延后到切换后播；
+  //   · **新视角那一方/那一队**（`deferAddOwners`，如"下家的回合开始补充"）→ 延后到切换后播；
   //   · **其余**（旧视角那方，如"你这回合技能给的骰"）→ **切换前随阶段③播完**。
   if (addedIds.length) {
     const ownerOf = (id: string): PlayerId | null => {
       const el = root.querySelector<HTMLElement>(`.die[data-id="${id}"]`);
       if (!el) return null;
-      return el.classList.contains('die-A') ? 'A' : el.classList.contains('die-B') ? 'B' : null;
+      return ownerFromDieEl(el);
     };
-    const nowIds = deferAddOwner ? addedIds.filter((id) => ownerOf(id) !== deferAddOwner) : addedIds;
-    const deferIds = deferAddOwner ? addedIds.filter((id) => ownerOf(id) === deferAddOwner) : [];
+    const { now: nowIds, deferred: deferIds } = splitDeferredAdds(addedIds, deferAddOwners, ownerOf);
     if (nowIds.length) {
       const delay = dur;
       // 同步调用（延时交给 WAAPI `delay` + `fill:'backwards'`）→ 延时期间保持隐藏，不再"一起播"
@@ -1477,6 +1569,7 @@ function playRemovalsAndFlip(
   rerollIds: Set<string>,
   /** 「翻面（重掷/改点）」延后多少毫秒再播（排在"消失/生命"之后 → 代价先于效果）。 */
   flipsDelayMs = 0,
+  skipLayoutFlips = false,
 ): number {
   const reduce = prefersReducedMotion();
   const dist = moveScale();
@@ -1498,11 +1591,7 @@ function playRemovalsAndFlip(
     if (reduce) return; // 减弱动效：不做移动/翻滚
     const nr = el.getBoundingClientRect();
     const n = rectCenter({ left: nr.left, top: nr.top, width: nr.width, height: nr.height });
-    const curOwner: PlayerId | null = el.classList.contains('die-A')
-      ? 'A'
-      : el.classList.contains('die-B')
-        ? 'B'
-        : null;
+    const curOwner = ownerFromDieEl(el);
     const curKind = (el.closest('.area') as HTMLElement | null)?.dataset.kind ?? null;
     const newVal = Number(el.dataset.value);
     if (rerollIds.has(id)) {
@@ -1532,6 +1621,7 @@ function playRemovalsAndFlip(
       flipItems.push({ el, oldVal: p.value, newVal, center: n });
       return;
     }
+    if (skipLayoutFlips) return;
     // 普通让位 FLIP
     const pc = rectCenter(p.rect);
     const dx = (pc.x - n.x) * dist;
@@ -1655,13 +1745,13 @@ function playValueFlip(
   holdDur: number,
   delayMs = 0,
 ): number {
-  // `delayMs`：让"翻面（重掷/改点）"**排在它前面的动画之后**（如"消耗/真伤先播完"）；延时期间影子留原位显示旧值。
+  // `delayMs`：让"翻面（重掷/改点）"**排在它前面的动画之后**（如"消失/真伤先播"）；延时期间影子留原位显示旧值。
   const d0 = Math.max(0, delayMs);
   const dist = moveScale();
   const dx = (pool.x - center.x) * dist;
   const dy = (pool.y - center.y) * dist;
   const flipDur = moveDur + holdDur + moveDur;
-  const g = ghostifyDie(el); // 影子在 fx 层 → 压过快速操作栏 / 必杀横幅
+  const g = ghostifyDie(el); // 影子进 fx 层 → 压过快速操作栏 / 必杀横幅
   const t = g.el;
   t.textContent = String(oldVal);
   let timer: number | null = null;
@@ -1896,6 +1986,29 @@ export function moveFxDuration(fx: DiceMoveFx): number {
     d = Math.max(d, h.mode === 'move' ? moveDur + holdDur + moveDur : moveDur + holdDur + fadeDur);
   }
   return d;
+}
+
+/**
+ * 攻击"等待时长"（**1v1 与 2v2 共用的唯一口径**）：攻击骰要等多久才起步。
+ * = 上一段收尾（多段攻击的 `attackResolve`）+ max(本段代价骰消耗组, 区域移动/搬家组) + 额外延迟（挑战模式）。
+ *
+ * ⚠️ 为什么必须有这个函数：攻击骰和"代价骰淡出 / 搬家的骰"如果同时起步，画面就是**一颗骰飞两次**
+ *   （2v2 影袭曾因写死 `costDur: 0`，灰骰和玩家色骰同时飞出 → 重影）。
+ *   **禁止在调用处写死 `costDur: 0`**，必须经此函数计算。
+ */
+export function attackWatchDelay(args: {
+  /** 本段有"代价骰"（上一帧有、这一帧消失，且不归攻击池/支付/抵挡接管） */
+  costPresent?: boolean;
+  /** 本帧的区域移动 / 027 寒光搬家组 */
+  diceFx?: DiceMoveFx;
+  /** 上一段攻击收尾的时长（多段攻击） */
+  resolveDur?: number;
+  /** 额外延迟（挑战模式的"先出骰后攻击"） */
+  extraDelay?: number;
+}): number {
+  const cost = args.costPresent ? removalGroupMs() : 0;
+  const move = args.diceFx ? moveFxDuration(args.diceFx) : 0;
+  return (args.resolveDur ?? 0) + Math.max(cost, move) + (args.extraDelay ?? 0);
 }
 
 /** 区域移动/重排：每颗骰"旧位 → 中间重合 → 停 → 分体飞新位"（旧位可来自区域或卡头）。返回时长。 */
@@ -2230,8 +2343,30 @@ function healPanelGlow(panel: HTMLElement): void {
   panelGlow(panel, '29, 122, 77');
 }
 
+/**
+ * 生命变化要"抖/泛光"的面板。
+ * 1v1：缺省按 `.player[data-player="A"]` 精确匹配（一个玩家一块面板）。
+ * 2v2：`d.player` 是**队**（`A`/`B`）→ 必须由调用方传 `panelOf` 映射到该队全部座位（A1/A2）。
+ * 不传且精确匹配不到 → 返回空数组（**＝没有抖动**）——这正是"2v2 非攻击真伤不抖"的成因，勿再回退。
+ */
+export function lifeFloatPanelsFor(
+  root: HTMLElement,
+  player: string,
+  panelOf?: (player: string) => HTMLElement[],
+): HTMLElement[] {
+  if (panelOf) return panelOf(player);
+  const panel = root.querySelector<HTMLElement>(`.player[data-player="${player}"]`);
+  return panel ? [panel] : [];
+}
+
 /** 生命变化飘字 + 反馈。delta>=0 走"回血"（含 +0），delta<0 走"受伤"。返回时长。 */
-function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta[], delayMs = 0): number {
+export function playLifeFloats(
+  root: HTMLElement,
+  layer: HTMLElement,
+  deltas: LifeDelta[],
+  delayMs = 0,
+  panelOf?: (player: string) => HTMLElement[],
+): number {
   if (deltas.length === 0) return 0;
   const reduce = prefersReducedMotion();
   const d0 = Math.max(0, delayMs); // 生命变化排在"消耗/弃置"之后（代价先于效果）
@@ -2242,17 +2377,26 @@ function playLifeFloats(root: HTMLElement, layer: HTMLElement, deltas: LifeDelta
 
   for (const d of deltas) {
     const isHeal = d.delta >= 0;
-    const panel = root.querySelector<HTMLElement>(`.player[data-player="${d.player}"]`);
+    const panels = lifeFloatPanelsFor(root, d.player, panelOf);
+    // 锚点：优先"该面板内部的 .lifeline"（1v1），否则按 data-player 找（2v2 的队伍生命条）。
     const anchor =
-      panel?.querySelector<HTMLElement>('.lifeline') ??
+      panels[0]?.querySelector<HTMLElement>('.lifeline') ??
       root.querySelector<HTMLElement>(`.lifeline[data-player="${d.player}"]`);
     if (!anchor) continue;
     const r = anchor.getBoundingClientRect();
 
-    if (panel) window.setTimeout(() => (isHeal ? healPanelGlow : hitGlow)(panel), d0); // 受伤红 / 回血绿 面板彩光（非位移 → 减弱动效也保留）
+    if (panels.length) {
+      window.setTimeout(() => {
+        for (const p of panels) (isHeal ? healPanelGlow : hitGlow)(p);
+      }, d0);
+    }
     if (!reduce) {
       if (!isHeal) {
-        if (panel && !d.calm) window.setTimeout(() => shakePanel(panel), d0); // 「非伤害的下降」（033 抹零）不抖；其余照抖
+        if (panels.length && !d.calm) {
+          window.setTimeout(() => {
+            for (const p of panels) shakePanel(p);
+          }, d0);
+        }
         shrinkLifeBar(anchor, d.delta, d.max, d0); // 受伤：血条平滑收缩（与回血的"平滑变长"对称）
       } else {
         window.setTimeout(() => {
@@ -2529,6 +2673,45 @@ export function playBubble(
   }
   window.setTimeout(() => b.remove(), delay + total + 80);
   return delay + total;
+}
+
+/**
+ * 同卡气泡串行队列（1v1 / 2v2 共用，防第二套实现）。
+ *   - `play(key, target, text, variant)`：同一 `key` 上**依次**弹（前一个播完再弹），不同 `key` 各自并行。
+ *   - 元素**立即创建**、只用 WAAPI `delay` 延后出场 → 不跨重绘持旧元素（否则重绘时气泡会被吞）。
+ *   - `total` 暴露本帧已排总时长（供切换等待）；
+ *   - `endAt(key)` 返回该 key 上**排完**的时刻（相对本帧开始的毫秒数）→ 供"先气泡、后必杀横幅"跨卡排序。
+ */
+export function createBubbleQueue(
+  root: HTMLElement,
+  play: (
+    root: HTMLElement,
+    target: HTMLElement | null,
+    text: string,
+    variant: BubbleVariant,
+    opts: BubbleOpts,
+  ) => number = playBubble,
+) {
+  let total = 0;
+  const busy = new Map<string, number>(); // key → 可再弹的最早时刻（相对本帧开始）
+  const playOn = (key: string, target: HTMLElement | null, text: string, variant: BubbleVariant, opts: BubbleOpts = {}): number => {
+    const dur = bubbleDuration(variant);
+    const delay = Math.max(0, busy.get(key) ?? 0);
+    play(root, target, text, variant, { ...opts, delayMs: (opts.delayMs ?? 0) + delay });
+    const end = delay + (opts.delayMs ?? 0) + dur;
+    busy.set(key, end);
+    total = Math.max(total, end);
+    return end;
+  };
+  return {
+    play: playOn,
+    /** 该 key 当前排到的结束时刻（本帧开始算起）；未排过 = 0。 */
+    endAt: (key: string): number => busy.get(key) ?? 0,
+    /** 本帧已排气泡的总时长（含所有 key 的最后一个）。 */
+    get total(): number {
+      return total;
+    },
+  };
 }
 
 /* ===== 挑战模式 · 传奇回合的专属过场 ===== */

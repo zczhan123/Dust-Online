@@ -57,8 +57,8 @@ describe('model types', () => {
       ultimatesUsed: [],
       legendOnceUsed: [],
       winner: null,
-      skillConsumedThisAction: 0,
-      dunwuPulseUsedThisTurn: false,
+      skillConsumedThisAction: {},
+      dunwuPulseUsed: {},
       attackQueue: null,
       virtualQueue: null,
       extraReroll: null,
@@ -74,8 +74,8 @@ describe('model types', () => {
     tianfa: { A: null, B: null },
     };
     expect(g.players.A.life).toBe(50);
-    expect(g.skillConsumedThisAction).toBe(0);
-    expect(g.dunwuPulseUsedThisTurn).toBe(false);
+    expect(g.skillConsumedThisAction).toEqual({});
+    expect(g.dunwuPulseUsed).toEqual({});
   });
 });
 

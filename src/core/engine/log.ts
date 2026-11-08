@@ -2,6 +2,7 @@ import { CHALLENGES } from '../content/challenges';
 import type { GameState, Phase, PlayerId } from '../model/types';
 
 export function pname(id: PlayerId): string {
+  if (id === 'A1' || id === 'A2' || id === 'B1' || id === 'B2') return `玩家${id}`;
   return id === 'A' ? '玩家A' : '玩家B';
 }
 

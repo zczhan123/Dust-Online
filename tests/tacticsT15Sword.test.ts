@@ -19,7 +19,7 @@ const mk = (heldValue: number) => {
 };
 
 const convertPay = (g: ReturnType<typeof mk>) =>
-  paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+  paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], 'attack');
 
 const heldInAreas = (g: ReturnType<typeof mk>): boolean =>
   (['attack', 'defense', 'meditation'] as const).some((k) => g.players.A.areas[k].some((d) => d.id === 'sd'));

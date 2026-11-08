@@ -43,7 +43,7 @@ describe('动效旁路事件 · 回血（供 UI 显示 +0）', () => {
     fxReset();
     g.players.A.areas.attack.push({ id: 'x1', value: 2, kind: 'attack' });
     g.players.A.areas.defense.push({ id: 'x2', value: 3, kind: 'defense' });
-    const eff = paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+    const eff = paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], 'attack');
     expect(eff).toHaveLength(1);
     expect(eff[0].source).toBe('converted');
     expect(fxTake()).toContainEqual({
@@ -59,7 +59,7 @@ describe('动效旁路事件 · 回血（供 UI 显示 +0）', () => {
     fxReset();
     g.players.A.areas.attack.push({ id: 'x1', value: 2, kind: 'attack' });
     g.players.A.areas.defense.push({ id: 'x2', value: 3, kind: 'defense' });
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], 'attack');
     expect(fxTake()).toContainEqual(
       expect.objectContaining({ kind: 'skillFired', player: 'A', skillKey: 'shenhong.sword' }),
     );
@@ -70,7 +70,7 @@ describe('动效旁路事件 · 回血（供 UI 显示 +0）', () => {
     fxReset();
     g.players.A.areas.attack.push({ id: 'y1', value: 2, kind: 'attack' });
     g.players.A.areas.defense.push({ id: 'y2', value: 3, kind: 'defense' });
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['y1', 'y2'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['y1', 'y2'] }], 'attack');
     expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'shenhong.sword')).toBe(false);
   });
 
@@ -120,7 +120,7 @@ describe('动效旁路事件 · 回血（供 UI 显示 +0）', () => {
     a034.heldDice = [{ id: 'held1', value: 2 }];
     const dist = g.players.A.artifacts.find((a) => a.column === 2)!.distribution!;
     const kind = areaOf(2, dist);
-    const eff = paySlots(g, 'A', [{ kind }], [{ dieIds: ['held1'] }], undefined, 'attack');
+    const eff = paySlots(g, 'A', [{ kind }], [{ dieIds: ['held1'] }], 'attack');
     expect(eff).toHaveLength(1);
     expect(fxTake()).toContainEqual({
       kind: 'pay',

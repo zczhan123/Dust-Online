@@ -36,7 +36,6 @@ const runSkill = (
     rng: new SeededRng(1),
     params,
     endMainPhase: () => {},
-    reportConsumed: () => {},
   });
 };
 

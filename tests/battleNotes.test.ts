@@ -313,6 +313,23 @@ describe('显示时机（用户反馈：被问"是否抵挡"时不该显示自�
     g.pending = { kind: 'sijiChuxing', player: 'A', costSlots: [] };
     expect(battleNotes(g, 'A').length).toBeGreaterThan(0); // 022 前置待决策属于自己 → 仍显示
   });
+
+  it('「即时反应」类待决策（009 取消 / 011 屏障 / 011 脉冲 / T09 慈悲）→ 攻击提示不显示', () => {
+    const g = mk22();
+    const reaction = [
+      { kind: 'guwangCancel', player: 'A', amount: 2, source: 'B' },
+      { kind: 'dunwuHalve', player: 'A' },
+      { kind: 'dunwuPulse', player: 'A', amount: 2 },
+      { kind: 'ciBei', player: 'A', target: 'B', amount: 2 },
+    ] as NonNullable<GameState['pending']>[];
+    for (const p of reaction) {
+      g.pending = p;
+      expect(battleNotes(g, 'A')).toEqual([]);
+    }
+    // 对照：022「使用攻击骰前」的选择仍应显示
+    g.pending = { kind: 'sijiChuxing', player: 'A', costSlots: [] };
+    expect(battleNotes(g, 'A').length).toBeGreaterThan(0);
+  });
 });
 
 describe('战斗提示：028 天罚 / 030 寰宇飞升', () => {

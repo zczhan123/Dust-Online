@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { setupGame } from '../src/core/engine/setup';
 import { createGame } from '../src/core/engine/game';
 import { doAttack, resolveBlock, dealTrueDamage, finalizeAttackResolution, pumpAttackQueue } from '../src/core/engine/combat';
@@ -12,6 +12,7 @@ describe('combat', () => {
     doAttack(g, 'A', [{ dieIds: [die.id] }]);
     expect(g.pendingAttack).toMatchObject({
       attacker: 'A',
+      defender: 'B',
       value: die.value,
       unblockable: false,
       physical: true,
@@ -140,7 +141,7 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     const before = g.players.B.life;
     dealTrueDamage(g, 'B', 5, 'A');
-    expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 5 });
+    expect(g.pending).toEqual({ kind: 'guwangCancel', player: 'B', amount: 5, source: 'A' });
     expect(g.players.B.life).toBe(before);
 
     const legal = getLegalActions(g);
@@ -215,14 +216,17 @@ describe('009 高塔铁幕 触发 (true damage cancel)', () => {
     expect(g.players.B.life).toBe(before - 5);
   });
 
-  it('applies damage immediately (no overwrite) when another pending exists', () => {
+  it('另一个待决策存在时：不覆盖它，而是把「高塔铁幕」**排队**（伤害延后）', () => {
     const g = guwangGame();
     g.players.B.areas.defense = [{ id: 'd1', value: 4, kind: 'defense' }];
     g.pending = { kind: 'caiyuliu', player: 'A', dieId: 'x', value: 3 };
     const before = g.players.B.life;
     dealTrueDamage(g, 'B', 5, 'A');
+    // 原来的待决策不动
     expect(g.pending.kind).toBe('caiyuliu');
-    expect(g.players.B.life).toBe(before - 5);
+    // 伤害延后：等当前待决策结算完再问「高塔铁幕」
+    expect(g.players.B.life).toBe(before);
+    expect(g.pendingQueue.some((p) => p.kind === 'guwangCancel')).toBe(true);
   });
 });
 

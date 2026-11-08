@@ -270,20 +270,26 @@ describe('effects primitives', () => {
       expect(() => paySlots(g, 'A', [{ kind: 'meditation' }], [{ dieIds: ['nope'] }])).toThrow();
     });
 
-    it('reports the slot count (not the real-die count) to reportConsumed', () => {
+    it('counts «consumed» slots per payer（置换 2 颗顶 1 格只算 1格）', () => {
       const g = setup();
       g.players.A.areas.attack = ['a1', 'a2', 'a3'].map((id) => ({ id, value: 1, kind: 'attack' as const }));
-      let reported = -1;
       paySlots(
         g,
         'A',
         [{ kind: 'attack' }, { kind: 'attack' }],
         [{ dieIds: ['a1'] }, { dieIds: ['a2', 'a3'] }],
-        (n) => {
-          reported = n;
-        },
+        'skill',
       );
-      expect(reported).toBe(2);
+      // 2 格：第 2 格用 2 颗置换 → 仍只算 1 格（011 灵能脉冲按「格数」计）
+      expect(g.skillConsumedThisAction.A).toBe(2);
+      expect(g.skillConsumedThisAction.B).toBe(undefined);
+    });
+
+    it('does not count «use» payments as 消耗（attack / defense / dustRise）', () => {
+      const g = setup();
+      g.players.A.areas.attack = [{ id: 'a1', value: 1, kind: 'attack' as const }];
+      paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a1'] }], 'attack');
+      expect(g.skillConsumedThisAction.A).toBe(undefined);
     });
   });
 

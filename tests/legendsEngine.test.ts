@@ -457,11 +457,11 @@ describe('L04 无上剑术（持续）', () => {
     const A = g.players.A;
     A.life = 30; // 012 魔女 lifeMax=40 → 有回血空间
     A.areas.attack.push(die('a5', 5, 'attack'));
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], 'attack');
     expect(A.life).toBe(31);
     A.areas.defense.push(die('d5', 5, 'defense'));
     const beforeB = g.players.B.life;
-    paySlots(g, 'A', [{ kind: 'defense' }], [{ dieIds: ['d5'] }], undefined, 'defense');
+    paySlots(g, 'A', [{ kind: 'defense' }], [{ dieIds: ['d5'] }], 'defense');
     expect(g.players.B.life).toBe(beforeB - 1);
   });
 
@@ -473,15 +473,15 @@ describe('L04 无上剑术（持续）', () => {
     A.life = 30; // 012 魔女 lifeMax=40 → 有回血空间
     // 置换：2 颗任意骰 → 视为 1 颗攻击骰（有效值 5）
     A.areas.attack.push(die('x1', 3, 'attack'), die('x2', 4, 'attack'));
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['x1', 'x2'] }], 'attack');
     expect(A.life).toBe(31);
     // 非 5 点 → 不回复
     A.areas.attack.push(die('a4', 4, 'attack'));
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a4'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a4'] }], 'attack');
     expect(A.life).toBe(31);
     // 「消耗」（reason='skill'）→ 不触发
     A.areas.attack.push(die('a5b', 5, 'attack'));
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5b'] }], undefined, 'skill');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5b'] }], 'skill');
     expect(A.life).toBe(31);
   });
 
@@ -493,11 +493,11 @@ describe('L04 无上剑术（持续）', () => {
     A.life = 30;
     A.areas.attack.push(die('a5', 5, 'attack'));
     fxReset();
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a5'] }], 'attack');
     expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tata.wushangjianshu')).toBe(true);
     A.areas.attack.push(die('a4', 4, 'attack'));
     fxReset();
-    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a4'] }], undefined, 'attack');
+    paySlots(g, 'A', [{ kind: 'attack' }], [{ dieIds: ['a4'] }], 'attack');
     expect(fxTake().some((e) => e.kind === 'skillFired' && e.skillKey === 'tata.wushangjianshu')).toBe(false);
   });
 });
@@ -526,7 +526,7 @@ describe('L04 我将在下个梦境与你再度相逢（必杀）', () => {
     skillsUsedThisTurn: g.skillsUsedThisTurn,
     ultimatesUsed: g.ultimatesUsed,
     skillConsumedThisAction: g.skillConsumedThisAction,
-    dunwuPulseUsedThisTurn: g.dunwuPulseUsedThisTurn,
+    dunwuPulseUsed: g.dunwuPulseUsed,
     chenaiUsed: g.chenaiUsed,
     attacksThisTurn: g.attacksThisTurn,
     hunhunGained: g.hunhunGained,
@@ -663,12 +663,12 @@ describe('L05 复仇之灵（持续）', () => {
     const A = g.players.A;
     expect(A.lifeTens).toBe(5); // 015 残响 life 50
     const q = () => g.pendingQueue.filter((x) => x.kind === 'fuchouRise').length;
-    applyLifeLoss(g, 'A', 15); // 50 → 35：十位数 5→3（跨多位）→ 只 1 次
+    applyLifeLoss(g, 'A', 15, 'B'); // 50 → 35：十位数 5→3（跨多位）→ 只 1 次
     expect(A.lifeTens).toBe(3);
     expect(q()).toBe(1);
-    applyLifeLoss(g, 'A', 1); // 35 → 34：十位数不变 → 不触发
+    applyLifeLoss(g, 'A', 1, 'B'); // 35 → 34：十位数不变 → 不触发
     expect(q()).toBe(1);
-    applyLifeLoss(g, 'A', 5); // 34 → 29：3→2 → 再 1 次
+    applyLifeLoss(g, 'A', 5, 'B'); // 34 → 29：3→2 → 再 1 次
     expect(q()).toBe(2);
   });
 
@@ -683,7 +683,7 @@ describe('L05 复仇之灵（持续）', () => {
     g.activePlayer = 'A'; // 当前回合玩家 = A；触发者 = B
     g.players.B.life = 40;
     g.players.B.lifeTens = 4;
-    applyLifeLoss(g, 'B', 5); // 40 → 35：十位数 4→3 → B 的强制尘起
+    applyLifeLoss(g, 'B', 5, 'A'); // 40 → 35：十位数 4→3 → B 的强制尘起
     pumpPending(g);
     expect(g.pending?.kind).toBe('fuchouRise');
     const acts = getLegalActions(g);
@@ -1806,7 +1806,6 @@ const runSkill = (
     rng: new SeededRng(1),
     params,
     endMainPhase: () => {},
-    reportConsumed: () => {},
   });
 };
 

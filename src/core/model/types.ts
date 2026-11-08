@@ -1,4 +1,5 @@
-export type PlayerId = 'A' | 'B';
+/** 1v1 使用 A/B；2v2 使用 A1/A2/B1/B2。 */
+export type PlayerId = 'A' | 'B' | 'A1' | 'A2' | 'B1' | 'B2';
 export type DiceKind = 'attack' | 'defense' | 'meditation';
 export type Column = 1 | 2 | 3;
 export type Phase =
@@ -40,23 +41,23 @@ export type Action =
   | { t: 'advance' }
   | { t: 'reroll'; dieIds: string[] }
   | { t: 'dustRise'; artifactId: string; side?: 'left' | 'right'; useSeal?: boolean; free?: boolean; costSlots?: SlotFill[]; /** L05 复仇之灵：强制额外尘起（不耗冥想骰/不占次数/不消耗 019 免费计数） */ fuchou?: boolean }
-  | { t: 'attack'; costSlots: SlotFill[] }
-  | { t: 'block'; costSlots?: SlotFill[] }
+  | { t: 'attack'; costSlots: SlotFill[]; target?: PlayerId }
+  | { t: 'block'; costSlots?: SlotFill[]; by?: PlayerId }
   | { t: 'caiyuliu'; to: 'defense' | 'meditation' | null }
   /** C01 特典·极之境·裁雨流：使用攻击骰造成伤害后，可将该攻击骰重掷并按新点数落区（可选） */
   | { t: 'c01Caiyuliu'; accept: boolean }
   | { t: 'fengmang'; accept: boolean; attackDieId?: string; meditationDieId?: string }
-  | { t: 'guwangCharge'; dieId?: string }
+  | { t: 'guwangCharge'; dieId?: string; target?: PlayerId }
   | { t: 'guwangCancel'; cancel: boolean; defenseDieId?: string; costSlots?: SlotFill[] }
-  | { t: 'shenhongKill'; accept: boolean }
+  | { t: 'shenhongKill'; accept: boolean; target?: PlayerId }
   /** A02 深红（异相）·哀悼：补充数量 ≤3 时，可造成 2 点真实伤害并弃置对方 1 个防御骰（由持有者选择） */
-  | { t: 'aidao'; accept: boolean; defenseDieId?: string }
+  | { t: 'aidao'; accept: boolean; defenseDieId?: string; target?: PlayerId; damageTarget?: PlayerId }
   | { t: 'dunwuHalve'; accept: boolean; meditationDieId?: string; costSlots?: SlotFill[] }
-  | { t: 'dunwuPulse'; accept: boolean }
+  | { t: 'dunwuPulse'; accept: boolean; target?: PlayerId }
   | { t: 'leibaoReroll'; accept: boolean }
-  | { t: 'dianxing'; accept?: false; dieIds?: string[] }
+  | { t: 'dianxing'; accept?: false; dieIds?: string[]; targets?: PlayerId[] }
   | { t: 'leibao'; accept?: false; dieIds?: string[] }
-  | { t: 'weimu'; accept: boolean; dieId?: string }
+  | { t: 'weimu'; accept: boolean; dieId?: string; target?: PlayerId }
   | { t: 'zhihaiReroll'; dieIds: string[] }
   /** 019 尘哀·尘起：是否接受赠送的 1 次「无需冥想骰的额外尘起行动」 */
   | { t: 'chenaiFreeRise'; accept: boolean }
@@ -113,11 +114,11 @@ export type Action =
   /** 020 兽魂：攻击方选择是否取消本次伤害（取消则令持有者计数 −1） */
   | { t: 'shouhunCancel'; cancel: boolean }
   /** 026 哀歌·威压：使用能力骰后，令自己或对方的 1 颗能力骰点数变为固定值（保留区域）；dieId 省略 = 不发动 */
-  | { t: 'weiyaPick'; owner: 'self' | 'opp'; dieId?: string }
+  | { t: 'weiyaPick'; owner: 'self' | 'opp'; dieId?: string; target?: PlayerId }
   /** 026 哀歌·陷阵：生命最少的一方选择弃置持有者的 1 颗能力骰 */
   | { t: 'xianzhenResolve'; dieId: string }
   /** 025 屠虎·横贯（触发）：被抵挡后可弃置对方 1 颗点数小于该攻击的能力骰；dieId 省略 = 不发动 */
-  | { t: 'hengguan'; dieId?: string }
+  | { t: 'hengguan'; dieId?: string; target?: PlayerId }
   /** 027 寒光·必杀：使用攻击骰前的二选一（① 把神器上的骰移入对应区域 / ② 移除它并弃置对方同点数骰） */
   | { t: 'hanguangPick'; pick: 'move' | 'discard'; dieId: string; targetDieId?: string }
   /** 029 真言·全知：把全部能力骰分配到三区（dieId → 目标类型） */
@@ -132,7 +133,7 @@ export type Action =
   | { t: 'wanzhangDiscard'; dieIds: string[] }
   /** 034 金刚·不动菩提：是否移除神器上同点数骰以取消其效果 */
   | { t: 'putiResolve'; accept: boolean }
-  | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown> };
+  | { t: 'skill'; artifactId: string; side: 'left' | 'right' | 'only'; params?: Record<string, unknown>; target?: PlayerId };
 
 /** 挑战模式"因多组触发的攻击"的表现层提示：`index/total`＝组序号/组数；`sub/subTotal`＝组内第几段（可选）。 */
 export interface LegendGroup {
@@ -144,8 +145,12 @@ export interface LegendGroup {
 
 export interface PendingAttack {
   attacker: PlayerId;
+  /** 防守座位；2v2 必填（由攻守标记/票选决定），1v1 缺省按唯一敌人解析。 */
+  defender?: PlayerId;
   value: number;
   unblockable: boolean;
+  /** 「不可抵挡」的来源技能名（001 中央突破 / 022 处刑通牒 / L07 无尽追猎）——只供提示栏写明来源 */
+  unblockableLabel?: string;
   physical: boolean;
   sourceDieId?: string;
   sourceValue?: number;
@@ -181,13 +186,15 @@ export interface PendingAttack {
   legendGroup?: LegendGroup;
 }
 
-export type Pending =
+type PendingPayload =
   | { kind: 'caiyuliu'; player: PlayerId; dieId: string; value: number }
   /** C01 特典·极之境·裁雨流（触发）：使用攻击骰造成伤害后，由攻击方决定是否重掷该骰并按新点数落区 */
   | { kind: 'c01Caiyuliu'; player: PlayerId; dieId: string }
   | { kind: 'fengmang'; player: PlayerId; defenderId: PlayerId; value: number }
-  | { kind: 'guwangCharge'; player: PlayerId }
-  | { kind: 'guwangCancel'; player: PlayerId; amount: number }
+  | { kind: 'guwangCharge'; player: PlayerId; target?: PlayerId }
+  | { kind: 'guwangCancel'; player: PlayerId; amount: number; /** 真伤来源（2v2 有 2 个敌人，不能靠 opponentOf 推） */ source: PlayerId;
+      /** 造成这次真伤的"发动卡"（供提示栏写明"谁发动了什么技能"；来自 fx 的 curSource） */
+      sourceCard?: { player: PlayerId; artifactId?: string; side?: 'left' | 'right' | 'only'; skillKey?: string; tacticId?: string } }
   | { kind: 'shenhongKill'; player: PlayerId }
   /** A02 深红（异相）·哀悼（触发）：补充阶段实际补充数量 ≤3 时，由**持有者本人**决定是否发动 */
   | { kind: 'aidao'; player: PlayerId }
@@ -199,7 +206,7 @@ export type Pending =
   /** 「激活」类技能：尘起装填到该侧后立即强制结算（待玩家选完） */
   | { kind: 'activationResolve'; player: PlayerId; artifactId: string; side: 'left' | 'right' | 'only' }
   /** 017 帷幕：对方重掷阶段结束时，可受 2 真实伤害并弃置对方 1 个能力骰 */
-  | { kind: 'weimu'; player: PlayerId }
+  | { kind: 'weimu'; player: PlayerId; target?: PlayerId }
   /** 018 漆黑绽放·必杀：获得 X 骰后，可选重掷最多 X 颗 */
   | { kind: 'zhihaiReroll'; player: PlayerId; x: number; forced: boolean }
   /** 019 尘哀·尘起：自己回合造成伤害后可立即进行 1 次「无需冥想骰」的额外尘起行动（每回合 1 次） */
@@ -211,7 +218,7 @@ export type Pending =
   /** 023 蛇蝎·畏惧：对方必须消耗 1 颗能力骰（由对方选择） */
   | { kind: 'weijuPay'; player: PlayerId; initiator: PlayerId; initiatorValue: number }
   /** 023 蛇蝎·共振：重掷并落区后，按落区类型二选一 */
-  | { kind: 'gongzhenPick'; player: PlayerId; areaKind: DiceKind }
+  | { kind: 'gongzhenPick'; player: PlayerId; areaKind: DiceKind; target?: PlayerId }
   /** 挑战模式·代决（模式 1）：把「昔日传奇」本该自己做的抉择交给挑战者；`options` 为候选。 */
   | {
       kind: 'challengePick';
@@ -237,9 +244,9 @@ export type Pending =
   /** 026 哀歌·陷阵：持有者的重掷阶段结束时，由生命最少的一方（并列 = 当前回合玩家）弃置持有者 1 颗能力骰 */
   | { kind: 'xianzhenPick'; player: PlayerId; owner: PlayerId }
   /** 025 屠虎·横贯（触发）：攻击被抵挡后，攻击者可弃置对方 1 颗点数小于该攻击的能力骰 */
-  | { kind: 'hengguan'; player: PlayerId; value: number }
+  | { kind: 'hengguan'; player: PlayerId; value: number; target?: PlayerId }
   /** 027 寒光·必杀：使用攻击骰前，必须先决定是否使用神器上的骰子（暂存本次攻击的支付） */
-  | { kind: 'hanguangPick'; player: PlayerId; costSlots: SlotFill[] }
+  | { kind: 'hanguangPick'; player: PlayerId; costSlots: SlotFill[]; target?: PlayerId }
   /** 029 真言·全知（持续）：补充阶段与重掷阶段落区后，由玩家把**全部能力骰**自行分配到 防御(同点成对)/攻击(顺点三连)/冥想(其余) */
   | { kind: 'quanzhiAssign'; player: PlayerId }
   /** 032 梦魇·低语（持续）：持有者**主要阶段结束时**，宣称 1 个能力骰类型（获得 1 随机骰并移入该区） */
@@ -304,6 +311,17 @@ export type Pending =
       blocked?: boolean;
       blockedForTriggers?: boolean;
     };
+
+/**
+ * 待决策的公共归属字段（与具体 kind 交叉）：
+ * - `player`：**决策人**（旧字段，保持兼容）；
+ * - `owner`：骰子/资源归属方（部分 kind 本来就有，交叉后仍必填）；
+ * - `cardOwner`：卡主（2v2 队友卡触发、由另一名队友决策时使用）。
+ */
+export type Pending = PendingPayload & {
+  owner?: PlayerId;
+  cardOwner?: PlayerId;
+};
 
 export interface Distribution {
   defense: number[];
@@ -419,6 +437,20 @@ export interface PlayerState {
   tactic?: string | null;
 }
 
+/** 一个队伍/阵营：1v1 为单人队伍；2v2 为两人共享生命。 */
+export interface TeamState {
+  id: string;
+  members: PlayerId[];
+  life: number;
+  lifeMax: number;
+}
+
+/** 规则档位：模式无关层据此决定生命、回合与目标策略。 */
+export interface BattleRules {
+  id: '1v1' | '2v2' | 'challenge';
+  lifeModel: 'perSeat' | 'perTeam';
+}
+
 export interface LogEntry {
   turn: number;
   phase: Phase;
@@ -426,7 +458,17 @@ export interface LogEntry {
 }
 
 export interface GameState {
-  players: Record<PlayerId, PlayerState>;
+  players: Record<string, PlayerState>;
+  /** 参战座位顺序（1v1: A,B；2v2: A1,B1,A2,B2）。缺省回退 1v1。 */
+  roster?: PlayerId[];
+  /** 座位 → 阵营。1v1: A→A, B→B。 */
+  teamOf?: Record<string, string>;
+  /** 阵营状态。1v1 为单人队伍（生命仍以 PlayerState 为准）；2v2 为共享生命。 */
+  teams?: Record<string, TeamState>;
+  /** 规则档位（模式无关层用）。 */
+  rules?: BattleRules;
+  /** 2v2 攻守标记；缺省/1v1 不设置。 */
+  stance?: 'attackPicks' | 'defensePicks';
   activePlayer: PlayerId;
   firstPlayer: PlayerId;
   initialRerollQueue: PlayerId[];
@@ -518,7 +560,7 @@ export interface GameState {
   };
   dustfall: number;
   turnIndex: number;
-  firstRound: Record<PlayerId, boolean>;
+  firstRound: Record<string, boolean>;
   rngState: number;
   log: LogEntry[];
   pendingAttack: PendingAttack | null;
@@ -535,10 +577,14 @@ export interface GameState {
   /** 「整局一次」类的**传奇面板**技能（键为 `玩家:key`，如 L11「永恒女王」）——与必杀的 `ultimatesUsed` 分开记 */
   legendOnceUsed: string[];
   winner: PlayerId | null;
-  skillConsumedThisAction: number;
-  dunwuPulseUsedThisTurn: boolean;
+  /** 本次动作中**通过技能消耗**的能力骰「格数」（按付款人分别记）。
+   *  唯一来源＝`effects.paySlots` 在 `reason === 'skill'` 时自记 → 任何模式、任何座位、任何技能都不会漏报。 */
+  skillConsumedThisAction: Partial<Record<PlayerId, number>>;
+  /** 011「灵能脉冲·触发」本回合是否**已使用**（按玩家分别记；每回合开始全部清零）。
+   *  注意：只表示"用过了"，不代表"不能再触发"——触发可以发生多次，只是用不了第二次。 */
+  dunwuPulseUsed: Partial<Record<PlayerId, boolean>>;
   /** 多段攻击队列（013 电刑：1/2/3 逐段结算，同一攻击者） */
-  attackQueue: { player: PlayerId; values: number[] } | null;
+  attackQueue: { player: PlayerId; values: number[]; defenders?: PlayerId[] } | null;
   /** 技能发起的多次攻击队列（A01「不败之王」充能：你 5 点 → 对方 3 点 ×2，**攻击者可不同**，逐次结算）
    *  `owner` = 该技能（效果）的拥有者，用于提示栏区分"我方发起 / 因对方效果发起" */
   /**
@@ -550,6 +596,8 @@ export interface GameState {
     value: number;
     label: string;
     owner: PlayerId;
+    /** 2v2：本段攻击的防守座位（缺省时 1v1 按唯一敌人解析）。 */
+    defender?: PlayerId;
     dieId?: string;
     dieStyle?: 'solid';
     /** 因"多组"触发的攻击：组序号/组数（+组内第几段），供提示栏显示（见 `LegendGroup`）。 */
@@ -574,15 +622,15 @@ export interface GameState {
   /** 待弹出的待决策队列（多个触发同时排队时按序弹出，避免互相覆盖） */
   pendingQueue: Pending[];
   /** 019 尘哀·尘起：本回合该玩家是否已触发过（每回合最多 1 次） */
-  chenaiUsed: Record<PlayerId, boolean>;
+  chenaiUsed: Record<string, boolean>;
   /** 本回合可用的「无需冥想骰的额外尘起行动」次数（019 尘起赠予） */
   freeNoCostRise: number;
   /** 每名玩家「本回合已进行的攻击次数」（025 屠虎·横贯持续：第 2 次攻击伤害 +2；回合开始时清零） */
-  attacksThisTurn: Record<PlayerId, number>;
+  attacksThisTurn: Record<string, number>;
   /** A06 异相·「幽魂不散」：每名玩家「本回合已获得的攻击骰数」（上限 2；回合开始时清零） */
-  hunhunGained: Record<PlayerId, number>;
+  hunhunGained: Record<string, number>;
   /** 027 寒光·凛冽之音（充能）：持有者自己的下个尘起阶段开始前，任何玩家重掷能力骰都会受到等量真实伤害 */
-  rerollPunish: Record<PlayerId, boolean>;
+  rerollPunish: Record<string, boolean>;
   /** 028 天罚（激活·本回合）：该玩家的攻击点数「视为固定值」（可选——A05 异相无固定值、改为攻击伤害+3），且对方只能用某类骰抵挡；damageCount 统计本回合通过攻击造成伤害的次数（满 2 次即结束主要阶段） */
-  tianfa: Record<PlayerId, { blockKind: 'meditation' | 'attack'; value?: number; damageCount: number; /** 发动它的技能 key（bairi / yunluo / alt.shenkong / alt.yunluo）→ 供界面每次攻击时弹技能名 */ key: string } | null>;
+  tianfa: Record<string, { blockKind: 'meditation' | 'attack'; value?: number; damageCount: number; /** 发动它的技能 key（bairi / yunluo / alt.shenkong / alt.yunluo）→ 供界面每次攻击时弹技能名 */ key: string } | null>;
 }

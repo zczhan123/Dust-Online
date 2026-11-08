@@ -34,3 +34,13 @@ export function placeDieByDistribution(
 export function resetDieIdCounter(): void {
   counter = 0;
 }
+
+/** 只读：拿到当前计数器（供"状态副本试算"用；试算结束必须复原，否则会浪费 id）。 */
+export function getDieIdCounter(): number {
+  return counter;
+}
+
+/** 复原计数器（搭配 `getDieIdCounter`）。 */
+export function setDieIdCounter(n: number): void {
+  counter = n;
+}

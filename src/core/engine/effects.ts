@@ -19,6 +19,7 @@ import { TACTIC_BY_ID } from '../content/tactics';
 // 这里只在**函数体内**使用（不在模块初始化期），与 combat ↔ pending 的既有情形一致。
 import { queuePending, pumpPending } from './pending';
 import { fxPush, fxTacticFired, fxSkillFired } from './fx';
+import { lifeMaxOf, lifeOf, rosterOf, setLife } from '../model/participants';
 
 const kindCnOf = (k: DiceKind): string => (k === 'attack' ? '攻击' : k === 'defense' ? '防御' : '冥想');
 
@@ -99,9 +100,10 @@ export function moveDice(g: GameState, player: PlayerId, dieIds: string[], to: D
 /** 实际回复生命（不做任何"将要回复"的前置询问）；仅供**已经决定要回复**的结算使用。返回实际回复量 */
 export function applyHeal(g: GameState, player: PlayerId, amount: number): number {
   const p = g.players[player];
-  const before = p.life;
-  p.life = Math.min(p.lifeMax, p.life + amount);
-  const healed = p.life - before;
+  const before = g.rules?.lifeModel === 'perTeam' ? lifeOf(g, player) : p.life;
+  if (g.rules?.lifeModel === 'perTeam') setLife(g, player, Math.min(lifeMaxOf(g, player), before + amount));
+  else p.life = Math.min(p.lifeMax, p.life + amount);
+  const healed = (g.rules?.lifeModel === 'perTeam' ? lifeOf(g, player) : p.life) - before;
   fxPush({ kind: 'heal', player, actual: healed }); // 满血时 healed=0 → UI 显示 +0
   if (healed > 0) checkLifeTens(g, player);
   return healed;
@@ -192,7 +194,7 @@ export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): vo
   ) {
     g.tacticLowFirst = player;
     const life = g.players[player].life;
-    for (const id of ['A', 'B'] as PlayerId[]) {
+    for (const id of rosterOf(g)) {
       const p = g.players[id];
       if (TACTIC_BY_ID[p.tactic ?? '']?.key !== 'yuanjian') continue;
       if (p.tacticGuess === player) {
@@ -210,7 +212,7 @@ export function noteLifeDrop(g: GameState, player: PlayerId, amount: number): vo
       }
     }
   }
-  for (const id of ['A', 'B'] as PlayerId[]) {
+  for (const id of rosterOf(g)) {
     const lg = g.players[id].legend;
     if (!lg || lg.id !== 'L11') continue;
     if (!hasActiveSkill(g.players[id], 'aiwa.xielingxuqu')) continue;
@@ -453,13 +455,14 @@ export function noteYuluoDiceConsumed(
 }
 
 /** 支付“N 个骰位”的代价：每格 1 颗真骰(类型须匹配) 或 2 颗任意真骰(置换,值5)。
- *  移除所有真骰(返还供应堆)；返回各格“有效骰”；reportConsumed 按“格数”上报。 */
+ *  移除所有真骰(返还供应堆)；返回各格“有效骰”。
+ *  `reason === 'skill'`（＝「消耗」，技能代价）时**在这里**记「付了几格 + 谁付的」——
+ *  011「灵能脉冲·触发」的唯一记账点：任何模式 / 座位 / 技能只要走本入口就自动计入（不再由调用点手动上报）。 */
 export function paySlots(
   g: GameState,
   player: PlayerId,
   spec: SlotSpec[],
   fills: SlotFill[],
-  reportConsumed?: (n: number) => void,
   // 该次支付属于哪种「使用能力骰」（026「威压」只在 attack / defense / dustRise 触发；reason='skill'＝「消耗」不触发）
   reason: 'attack' | 'defense' | 'dustRise' | 'skill' = 'skill',
 ): EffectiveDie[] {
@@ -587,7 +590,11 @@ export function paySlots(
       );
     }
   }
-  reportConsumed?.(spec.length);
+  // 「消耗」记账（011「灵能脉冲·触发」的唯一来源，按「格数」计：置换 2 颗顶 1 格仍算 1）。
+  // ⚠️ 不要改回"由各调用点传 reportConsumed"——历史事故：14 处漏传 → 脉冲静默不触发。
+  if (reason === 'skill') {
+    g.skillConsumedThisAction[player] = (g.skillConsumedThisAction[player] ?? 0) + spec.length;
+  }
   // L01 传奇面板·雨落狂流：本次「使用/消耗」若含"不符合骰点分布"的骰 → 计数 +1
   noteYuluoDiceConsumed(g, player, paidDice);
   // A06 异相·「幽魂不散」：「使用」防御/冥想骰（抵挡 reason='defense' / 尘起 reason='dustRise'）时触发；

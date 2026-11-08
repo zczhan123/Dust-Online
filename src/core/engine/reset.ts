@@ -4,6 +4,7 @@ import { fillInitialDice } from './setup';
 import { hasActiveSkill } from './skill-state';
 import { applyTacticStart } from './game';
 import { TACTIC_BY_ID } from '../content/tactics';
+import { nextSeat, rosterOf } from '../model/participants';
 
 const KINDS = ['attack', 'defense', 'meditation'] as const;
 
@@ -16,10 +17,10 @@ const KINDS = ['attack', 'defense', 'meditation'] as const;
  * **后手拿尘印**；战报（`g.log`）**保留**。
  */
 export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
-  const second: PlayerId = firstPlayer === 'A' ? 'B' : 'A';
+  const second: PlayerId = nextSeat(g, firstPlayer);
 
   // 1) 清空能力骰与各神器/玩家/面板的临时状态（计数与生命**不动**）
-  for (const id of ['A', 'B'] as PlayerId[]) {
+  for (const id of rosterOf(g)) {
     const p = g.players[id];
     for (const k of KINDS) p.areas[k] = [];
     for (const a of p.artifacts) {
@@ -55,7 +56,7 @@ export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
 
   // 2) 重投初始能力骰（按各自意志与第二列分布；T01「谨慎」持有者改为由玩家自选 → 见第 5 步）
   withRngState(g, (rng) => {
-    for (const id of ['A', 'B'] as PlayerId[]) {
+    for (const id of rosterOf(g)) {
       const p = g.players[id];
       // L03「无敌」没有初始能力骰
       if (hasActiveSkill(p, 'batton.wudi')) continue;
@@ -85,8 +86,8 @@ export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
   g.rerollUsed = 0;
   g.skillsUsedThisTurn = [];
   g.ultimatesUsed = [];
-  g.skillConsumedThisAction = 0;
-  g.dunwuPulseUsedThisTurn = false;
+  g.skillConsumedThisAction = {};
+  g.dunwuPulseUsed = {};
   g.chenaiUsed = { A: false, B: false };
   g.attacksThisTurn = { A: 0, B: 0 };
   g.hunhunGained = { A: 0, B: 0 };
@@ -101,12 +102,12 @@ export function resetToBattleStart(g: GameState, firstPlayer: PlayerId): void {
   // L04 重开＝从「获得初始能力骰子」步骤重来，故只重跑**触发时点在该步骤或之后**的战术牌
   // （`TacticDef.reOnReset`，如 T01「当你投掷初始能力骰子」）；T02「当你获得本战术后」不重跑。
   // 无此类牌则直接进初始重掷。生命/上限与生命修正**一律不动**（属第 3 页初始设置）。
-  const reRun = (['A', 'B'] as PlayerId[]).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.reOnReset);
+  const reRun = rosterOf(g).some((id) => TACTIC_BY_ID[g.players[id].tactic ?? '']?.reOnReset);
   if (reRun) {
     g.phase = 'tactics';
     g.tacticQueue = [];
     g.tacticHand = [];
-    for (const id of ['A', 'B'] as PlayerId[]) {
+    for (const id of rosterOf(g)) {
       if (TACTIC_BY_ID[g.players[id].tactic ?? '']?.reOnReset) applyTacticStart(g, id);
     }
   } else {

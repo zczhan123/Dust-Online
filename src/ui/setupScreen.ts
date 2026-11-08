@@ -10,6 +10,20 @@ import { renderLobby } from './lobby';
 import { createOnlineShell, type OnlineCtx, type OnlineShell } from './online';
 import { enterOnlineBattle } from './onlineMode';
 import { attachSettleTip, hideSettleTip } from './settleTip';
+import type { TwoVTwoSeat, TwoVTwoSetup, TwoVTwoTeam } from './twoVTwoSetup';
+import { SEAT_COLOR } from './seatColors';
+
+/**
+ * 是否显示 2v2 入口（首页「测试2v2」+ 左右互搏子菜单「团队作战」）。
+ *
+ * **2v2 整套模式开发完成前，线上不暴露入口**；但开发期必须能随时点测。
+ * 做法＝**按构建场合自动判定**（不写死 true/false，避免"本地改关→提交→再改开"留下永久未提交改动）：
+ *  - `npm run dev` / `vitest`（DEV 为真）→ **显示**，本地照常点测；
+ *  - `npm run build`（生产构建）→ **隐藏**，且该分支会被整段 tree-shake 掉（产物里不含这些入口代码）。
+ * ⚠️ 边界：`vite build --mode development` 会被当成 DEV → 显示（正常 `npm run build` 不会）。
+ * ⚠️ 若要在**成品/部署包**里预览 2v2，临时把本行改成 `true` 再打包。
+ */
+export const SHOW_2V2_ENTRIES = import.meta.env.DEV;
 
 export const HEROES = {
   kong: ['001', '002', '003'] as [string, string, string], // 雨中剑圣 空
@@ -59,9 +73,15 @@ export interface SetupOptions {
   challengeCardId?: string;
   /** 单人挑战：结算模式（`manual` 自选 / `favor` 有利 / `against` 不利） */
   settleMode?: 'manual' | 'favor' | 'against';
+  /** 团队作战：完整四座位配置（由 2v2 轮选流程生成） */
+  twoVTwo?: TwoVTwoSetup;
 }
 
 type Side = 'A' | 'B';
+
+/** 联机/1v1 仍只有 A/B；2v2 座位不进入这些旧入口。 */
+const asSide = (p: PlayerId | null | undefined): Side | null =>
+  p === 'A' || p === 'B' ? p : null;
 // 内部 id 固定为 'yuxuan'（历史命名，勿改，仅内部标识）；该模式的界面文案一律为「预设模式」。
 type PickerMode = 'yuxuan' | 'gouzu';
 
@@ -435,6 +455,7 @@ function renderMenu(
   level: 'home' | 'jubai',
 ): void {
   root.innerHTML = '';
+  root.classList.remove('setup-2v2-test');
   root.classList.add('setup-page');
   ensureInkFilter();
 
@@ -480,6 +501,26 @@ function renderMenu(
       if (act === 'lunxuan') item.addEventListener('click', () => renderRotationSetup(root, onStart));
       menu.appendChild(item);
     }
+    // 团队作战（2v2）：正式入口，放在「左右互搏」子菜单。
+    if (SHOW_2V2_ENTRIES) {
+      const team = button('menu-item', '');
+      team.dataset.act = 'team2v2';
+      const teamWord = el('span', 'word');
+      teamWord.textContent = '团队作战';
+      team.appendChild(teamWord);
+      team.addEventListener('click', () => {
+        const backToJubai = (): void => renderMenu(root, onStart, 'jubai');
+        render2v2DraftSetup(root, backToJubai, (setup) => {
+          onStart({
+            heroA: setup.seats.A1,
+            heroB: setup.seats.B1,
+            firstPlayer: setup.firstTeam === 'A' ? 'A' : 'B',
+            twoVTwo: setup,
+          });
+        });
+      });
+      menu.appendChild(team);
+    }
   } else {
     const live = (label: string): void => {
       const item = button('menu-item', '');
@@ -505,6 +546,15 @@ function renderMenu(
     challenge.appendChild(cw);
     challenge.addEventListener('click', () => renderChallengeSetup(root, onStart));
     menu.appendChild(challenge);
+    if (SHOW_2V2_ENTRIES) {
+      const test2v2 = button('menu-item', '');
+      test2v2.dataset.act = 'test2v2';
+      const tw = el('span', 'word');
+      tw.textContent = '测试2v2';
+      test2v2.appendChild(tw);
+      test2v2.addEventListener('click', () => render2v2TestSetup(root, () => renderMenu(root, onStart, 'home'), onStart));
+      menu.appendChild(test2v2);
+    }
     const link = document.createElement('a');
     link.className = 'menu-item';
     link.href = MENU_EXTERNAL;
@@ -619,6 +669,7 @@ function tacticSection(opts: {
  */
 function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, mode: PickerMode, online?: OnlineCtx): void {
   root.innerHTML = '';
+  root.classList.remove('setup-2v2-test');
   root.classList.add('setup-page');
   ensureInkFilter();
 
@@ -671,7 +722,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
   }
 
   // ── 联机选择同步（3b）：预设/构筑＝各自选自己（只同步"我这一侧"，对端只读）──
-  const mySide: Side | null = online?.session.state.myPlayer ?? null;
+  const mySide: Side | null = asSide(online?.session.state.myPlayer);
   const onlineOn = !!(online && mySide);
   const oppSide: Side | null = mySide === 'A' ? 'B' : mySide === 'B' ? 'A' : null;
   const selMode: 'preset' | 'build' = mode === 'yuxuan' ? 'preset' : 'build';
@@ -1300,6 +1351,7 @@ function renderPicker(root: HTMLElement, onStart: (opts: SetupOptions) => void, 
  */
 export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void, online?: OnlineCtx): void {
   root.innerHTML = '';
+  root.classList.remove('setup-2v2-test');
   root.classList.add('setup-page');
   ensureInkFilter();
 
@@ -1330,7 +1382,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
 
   // ── 联机（3b）：轮选＝"轮到谁谁选"；房主抽池并广播，对端采纳；只有 actor() 能选 ──
   let shell: OnlineShell | null = null;
-  const mySideR: Side | null = online?.session.state.myPlayer ?? null;
+  const mySideR: Side | null = asSide(online?.session.state.myPlayer);
   const onlineOnR = !!(online && mySideR);
   const guestJoinedR = (): boolean => !!online && online.session.state.members.some((m) => m.role === 'guest');
   if (online && mySideR) {
@@ -1783,6 +1835,7 @@ export function renderRotationSetup(root: HTMLElement, onStart: (opts: SetupOpti
  */
 export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOptions) => void): void {
   root.innerHTML = '';
+  root.classList.remove('setup-2v2-test');
   root.classList.add('setup-page');
   ensureInkFilter();
 
@@ -2101,6 +2154,638 @@ export function renderChallengeSetup(root: HTMLElement, onStart: (opts: SetupOpt
     surface.innerHTML = '';
     buildTop();
     buildBoard();
+    surface.appendChild(version);
+  }
+
+  render();
+}
+
+export function render2v2TestSetup(
+  root: HTMLElement,
+  onBack: () => void,
+  onStart: (opts: SetupOptions) => void,
+): void {
+  root.innerHTML = '';
+  root.classList.add('setup-page', 'setup-2v2', 'setup-2v2-test');
+  ensureInkFilter();
+
+  const surface = el('div', 'b2v2-test-surface');
+  const head = el('div', 'b2v2-test-head');
+  const back = button('menu-back', '← 返回');
+  back.dataset.act = 'test2v2Back';
+  back.addEventListener('click', onBack);
+  const title = el('div', 'b2v2-test-title');
+  title.textContent = '测试2v2';
+  head.append(back, title);
+  surface.appendChild(head);
+
+  const panel = el('div', 'b2v2-test-panel');
+  const seats: TwoVTwoSeat[] = ['A1', 'A2', 'B1', 'B2'];
+  const heroes: Record<TwoVTwoSeat, HeroKey> = {
+    A1: 'kong',
+    A2: 'ying',
+    B1: 'batton',
+    B2: 'tata',
+  };
+  const alt: Record<TwoVTwoSeat, boolean> = { A1: false, A2: false, B1: false, B2: false };
+  const message = el('div', 'b2v2-test-message');
+  const rows: Record<TwoVTwoSeat, { select: HTMLSelectElement; alt: HTMLInputElement; altLabel: HTMLElement; altText: HTMLElement }> = {} as never;
+
+  const heroAlt = (seat: TwoVTwoSeat): string | null => {
+    const base = HEROES[heroes[seat]].find((id) => ALT_OF[id]);
+    return base ? ALT_OF[base] : null;
+  };
+
+  const syncRow = (seat: TwoVTwoSeat): void => {
+    const row = rows[seat];
+    if (!row) return;
+    const altId = heroAlt(seat);
+    row.alt.disabled = !altId;
+    if (!altId) alt[seat] = false;
+    row.alt.checked = alt[seat];
+    row.altText.textContent = altId
+      ? `使用异相（${ARTIFACTS[altId]?.name ?? altId}）`
+      : '无异相/特典';
+  };
+
+  for (const seat of seats) {
+    const row = el('div', 'b2v2-test-row');
+    row.style.setProperty('--pc', SEAT_COLOR[seat]);
+    const who = el('span', 'b2v2-test-seat');
+    who.textContent = seat;
+    const select = document.createElement('select');
+    select.className = 'b2v2-test-select';
+    select.dataset.seat = seat;
+    for (const key of HERO_KEYS) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = HERO_LABELS[key];
+      select.appendChild(opt);
+    }
+    select.value = heroes[seat];
+    const altLabel = document.createElement('label');
+    altLabel.className = 'b2v2-test-alt';
+    const altInput = document.createElement('input');
+    altInput.type = 'checkbox';
+    altInput.dataset.seat = seat;
+    const altText = el('span', '');
+    altLabel.append(altInput, altText);
+    select.addEventListener('change', () => {
+      const next = select.value as HeroKey;
+      if (seats.some((s) => s !== seat && heroes[s] === next)) {
+        select.value = heroes[seat];
+        message.textContent = '四个座位不能选择同一个英雄';
+        return;
+      }
+      heroes[seat] = next;
+      message.textContent = '';
+      syncRow(seat);
+    });
+    altInput.addEventListener('change', () => {
+      alt[seat] = altInput.checked;
+    });
+    row.append(who, select, altLabel);
+    panel.appendChild(row);
+    rows[seat] = { select, alt: altInput, altLabel, altText };
+    syncRow(seat);
+  }
+
+  const idsOf = (seat: TwoVTwoSeat): [string, string, string] => {
+    const ids = [...HEROES[heroes[seat]]];
+    const altId = heroAlt(seat);
+    if (alt[seat] && altId) {
+      const idx = ids.findIndex((id) => ALT_OF[id] === altId);
+      if (idx >= 0) ids[idx] = altId;
+    }
+    return ids as [string, string, string];
+  };
+
+  const start = button('btn btn-skill b2v2-test-start', '开始测试');
+  start.dataset.act = 'startTest2v2';
+  start.addEventListener('click', () => {
+    onStart({
+      heroA: idsOf('A1'),
+      heroB: idsOf('B1'),
+      firstPlayer: 'A',
+      twoVTwo: {
+        seats: {
+          A1: idsOf('A1'),
+          A2: idsOf('A2'),
+          B1: idsOf('B1'),
+          B2: idsOf('B2'),
+        },
+        firstTeam: 'A',
+        seed: 1,
+        startPhase: true,
+      },
+    });
+  });
+  panel.append(message, start);
+  surface.appendChild(panel);
+  root.appendChild(surface);
+}
+
+export function render2v2DraftSetup(
+  root: HTMLElement,
+  onBack: () => void,
+  onStart: (setup: TwoVTwoSetup) => void,
+  seatNames?: Partial<Record<TwoVTwoSeat, string>>,
+): void {
+  root.innerHTML = '';
+  root.classList.add('setup-page', 'setup-2v2');
+  ensureInkFilter();
+
+  const ac = new AbortController();
+  const signal = ac.signal;
+  const inspector = createCardInspector(root, signal);
+  const surface = el('div', 'pick-surface');
+  const version = el('div', 'app-version');
+  version.textContent = APP_VERSION_LABEL;
+  root.appendChild(surface);
+  root.appendChild(inspector.modal);
+
+  type Phase = 'prep' | 'draft' | 'assign' | 'reveal';
+  type Piece = { col: number; baseId: string; id: string; alt: boolean };
+  type Team = TwoVTwoTeam;
+  type Seat = TwoVTwoSeat;
+  // 座位身份色统一来源：ui/seatColors.ts
+  const LOCAL_SEAT_NAMES: Record<Seat, string> = {
+    A1: '玩家A1', A2: '玩家A2', B1: '玩家B1', B2: '玩家B2',
+  };
+  const seatName = (seat: Seat): string => seatNames?.[seat] ?? LOCAL_SEAT_NAMES[seat];
+  const SEAT_LABEL: Record<Seat, string> = {
+    A1: '玩家A1', A2: '玩家A2', B1: '玩家B1', B2: '玩家B2',
+  };
+  // 先手 A 队从 A1 开始，先手 B 队从 B1 开始；之后按固定环序推进。
+  const BASE_ORDER: Seat[][] = [
+    ['B1', 'A1', 'B2', 'A2'],
+    ['A2', 'B2', 'A1', 'B1'],
+    ['B1', 'A1', 'B2', 'A2'],
+  ];
+  const mirrorSeat = (s: Seat): Seat => (s[0] === 'A' ? `B${s[1]}` : `A${s[1]}`) as Seat;
+  const orderFor = (first: Team): Seat[][] =>
+    first === 'B' ? BASE_ORDER : BASE_ORDER.map((round) => round.map(mirrorSeat));
+
+  let phase: Phase = 'prep';
+  let firstTeam: Team = 'A';
+  let anomaly = false;
+  let pieces: Piece[] = [];
+  let picks: { seat: Seat; team: Team; col: number; id: string }[] = [];
+  let taken: Record<Team, (string | null)[][]> = emptyTaken();
+  let assign: Record<Team, { toFirst: number[]; locked: boolean }> = emptyAssign();
+  let order: Seat[][] = orderFor('A');
+
+  function emptyTaken(): Record<Team, (string | null)[][]> {
+    return {
+      A: [[null, null], [null, null], [null, null]],
+      B: [[null, null], [null, null], [null, null]],
+    };
+  }
+  function emptyAssign(): Record<Team, { toFirst: number[]; locked: boolean }> {
+    return { A: { toFirst: [0, 0, 0], locked: false }, B: { toFirst: [0, 0, 0], locked: false } };
+  }
+  function shuffle<T>(arr: T[]): T[] {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+  function drawPool(): void {
+    pieces = [];
+    for (let c = 0; c < 3; c += 1) {
+      for (const id of shuffle(HERO_KEYS.map((k) => HEROES[k][c])).slice(0, 4)) {
+        pieces.push({ col: c, baseId: id, id, alt: false });
+      }
+    }
+    picks = [];
+    taken = emptyTaken();
+    assign = emptyAssign();
+  }
+  const currentSeat = (): Seat | null => (picks.length >= 12 ? null : order[(picks.length / 4) | 0][picks.length % 4]);
+  const teamOf = (seat: Seat): Team => seat[0] as Team;
+  const idOf = (p: Piece): string => p.id;
+  const takenIds = (team: Team): string[] => taken[team].flatMap((pair) => pair.filter((x): x is string => !!x));
+  const isRemaining = (p: Piece): boolean => !takenIds('A').includes(idOf(p)) && !takenIds('B').includes(idOf(p));
+  const colCount = (team: Team, col: number): number => taken[team][col].filter(Boolean).length;
+  const canPick = (p: Piece): boolean => {
+    const seat = currentSeat();
+    if (phase !== 'draft' || !seat) return false;
+    if (!isRemaining(p)) return false;
+    return colCount(teamOf(seat), p.col) < 2;
+  };
+  function onPick(index: number): void {
+    const p = pieces[index];
+    if (!p || !canPick(p)) return;
+    const seat = currentSeat()!;
+    const team = teamOf(seat);
+    picks.push({ seat, team, col: p.col, id: p.id });
+    const pair = taken[team][p.col];
+    if (!pair[0]) pair[0] = p.id;
+    else pair[1] = p.id;
+    if (picks.length >= 12) {
+      order = orderFor(firstTeam);
+      phase = 'assign';
+    }
+    render();
+  }
+
+  function artFor(id: string): HTMLElement {
+    const art = el('div', 'pick-art');
+    const inner = el('div', 'pick-art-inner');
+    const image = document.createElement('img');
+    image.src = cardUrl(id);
+    image.alt = ARTIFACTS[id]?.name ?? id;
+    image.addEventListener('error', () => {
+      const ph = el('div', 'pick-img-missing');
+      ph.textContent = '（卡图占位）';
+      image.replaceWith(ph);
+    });
+    inner.appendChild(image);
+    art.appendChild(inner);
+    if (isAltArtifact(id)) addAltBadge(inner);
+    if (ARTIFACTS[id]?.special) addSpecialBadge(inner);
+    return art;
+  }
+  function cardSlot(id: string, cls = 'pick-slot'): HTMLElement {
+    const s = el('div', cls);
+    s.dataset.cardId = id;
+    s.appendChild(artFor(id));
+    return s;
+  }
+  function emptySlot(col: number): HTMLElement {
+    const s = el('div', 'pick-slot empty');
+    const t = el('span', 'pick-colno');
+    t.textContent = COL_LABELS[col];
+    s.appendChild(t);
+    return s;
+  }
+  function altId(p: Piece): string {
+    return p.alt ? (ALT_OF[p.baseId] ?? p.baseId) : p.baseId;
+  }
+  function gridSlot(index: number): HTMLElement {
+    const p = pieces[index];
+    if (!isRemaining(p)) {
+      const s = el('div', 'pick-slot taken');
+      const art = el('div', 'pick-art');
+      art.textContent = '已被选取';
+      s.appendChild(art);
+      return s;
+    }
+    const id = idOf(p);
+    const s = cardSlot(id, 'pick-slot ink');
+    const inner = s.querySelector('.pick-art-inner') as HTMLElement;
+    if (anomaly && ALT_OF[p.baseId]) {
+      const sw = el('span', 'pick-alt-switch');
+      sw.textContent = '切换';
+      sw.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        p.alt = !p.alt;
+        p.id = altId(p);
+        render();
+      });
+      inner.appendChild(sw);
+    }
+    const seat = currentSeat();
+    if (seat && colCount(teamOf(seat), p.col) >= 2) {
+      s.classList.add('pick-slot--full');
+    } else if (canPick(p)) {
+      s.classList.add('legal');
+      s.style.setProperty('--pc', SEAT_COLOR[seat!]);
+      s.tabIndex = 0;
+      s.setAttribute('role', 'button');
+      s.addEventListener('click', () => {
+        if (!inspector.consumeLp()) onPick(index);
+      });
+      s.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          if (!inspector.consumeLp()) onPick(index);
+        }
+      });
+    }
+    return s;
+  }
+
+  function buildTop(): void {
+    const top = el('div', 'pick-top');
+    const back = button('pick-back', '← 返回');
+    back.addEventListener('click', () => {
+      ac.abort();
+      root.classList.remove('setup-2v2');
+      onBack();
+    });
+    top.appendChild(back);
+    const title = el('span', 'pick-ttl');
+    const titleByPhase: Record<Phase, string> = {
+      prep: '团队作战 · 准备',
+      draft: '团队作战 · 轮选',
+      assign: '团队作战 · 分配',
+      reveal: '团队作战 · 亮出',
+    };
+    title.textContent = titleByPhase[phase];
+    top.appendChild(title);
+
+    if (phase !== 'prep') {
+      const g = el('span', 'pick-grp');
+      const lab = el('span', 'pick-lab');
+      lab.textContent = '先手队伍';
+      g.appendChild(lab);
+      const f = el('span', 'pick-tbtn on ' + firstTeam);
+      f.textContent = firstTeam + ' 队';
+      g.appendChild(f);
+      top.appendChild(g);
+    }
+    if (phase === 'prep' || phase === 'draft') {
+      const g = el('span', 'pick-grp');
+      const lab = el('span', 'pick-lab');
+      lab.textContent = '附加模组';
+      g.appendChild(lab);
+      const sw = el('span', 'pick-sw' + (anomaly ? ' on' : ''));
+      sw.appendChild(el('span', 'pick-dot'));
+      const swlab = el('span', 'pick-swlab');
+      swlab.textContent = '使用异相神器';
+      sw.appendChild(swlab);
+      sw.addEventListener('click', () => { anomaly = !anomaly; render(); });
+      g.appendChild(sw);
+      top.appendChild(g);
+    }
+    if (phase === 'reveal') {
+      const start = button('pick-start', '开始游戏');
+      start.dataset.act = 'start2v2';
+      start.addEventListener('click', () => {
+        ac.abort();
+        onStart({ seats: seatSets(), firstTeam, startPhase: true });
+      });
+      top.appendChild(start);
+    }
+    surface.appendChild(top);
+  }
+
+  function buildPrep(): void {
+    const panel = el('div', 'pick-prep');
+    const card = el('div', 'pick-prep-card');
+    const title = el('div', 'pick-prep-title');
+    title.textContent = '选择先手队伍';
+    card.appendChild(title);
+    const note = el('div', 'pick-prep-note');
+    note.textContent = '点选先手队伍，随即进入轮选（随机抽 12 件神器）。';
+    card.appendChild(note);
+    const chips = el('div', 'pick-prep-chips');
+    ([['A 队', 'A'], ['B 队', 'B'], ['随机', 'random']] as const).forEach(([label, val]) => {
+      const c = el('span', 'pick-tbtn');
+      c.textContent = label;
+      c.addEventListener('click', () => {
+        firstTeam = val === 'random' ? (Math.random() < 0.5 ? 'A' : 'B') : val;
+        order = orderFor(firstTeam);
+        drawPool();
+        phase = 'draft';
+        render();
+      });
+      chips.appendChild(c);
+    });
+    card.appendChild(chips);
+    panel.appendChild(card);
+    surface.appendChild(panel);
+  }
+
+  function buildStepbar(): void {
+    const bar = el('div', 'pick-stepbar');
+    const n = el('span', 'pick-step-n');
+    n.textContent = `第 ${Math.min(picks.length + 1, 12)} / 12 步`;
+    bar.appendChild(n);
+    const seat = currentSeat();
+    if (seat) {
+      const who = el('span', 'pick-step-who ' + seat);
+      who.style.color = SEAT_COLOR[seat];
+      who.textContent = `${SEAT_LABEL[seat]} 拿 1 件`;
+      bar.appendChild(who);
+      const round = el('span', 'pick-step-txt');
+      round.textContent = `第 ${Math.floor(picks.length / 4) + 1} 轮`;
+      bar.appendChild(round);
+    }
+    const dots = el('span', 'pick-dots pick-dots--12');
+    for (let i = 0; i < 12; i += 1) {
+      const d = document.createElement('i');
+      if (i < picks.length) d.className = 'on';
+      dots.appendChild(d);
+    }
+    bar.appendChild(dots);
+    const reroll = button('pick-reroll', '重新随机');
+    reroll.disabled = picks.length > 0;
+    reroll.addEventListener('click', () => {
+      if (reroll.disabled) return;
+      drawPool();
+      render();
+    });
+    bar.appendChild(reroll);
+    surface.appendChild(bar);
+  }
+
+  function confirmCol(team: Team): HTMLElement {
+    const acting = phase === 'draft' && currentSeat() && teamOf(currentSeat()!) === team;
+    const col = el('div', 'pick-col confirm ' + team + (acting ? ' acting' : ''));
+    const head = el('div', 'pick-chead');
+    const who = el('span', 'who');
+    who.textContent = team + ' 队';
+    head.appendChild(who);
+    const sub = el('span', 'sub');
+    sub.textContent = `已选 ${takenIds(team).length}/6`;
+    head.appendChild(sub);
+    col.appendChild(head);
+    const stack = el('div', 'pick-stack');
+    for (let c = 0; c < 3; c += 1) {
+      const pair = el('div', 'pick-pair');
+      const lab = el('span', 'pick-pairlab');
+      lab.textContent = COL_LABELS[c];
+      pair.appendChild(lab);
+      for (let k = 0; k < 2; k += 1) {
+        const id = taken[team][c][k];
+        pair.appendChild(id ? cardSlot(id) : emptySlot(c));
+      }
+      stack.appendChild(pair);
+    }
+    col.appendChild(stack);
+    return col;
+  }
+
+  function boardwrap(): HTMLElement {
+    const wrap = el('div', 'pick-boardwrap');
+    for (let c = 0; c < 3; c += 1) {
+      const col = el('div', 'pick-col grid');
+      const head = el('div', 'pick-chead');
+      const who = el('span', 'who');
+      who.textContent = COL_LABELS[c];
+      head.appendChild(who);
+      col.appendChild(head);
+      const cards = el('div', 'pick-cards pick-cards--4');
+      for (let r = 0; r < 4; r += 1) cards.appendChild(gridSlot(c * 4 + r));
+      col.appendChild(cards);
+      wrap.appendChild(col);
+    }
+    return wrap;
+  }
+
+  function buildDraft(): void {
+    buildStepbar();
+    const board = el('div', 'pick-board lunxuan2');
+    board.appendChild(confirmCol('A'));
+    board.appendChild(boardwrap());
+    board.appendChild(confirmCol('B'));
+    surface.appendChild(board);
+  }
+
+  function pendingTeam(): Team | null {
+    if (!assign.A.locked) return 'A';
+    if (!assign.B.locked) return 'B';
+    return null;
+  }
+
+  function assignStage(team: Team): HTMLElement {
+    const stage = el('div', 'assign-stage');
+    stage.style.setProperty('--pc', team === 'A' ? '#1d4ed8' : '#b91c1c');
+    const head = el('div', 'assign-head');
+    const who = el('span', team === 'A' ? 'who-a' : 'who-b');
+    who.textContent = team + ' 队';
+    head.appendChild(who);
+    head.appendChild(document.createTextNode(' · 秘密分配'));
+    const s1: Seat = team === 'A' ? 'A1' : 'B1';
+    const s2: Seat = team === 'A' ? 'A2' : 'B2';
+    const hint = el('span', 'assign-hint');
+    hint.textContent = `左列给 ${seatName(s1)}，右列给 ${seatName(s2)}；点卡可互换`;
+    head.appendChild(hint);
+    const lock = button('assign-lock pick-cbtn pick-ok', '封存');
+    lock.addEventListener('click', () => {
+      assign[team].locked = true;
+      if (assign.A.locked && assign.B.locked) phase = 'reveal';
+      render();
+    });
+    head.appendChild(lock);
+    stage.appendChild(head);
+
+    const colhead = el('div', 'assign-colhead');
+    colhead.appendChild(el('span', ''));
+    [s1, s2].forEach((seat) => {
+      const cell = el('span', 'seat');
+      const name = el('span', 'assign-seat-name');
+      name.style.color = SEAT_COLOR[seat];
+      name.textContent = seatName(seat);
+      cell.append(name);
+      cell.style.setProperty('--pc', SEAT_COLOR[seat]);
+      colhead.appendChild(cell);
+    });
+    stage.appendChild(colhead);
+
+    const rows = el('div', 'assign-rows');
+    for (let c = 0; c < 3; c += 1) {
+      const row = el('div', 'assign-row');
+      const lab = el('div', 'assign-collab');
+      lab.textContent = COL_LABELS[c];
+      row.appendChild(lab);
+      const f = assign[team].toFirst[c];
+      [f, 1 - f].forEach((k, idx) => {
+        const seat = idx === 0 ? s1 : s2;
+        const slot = cardSlot(taken[team][c][k]!, 'assign-slot');
+        slot.style.setProperty('--pc', SEAT_COLOR[seat]);
+        slot.addEventListener('click', () => {
+          assign[team].toFirst[c] = 1 - assign[team].toFirst[c];
+          render();
+        });
+        row.appendChild(slot);
+      });
+      rows.appendChild(row);
+    }
+    stage.appendChild(rows);
+    return stage;
+  }
+
+  function buildAssign(): void {
+    const team = pendingTeam();
+    if (!team) {
+      phase = 'reveal';
+      render();
+      return;
+    }
+    surface.appendChild(assignStage(team));
+  }
+
+  function setsOf(team: Team): { first: [string, string, string]; second: [string, string, string] } {
+    const f = assign[team].toFirst;
+    const pair = taken[team];
+    const first: string[] = [];
+    const second: string[] = [];
+    for (let c = 0; c < 3; c += 1) {
+      first.push(pair[c][f[c]]!);
+      second.push(pair[c][1 - f[c]]!);
+    }
+    return { first: first as [string, string, string], second: second as [string, string, string] };
+  }
+  function seatSets(): Record<Seat, [string, string, string]> {
+    const a = setsOf('A');
+    const b = setsOf('B');
+    return { A1: a.first, A2: a.second, B1: b.first, B2: b.second };
+  }
+  function teamLife(team: Team): number {
+    const s = setsOf(team);
+    return (ARTIFACTS[s.first[2]]?.life ?? 0) + (ARTIFACTS[s.second[2]]?.life ?? 0);
+  }
+
+  function buildReveal(): void {
+    const stage = el('div', 'reveal-stage');
+    const head = el('div', 'reveal-head');
+    const title = el('span', 'reveal-title');
+    title.textContent = '双方同时亮出';
+    head.appendChild(title);
+    const meta = el('span', 'reveal-meta');
+    meta.textContent = `A 队生命 ${teamLife('A')}　｜　B 队生命 ${teamLife('B')}（第三列神器生命之和）`;
+    head.appendChild(meta);
+    stage.appendChild(head);
+
+    const grid = el('div', 'reveal-grid');
+    for (const team of ['A', 'B'] as Team[]) {
+      const side = el('div', 'reveal-side ' + team);
+      side.style.setProperty('--pc', team === 'A' ? '#1d4ed8' : '#b91c1c');
+      const sh = el('div', 'side-head');
+      const tname = el('span', 'team-name ' + team);
+      tname.textContent = team + ' 队';
+      sh.appendChild(tname);
+      const sub = el('span', 'sub');
+      sub.textContent = team === 'A'
+        ? `${SEAT_LABEL.A1} · ${SEAT_LABEL.A2}　各 3 件`
+        : `${SEAT_LABEL.B1} · ${SEAT_LABEL.B2}　各 3 件`;
+      sh.appendChild(sub);
+      side.appendChild(sh);
+      const pairs = el('div', 'reveal-pairs');
+      for (const seat of (team === 'A' ? ['A1', 'A2'] : ['B1', 'B2']) as Seat[]) {
+        const box = el('div', 'reveal-team');
+        const h = el('div', 'rt-head');
+        const dot = el('span', 'rt-dot');
+        dot.style.background = SEAT_COLOR[seat];
+        h.appendChild(dot);
+        const nm = el('span', 'rt-name');
+        nm.style.color = SEAT_COLOR[seat];
+        nm.textContent = SEAT_LABEL[seat];
+        h.appendChild(nm);
+        box.appendChild(h);
+        const trio = seatSets()[seat];
+        for (const id of trio) box.appendChild(cardSlot(id, 'pick-slot ink'));
+        pairs.appendChild(box);
+      }
+      side.appendChild(pairs);
+      grid.appendChild(side);
+    }
+    stage.appendChild(grid);
+    surface.appendChild(stage);
+  }
+
+  function render(): void {
+    surface.innerHTML = '';
+    buildTop();
+    if (phase === 'prep') buildPrep();
+    else if (phase === 'draft') buildDraft();
+    else if (phase === 'assign') buildAssign();
+    else buildReveal();
     surface.appendChild(version);
   }
 

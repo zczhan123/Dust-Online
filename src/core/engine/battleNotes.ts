@@ -3,12 +3,13 @@ import { hasActiveSkill, skillUseKey } from './skill-state';
 import { artifactWithSkill, attackDamageBonus } from './combat';
 import { canPayCosts } from './effects';
 import { canTreatAsAttack, canUseHanguang } from './game';
+import { isReactionPending } from './pending';
 import { legendDamageCap } from './challenge';
 import { TACTIC_BY_ID } from '../content/tactics';
 import { ARTIFACT_TEXT } from '../content/artifactText';
+import { opponentOf } from '../model/participants';
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
-const oppOf = (p: PlayerId): PlayerId => (p === 'A' ? 'B' : 'A');
 
 /** 一条「攻击提示」：技能名（UI 上色）+ 说明文案（含数值；**不写发动条件**，因为只列出此刻可用的） */
 export interface BattleNote {
@@ -23,7 +24,7 @@ export interface BattleNote {
  * 纯读状态、数据驱动（不硬编码卡牌）——**新增神器/卡牌必须在此登记自己的提示**并补测试。
  * 顺序按一次攻击的时间线：加成 → 攻击前的选择 → 被抵挡时 → 造成伤害后 → 负面状态。
  */
-export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
+export function battleNotes(g: GameState, player: PlayerId, target?: PlayerId): BattleNote[] {
   if (g.phase !== 'main') return [];
   // 只在「你自己的行动窗口」显示（真实事故：被问是否抵挡时，仍显示自己「下次攻击」的提示）：
   //   ① 必须是你的回合；② 没有被要求抵挡；③ 若有待决策，必须属于你
@@ -31,6 +32,9 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   if (g.activePlayer !== player) return [];
   if (g.pendingAttack) return [];
   if (g.pending && g.pending.player !== player) return [];
+  // 「即时反应」类待决策（009 取消真伤 / 011 屏障减半 / 011 脉冲选目标 / T09 慈悲）：
+  // 此刻要回答的是"这一笔伤害怎么处理"，攻击提示与它无关 → 不显示。
+  if (isReactionPending(g.pending)) return [];
   const p = g.players[player];
   const notes: BattleNote[] = [];
 
@@ -140,7 +144,7 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
   // B 被抵挡时：025 屠虎·横贯·触发（对方有可弃置、且点数小于「可用攻击骰」的能力骰）
   if (hasActiveSkill(p, 'tuohu.hengguan.trigger')) {
     const maxAtk = p.areas.attack.reduce((m, d) => Math.max(m, d.value), 0);
-    const opp = oppOf(player);
+    const opp = target ?? opponentOf(g, player);
     const hasTarget = KINDS.some((k) => g.players[opp].areas[k].some((d) => d.value < maxAtk));
     if (maxAtk > 0 && hasTarget) {
       notes.push({ label: '横贯', text: '攻击被抵挡时，可弃置对方 1 颗点数小于该攻击的能力骰' });
@@ -180,7 +184,7 @@ export function battleNotes(g: GameState, player: PlayerId): BattleNote[] {
 
   // C 造成伤害后：L05 传奇面板·无法饶恕（对方有"点数＝某可用攻击点数"的防御骰时）
   if (hasActiveSkill(p, 'zoray.wufaraoshu')) {
-    const oppId = oppOf(player);
+    const oppId = target ?? opponentOf(g, player);
     const hasTarget = p.areas.attack.some((d) =>
       g.players[oppId].areas.defense.some((x) => x.value === d.value),
     );

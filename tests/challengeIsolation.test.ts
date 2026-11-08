@@ -59,7 +59,6 @@ function runSkill(g: GameState, who: PlayerId, key: string): void {
     rng: new SeededRng(1),
     params: {},
     endMainPhase: () => {},
-    reportConsumed: () => {},
   });
 }
 

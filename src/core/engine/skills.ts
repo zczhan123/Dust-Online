@@ -4,13 +4,15 @@ import type { Artifact, DiceKind, Die, GameState, PlayerId, PlayerState } from '
 import { skillActive, hasActiveSkill, skillUseKey } from './skill-state';
 import { isInertSkill, isValueLocked } from './challenge';
 import { checkLifeEnd, dealTrueDamage, pumpAttackQueue, virtualAttack } from './combat';
-import { abilityDieInfo, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
+import { abilityDieInfo, abilityDicePool, canPayCosts, checkLifeTens, findDieOf, gainRandomAbilityDice, gainRandomDice, heal, moveDice, noteLifeDrop, noteYuluoDiceConsumed, offerAdapt, paySlots, setDieValue, transferDice, xuyuYouhunTrigger, type SlotFill, type SlotSpec } from './effects';
 import { doReroll } from './phases';
 import { fxPush, fxSkillFired, fxSetSource, fxTrueLine } from './fx';
 import { pumpPending, queuePending } from './pending';
 import { resetToBattleStart } from './reset';
 import { effectiveWill, emptyDistribution, totalDice } from './derive';
 import { logLine, pname, vals, valsSorted } from './log';
+import { enemiesOf, lifeMaxOf, lifeOf, resolveEnemy, rosterOf, setLife } from '../model/participants';
+import { resolvePolicyTarget } from './targeting';
 export { skillActive, hasActiveSkill };
 
 const KINDS: DiceKind[] = ['attack', 'defense', 'meditation'];
@@ -26,7 +28,7 @@ export function lidichengfoRegions(
   g: GameState,
 ): { who: PlayerId; kind: DiceKind; ids: string[] }[] {
   const regions: { who: PlayerId; kind: DiceKind; ids: string[] }[] = [];
-  for (const who of ['A', 'B'] as PlayerId[]) {
+  for (const who of rosterOf(g)) {
     for (const k of KINDS) {
       const arr = g.players[who].areas[k];
       if (arr.length === 0) continue;
@@ -82,10 +84,10 @@ export interface SkillCtx {
   artifact: Artifact;
   rng: Rng;
   params: Record<string, unknown>;
+  /** 2v2 技能目标座位（1v1 省略；处理器按需读取） */
+  target?: PlayerId;
   /** 立即结束当前主要阶段（009 必杀等使用），由 game.ts 提供 */
   endMainPhase: () => void;
-  /** 汇报本次技能「以消耗自身能力骰为代价」的骰子数量（011 灵能脉冲·触发用） */
-  reportConsumed: (n: number) => void;
 }
 
 export interface SkillHandler {
@@ -161,17 +163,20 @@ export function consumeDiceByKind(
 }
 
 /**
- * 023「畏惧」能否**使用**：**对方必须至少有 1 颗能力骰**。
- * 口径＝对方**三个骰区**的合计（**不含 034 破障的存放骰**，与 `shexie.weiju` 处理器里的校验逐字一致）。
+ * 023「畏惧」能否**使用**：**对方必须至少有 1 颗可消耗的能力骰**。
+ * 口径＝统一支付池 `abilityDicePool`（含 034/A03「破障」的存放骰——存放骰可以「消耗」）。
+ * **2v2 有 2 个敌人**：不指定目标时要求"**任一**敌人有骰"；指定目标时只看那一个
+ * （座位候选还要按同样的口径过滤，见 `skillSelection` 的「畏惧」seat 步）。
  * **只限「使用」**：`activateSkillActions`（以及 L08 赏金的 `shangjin` 候选）在对手无骰时**不生成该动作**
  * → 界面自然没有"使用"按钮。
  * ⚠️ **尘起/激活（切到「畏惧」这一侧）不受限**——2026-10-18 修正：之前误把判定加在了尘起侧，
  *    导致"对手没骰时连激活按钮都消失"（用户报的 bug）。全模式生效。
  */
-export function weijuAvailable(g: GameState, owner: PlayerId): boolean {
-  const opp: PlayerId = owner === 'A' ? 'B' : 'A';
-  const o = g.players[opp];
-  return o.areas.attack.length + o.areas.defense.length + o.areas.meditation.length > 0;
+export function weijuAvailable(g: GameState, owner: PlayerId, target?: PlayerId): boolean {
+  const who = target ? [target] : enemiesOf(g, owner);
+  // ⚠️ 必须用**统一支付池**（含 034/A03「破障」的存放骰）：对方只要有能「消耗」的骰就付得起，
+  //    只数三个区域会把"只有存放骰"误判成"没有骰"（真实缺口 2026-11-08）。
+  return who.some((e) => abilityDicePool(g, e).length > 0);
 }
 
 /**
@@ -249,7 +254,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // L02 潸然的葬敌花（必杀·尘落前置 1）：双方各自获得 3 个随机点数的能力骰
   'ying.zangdihua': {
     run({ g, player, rng }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const opp: PlayerId = enemiesOf(g, player)[0];
       const mine = gainRandomAbilityDice(g, player, 3, rng);
       const theirs = gainRandomAbilityDice(g, opp, 3, rng);
       logLine(
@@ -279,7 +284,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // L05 绝地惊雷（必杀·尘落前置 3）：受到 = |双方生命差| 的真实伤害（自伤）→ 获得 1 个 6 点攻击骰
   'zoray.juedi': {
     run({ g, player }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const opp: PlayerId = enemiesOf(g, player)[0];
       const diff = Math.abs(g.players[player].life - g.players[opp].life);
       logLine(
         g,
@@ -318,7 +323,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'nisa.buqupaoxiao': {
     run({ g, player, params }) {
       const p = g.players[player];
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+      const opp: PlayerId = enemiesOf(g, player)[0];
       const o = g.players[opp];
       const jueyi = p.artifacts.find((a) => a.skills.some((s) => s.key === 'jueyi.wildfire'));
       const n = jueyi?.count ?? 0;
@@ -356,13 +361,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     },
   },
   'buxiang.cuilian': {
-    run({ player, artifact, params, g, reportConsumed }) {
+    run({ player, artifact, params, g }) {
       const effective = paySlots(
         g,
         player,
         [{ kind: 'attack' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       const spot = effective[0]?.value ?? 0;
       const before = artifact.count;
@@ -375,14 +379,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 龙腾万丈：消耗 3 冥想骰 → 获得 4 随机能力骰；最大/最小各 1 入攻击区，其余 2 入防御区；本回合攻击伤害 +1
   'youlong.tengwan': {
-    run({ player, rng, params, g, reportConsumed }) {
+    run({ player, rng, params, g }) {
       const p = g.players[player];
       const effective = paySlots(
         g,
         player,
         [{ kind: 'meditation' }, { kind: 'meditation' }, { kind: 'meditation' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       const dice: Die[] = Array.from({ length: 4 }, () => createDie(newDieId(`${player}-`), rng.rollDie()));
       const sorted = [...dice].sort((a, b) => a.value - b.value);
@@ -410,13 +413,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 潜行：消耗 2 攻击骰 → 先获得 2 随机防御骰，再获得 1 随机冥想骰（顺序强制）
   'yingle.qianxing': {
-    run({ player, rng, params, g, reportConsumed }) {
+    run({ player, rng, params, g }) {
       const effective = paySlots(
         g,
         player,
         [{ kind: 'attack' }, { kind: 'attack' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       const def = gainRandomDice(g, player, 'defense', 2, rng);
       const med = gainRandomDice(g, player, 'meditation', 1, rng);
@@ -444,13 +446,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 中央突破：消耗最多 3 个冥想骰 → 弃置对方等量防御骰；恰好 3 个则本回合攻击不可抵挡
   'yuqie.breakthrough': {
-    run({ g, player, params, reportConsumed }) {
+    run({ g, player, params, target }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must contain 1..3 slots');
+      const opponent = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
-      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const effective = paySlots(g, player, spec, fills);
       const count = effective.length;
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       const oppDef = g.players[opponent].areas.defense;
       const required = Math.min(count, oppDef.length);
       const defIds = (params.opponentDefenseDieIds as string[] | undefined) ?? [];
@@ -476,13 +478,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // C01 特典·突破（启动）：消耗**任意数量**冥想骰 → 弃置对方等量防御骰（发起者选；无"不可抵挡"）
   'c01.breakthrough': {
-    run({ g, player, params, reportConsumed }) {
+    run({ g, player, params, target }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
-      if (fills.length < 1) throw new Error('「突破」至少消耗 1 颗冥想骰');
+      if (fills.length < 1) throw new Error('「突破」需消耗至少 1 个冥想骰');
+      const opponent = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
-      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const effective = paySlots(g, player, spec, fills);
       const count = effective.length;
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
       const oppDef = g.players[opponent].areas.defense;
       const required = Math.min(count, oppDef.length);
       const chosen = ((params.opponentDefenseDieIds as string[] | undefined) ?? [])
@@ -503,11 +505,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 影袭：使 1 个能力骰点数下降 X（最低 1）→ 按新点数移到对应区域；视为以 X 点进行 1 次（虚拟）攻击
   'yingle.yingxi': {
-    run({ g, player, params }) {
+    run({ g, player, params, target }) {
       const p = g.players[player];
       const dieId = params.dieId as string;
       const x = params.x as number;
       if (!Number.isInteger(x) || x < 1) throw new Error('x must be >= 1');
+      const defender = resolveEnemy(g, player, target);
       const kinds = ['attack', 'defense', 'meditation'] as const;
       let old = 0;
       let found = false;
@@ -530,7 +533,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       p.areas[newKind].push({ id: dieId, value: newValue, kind: newKind });
       // 动效旁路：该骰"旧位 → 中间（翻面到新点数）→ 新区域"；并计入"代价时长" → 后面的虚拟攻击 + 黑线会等它播完
       fxPush({ kind: 'move', player, dieIds: [dieId] });
-      virtualAttack(g, player, x, { skill: '影袭', owner: player });
+      virtualAttack(g, player, x, { skill: '影袭', owner: player }, { defender });
       logLine(
         g,
         `${pname(player)} 发动「影袭」：将 1 颗能力骰由 ${old} 点降为 ${newValue} 点（X=${x}），并视为以 ${x} 点发起攻击`,
@@ -539,9 +542,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 明镜·必杀 斩神切：弃置自己全部能力骰；对方弃置对应种类对应数量；造成 X 真实伤害；获得 3 随机防御骰
   'mingjing.ultimate': {
-    run({ g, player, rng, params }) {
+    run({ g, player, rng, params, target }) {
       const p = g.players[player];
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const opponent: PlayerId = resolveEnemy(
+        g,
+        player,
+        target ?? (params.target as PlayerId | undefined),
+      );
+      const damageTarget: PlayerId = params.damageTarget
+        ? resolveEnemy(g, player, params.damageTarget as PlayerId)
+        : opponent;
       const o = g.players[opponent];
       const own = { attack: p.areas.attack.length, defense: p.areas.defense.length, meditation: p.areas.meditation.length };
       const total = own.attack + own.defense + own.meditation;
@@ -574,7 +584,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
           opponent,
         )} 弃置 ${oppDiscarded} 颗，造成 ${x} 点真实伤害`,
       );
-      dealTrueDamage(g, opponent, x, player);
+      dealTrueDamage(g, damageTarget, x, player);
       if (g.phase === 'gameOver') return;
       const gainedZhan = gainRandomDice(g, player, 'defense', 3, rng);
       logLine(g, `${pname(player)} 「斩神切」：获得 3 颗防御骰（${valsSorted(gainedZhan)}）`);
@@ -582,15 +592,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 完杀·必杀 零时枭首：消耗 1 攻击骰 → 弃对方 X 个防御骰；若对方仍有剩余防御骰，再获得 X 个随机攻击骰（X=消耗骰点数）
   'wansha.ultimate': {
-    run({ g, player, rng, params, reportConsumed }) {
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, rng, params, target }) {
+      const opponent = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const o = g.players[opponent];
       const effective = paySlots(
         g,
         player,
         [{ kind: 'attack' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       const x = effective[0]?.value ?? 0;
       const wanted = ((params.opponentDefenseDieIds as string[]) ?? [])
@@ -625,9 +634,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // A07 异相·完杀·必杀：对方防御骰数 ≥ 你攻击骰数时，弃对方防御骰至与你攻击骰数相等（发起者选，FAQ 43.1.1）；本回合双方持续失效
   'wansha.alt.ultimate': {
-    run({ g, player, params }) {
+    run({ g, player, params, target }) {
       const p = g.players[player];
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+      const opponent = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const o = g.players[opponent];
       const myAtk = p.areas.attack.length;
       const oppDef = o.areas.defense;
@@ -647,7 +656,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }
       if (wanted.length !== required) throw new Error(`「历王之血之印」需弃置恰好 ${required} 颗对方防御骰`);
       consumeDice(g, o, 'defense', wanted);
-      for (const id of ['A', 'B'] as PlayerId[]) {
+      for (const id of rosterOf(g)) {
         for (const a of g.players[id].artifacts) a.continuousLostThisTurn = true;
         // 传奇面板的持续技能同样失效（否则界面上只有神器持续转灰、传奇持续仍是绿的）
         if (g.players[id].legend) g.players[id].legend!.continuousLostThisTurn = true;
@@ -658,29 +667,36 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       );
     },
   },
-  // 009 高塔铁幕·充能：对方有攻击骰时，进入待结算，由发动者选择将其中 1 颗点数改为 1（保留原区域）
+  // 009 高塔铁幕·充能：把**对方** 1 个攻击骰改为 1 点（2v2 有两个敌人 → 目标由"选哪颗骰"那一步决定）
   'guwang.charge': {
-    run({ g, player }) {
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
-      if (g.players[opponent].areas.attack.length > 0) {
-        // 排队式（等价于直接挂起，但已有待决策时不会覆盖）
-        queuePending(g, { kind: 'guwangCharge', player });
-        pumpPending(g);
-        logLine(g, `${pname(player)} 「高塔铁幕」充能效果：可选择将 ${pname(opponent)} 的 1 个攻击骰点数变更为 1`);
-      } else {
+    run({ g, player, target }) {
+      const enemies = enemiesOf(g, player);
+      if (target && !enemies.includes(target)) throw new Error(`invalid enemy target: ${target}`);
+      const withDice = enemies.filter((e) => g.players[e].areas.attack.length > 0);
+      if (withDice.length === 0) {
         logLine(g, `${pname(player)} 「高塔铁幕」充能效果：对方没有攻击骰，无法变更点数`);
+        return;
       }
+      // 待决策**不自动写 target**（1v1 的登记形状保持原样）；2v2 不传 target 时
+      // `getLegalActions` 会列出**所有敌人**的攻击骰 —— 选哪颗骰＝打哪个敌人。
+      queuePending(g, { kind: 'guwangCharge', player, ...(target ? { target } : {}) });
+      pumpPending(g);
+      const named = target ?? (enemies.length === 1 ? enemies[0] : null);
+      logLine(
+        g,
+        `${pname(player)} 「高塔铁幕」充能效果：可选择将 ${named ? pname(named) : '对方'} 的 1 个攻击骰点数变更为 1`,
+      );
     },
   },
   // A01 不败之王·充能：**强制执行**——你视为以 5 点攻击 1 次，随后对方视为以 3 点攻击你 2 次（逐次完整结算）
   'guwang.alt.charge': {
-    run({ g, player }) {
-      const opponent: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, target }) {
+      const opponent: PlayerId = target ?? resolveEnemy(g, player);
       // §19⑨ 多段攻击源：A01 不败之王（virtualQueue）
       g.virtualQueue = [
-        { attacker: player, value: 5, label: '不败之王', owner: player },
-        { attacker: opponent, value: 3, label: '不败之王', owner: player },
-        { attacker: opponent, value: 3, label: '不败之王', owner: player },
+        { attacker: player, value: 5, label: '不败之王', owner: player, defender: opponent },
+        { attacker: opponent, value: 3, label: '不败之王', owner: player, defender: player },
+        { attacker: opponent, value: 3, label: '不败之王', owner: player, defender: player },
       ];
       logLine(
         g,
@@ -711,8 +727,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 007 战争横扫：各消耗 1 攻/防/冥 → 弃对方各 1 → floor(点数和/2) 真实伤害
   'zhuzai.sweep': {
-    run({ g, player, params, reportConsumed }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, params, target }) {
+      const opp: PlayerId = resolveEnemy(
+        g,
+        player,
+        target ?? (params.target as PlayerId | undefined),
+      );
+      const damageTarget: PlayerId = params.damageTarget
+        ? resolveEnemy(g, player, params.damageTarget as PlayerId)
+        : opp;
       const discard = (params.discard ?? {}) as { attack?: string; defense?: string; meditation?: string };
       // 「能弃则必须弃」（卡面未写"可少弃"；FAQ 7.1.1 只免"对方缺该类"）→ **先校验、后落状态**
       const CN7: Record<DiceKind, string> = { attack: '攻击', defense: '防御', meditation: '冥想' };
@@ -731,7 +754,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         player,
         [{ kind: 'attack' }, { kind: 'defense' }, { kind: 'meditation' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       let sum = 0;
       for (const e of effective) sum += e.value;
@@ -746,7 +768,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }
       consumeDiceByKind(g, g.players[opp], oppByKind); // 一次效果 → 对方 L01 只 +1
       const dmg = Math.floor(sum / 2);
-      dealTrueDamage(g, opp, dmg, player);
+      dealTrueDamage(g, damageTarget, dmg, player);
       logLine(
         g,
         `${pname(player)} 发动「战争横扫」：消耗 攻/防/冥 各 1（点数和 ${sum}），弃置对方 ${discarded} 颗能力骰，造成 ${dmg} 点真实伤害`,
@@ -756,8 +778,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 007 震荡斩击：消耗 4 颗同类型 → 弃对方 4 颗同类型 → floor(点数和/2) 真实伤害
   'zhuzai.smash': {
-    run({ g, player, params, reportConsumed }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, params, target }) {
+      const opp: PlayerId = resolveEnemy(
+        g,
+        player,
+        target ?? (params.target as PlayerId | undefined),
+      );
+      const damageTarget: PlayerId = params.damageTarget
+        ? resolveEnemy(g, player, params.damageTarget as PlayerId)
+        : opp;
       const kind = params.kind as DiceKind;
       if (kind !== 'attack' && kind !== 'defense' && kind !== 'meditation') throw new Error('invalid kind');
       // 「能弃则必须弃」：恰弃 `min(4, 对方该类骰数)` 颗 → **先校验、后落状态**
@@ -774,27 +803,25 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         player,
         Array.from({ length: 4 }, () => ({ kind })),
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       let sum = 0;
       for (const e of effective) sum += e.value;
       const removedZhendang = oppIds.length ? consumeDice(g, g.players[opp], kind, oppIds) : [];
       const dmg = Math.floor(sum / 2);
-      dealTrueDamage(g, opp, dmg, player);
+      dealTrueDamage(g, damageTarget, dmg, player);
       logLine(g, `${pname(player)} 发动「震荡斩击」：消耗 4 颗${kindShort(kind)}（点数和 ${sum}），弃置对方 ${oppIds.length} 颗同类型骰（${vals(removedZhendang)}），造成 ${dmg} 点真实伤害`);
       bachengHook(g, player, effective.length, oppIds.length);
     },
   },
   // 008 王家之拳：消耗 2 冥想 → 弃置自己的 2 防御；不足 2 个时每少弃 1 个受 2 真实伤害 → 获得 4 随机防御骰；本回合攻击伤害 +1
   'tiebi.fist': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params }) {
       const p = g.players[player];
       paySlots(
         g,
         player,
         [{ kind: 'meditation' }, { kind: 'meditation' }],
         (params.costSlots as SlotFill[] | undefined) ?? [],
-        reportConsumed,
       );
       const defIds = (params.defenseDieIds as string[]) ?? [];
       if (new Set(defIds).size !== defIds.length) throw new Error('duplicate die id');
@@ -809,11 +836,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 011 灵能屏障·启动：消耗最多 3 个防御骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
   'dunwu.barrier.activate': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'defense' as const }));
-      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const effective = paySlots(g, player, spec, fills);
       const n = effective.length;
       const gainedBarrier = gainRandomDice(g, player, 'meditation', n * 2, rng);
       logLine(g, `${pname(player)} 发动「灵能屏障」：消耗 ${n} 防御骰，获得 ${n * 2} 冥想骰（${valsSorted(gainedBarrier)}）`);
@@ -821,11 +848,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 011 灵能脉冲·启动：消耗最多 3 个攻击骰 → 获得等同消耗数量 2 倍的随机点数冥想骰
   'dunwu.pulse.activate': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'attack' as const }));
-      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const effective = paySlots(g, player, spec, fills);
       const n = effective.length;
       const gainedPulse = gainRandomDice(g, player, 'meditation', n * 2, rng);
       logLine(g, `${pname(player)} 发动「灵能脉冲」：消耗 ${n} 攻击骰，获得 ${n * 2} 冥想骰（${valsSorted(gainedPulse)}）`);
@@ -847,8 +874,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 014 净化（激活）：将对方最多 2 个「1 点」能力骰变更为 6 点并移动到对应区域
   'chengjie.jinghua': {
-    run({ g, player, rng, params }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, rng, params, target }) {
+      const opp = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const ids = (params.targetDieIds as string[]) ?? [];
       const changed = changeOnePointDice(g, opp, ids, player, rng);
       logLine(g, `${pname(player)} 发动「净化」：变更对方 ${changed} 个能力骰（1 点 → 6 点）`);
@@ -865,13 +892,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // 015 残响·必杀 绝境天神：当前生命每比初始生命低 10 点，计数 +1（向下取整，最高 4 层）
   'canxiang.juejing.ultimate': {
     run({ g, player, artifact }) {
-      const p = g.players[player];
-      const missing = Math.max(0, p.lifeMax - p.life);
+      const life = lifeOf(g, player);
+      const lifeMax = lifeMaxOf(g, player);
+      const missing = Math.max(0, lifeMax - life);
       const layers = Math.min(4, Math.floor(missing / 10));
       artifact.count = layers;
       logLine(
         g,
-        `${pname(player)} 发动必杀「绝境天神」：计数设为 ${layers}（生命 ${p.life}/${p.lifeMax}，每低 10 点计数 +1，上限 4）`,
+        `${pname(player)} 发动必杀「残响绝境」：层数变为 ${layers}（${life}/${lifeMax}；每满 10 点生命 +1，上限 4）`,
       );
     },
   },
@@ -918,11 +946,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 017 幽冥·冥界行走（启动）：消耗最多 3 个冥想骰 → 获得同等数量的随机点数攻击骰
   'youming.mingjie': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length < 1 || fills.length > 3) throw new Error('costSlots must be 1..3');
       const spec: SlotSpec[] = Array.from({ length: fills.length }, () => ({ kind: 'meditation' as const }));
-      const effective = paySlots(g, player, spec, fills, reportConsumed);
+      const effective = paySlots(g, player, spec, fills);
       const n = effective.length;
       const gained = gainRandomDice(g, player, 'attack', n, rng);
       logLine(
@@ -960,9 +988,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 019 尘哀·蛮王之牙（启动）：消耗 X 个种类各不相同的能力骰 → 选 X 项（①②可重复）→ 刷新启动次数 + 标记移到另一侧
   'chenai.fang': {
-    run({ g, player, artifact, params }) {
+    run({ g, player, artifact, params, target }) {
       const p = g.players[player];
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       const picks = (params.picks as string[] | undefined) ?? [];
       const discardIds = (params.discardIds as string[] | undefined) ?? [];
@@ -982,7 +1009,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const needDiscard = picks.filter((pk) => pk === 'discard').length;
       if (discardIds.length !== needDiscard) throw new Error(`需指定 ${needDiscard} 个要弃置的对方防御骰`);
       if (new Set(discardIds).size !== discardIds.length) throw new Error('要弃置的防御骰不能重复');
-      const oppDef = g.players[opp].areas.defense;
+      const oppId = needDiscard
+        ? resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined))
+        : undefined;
+      const oppDef = oppId ? g.players[oppId].areas.defense : [];
       for (const id of discardIds) if (!oppDef.some((d) => d.id === id)) throw new Error(`不是对方的防御骰: ${id}`);
       const spec: SlotSpec[] = kinds.map((k) => ({ kind: k }));
       const effective = paySlots(g, player, spec, fills);
@@ -994,7 +1024,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         if (pk === 'discard') {
           const id = discardIds[di];
           di += 1;
-          consumeDice(g, g.players[opp], 'defense', [id]);
+          consumeDice(g, g.players[oppId!], 'defense', [id]);
           discarded += 1;
         } else {
           const d = createDie(newDieId(`${player}-`), 3, 'attack');
@@ -1034,7 +1064,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 022 死契·填弹（启动）：消耗 1–6 个能力骰（≥2 个时必须顺点）→ 计数 +X（上限 6）
   'siji.tiandan': {
-    run({ g, player, artifact, params, reportConsumed }) {
+    run({ g, player, artifact, params }) {
       const ids = (params.dieIds as string[] | undefined) ?? [];
       if (ids.length < 1 || ids.length > 6) throw new Error('必须消耗 1–6 个能力骰');
       if (new Set(ids).size !== ids.length) throw new Error('duplicate die id');
@@ -1052,13 +1082,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         if (!ok) throw new Error('消耗 2 个或更多能力骰时，其点数必须顺点');
       }
       // 「消耗 1–6 个能力骰」→ 统一走 paySlots（支持 010 置换 / 034 破障）；
-      // reportConsumed 由 paySlots 按格数上报（FAQ 22.1.1：消耗 6 颗 → 6 点真伤）
+      // 「消耗」记账由 paySlots 按格数自记（FAQ 22.1.1：消耗 6 颗 → 6 点真伤）
       paySlots(
         g,
         player,
         dice.map((d) => ({ kind: d.kind })),
         dice.map((d) => ({ dieIds: [d.id] })),
-        reportConsumed,
         'skill',
       );
       const cap = artifact.countCap ?? Infinity;
@@ -1085,19 +1114,19 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 023 蛇蝎·畏惧（启动）：我方先消耗 1 骰 → 对方必须消耗 1 骰（由对方选择）→ 比大小（1 视为大于 6）
   'shexie.weiju': {
-    run({ g, player, params }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, params, target }) {
+      const opp = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       // 支付填法：显式 costSlots（010 置换 2 颗顶 1）优先；否则单颗 dieId
       const ids = (params.costSlots as SlotFill[] | undefined)?.[0]?.dieIds ?? (params.dieId ? [params.dieId as string] : []);
       if (ids.length !== 1 && ids.length !== 2) throw new Error('must choose 1 die (or 2 by substitution)');
       const info = abilityDieInfo(g, player, ids[0]);
       if (!info) throw new Error(`not your ability die: ${ids[0]}`);
-      const oppDice = [...g.players[opp].areas.attack, ...g.players[opp].areas.defense, ...g.players[opp].areas.meditation];
+      const oppDice = abilityDicePool(g, opp);
       if (oppDice.length < 1) throw new Error('对方没有能力骰，无法发动「畏惧」');
       const kindCn = info.kind === 'attack' ? '攻击' : info.kind === 'defense' ? '防御' : '冥想';
       // 「消耗 1 个任意能力骰」→ 走 paySlots（支持 010 置换 / 034 破障）
       const weijuSpec: SlotSpec[] = ids.length === 2 ? [{ kind: 'meditation' }] : [{ kind: info.kind }];
-      const eff = paySlots(g, player, weijuSpec, [{ dieIds: ids }], undefined, 'skill');
+      const eff = paySlots(g, player, weijuSpec, [{ dieIds: ids }], 'skill');
       const mine = eff[0].value;
       logLine(
         g,
@@ -1110,7 +1139,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 023 蛇蝎·共振（启动）：重掷我方 1 骰并按新点数落区 → 按落区类型二选一（待决策）
   'shexie.gongzhen': {
-    run({ g, player, params, rng }) {
+    run({ g, player, params, rng, target }) {
+      const opp = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const dieId = params.dieId as string | undefined;
       if (!dieId) throw new Error('must choose 1 die');
       const found = findDieOf(g, player, dieId);
@@ -1119,14 +1149,24 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const after = findDieOf(g, player, dieId);
       if (!after) throw new Error('reroll failed');
       const kindCn = after.kind === 'attack' ? '攻击' : after.kind === 'defense' ? '防御' : '冥想';
-      logLine(g, `${pname(player)} 发动「共振」：重掷 1 颗能力骰 → ${after.die.value} 点（${kindCn}骰区）`);
-      g.pending = { kind: 'gongzhenPick', player, areaKind: after.kind };
+      logLine(g, `${pname(player)} 「共振」：重掷 1 颗能力骰 → ${after.die.value} 点（${kindCn}区域）`);
+      g.pending = { kind: 'gongzhenPick', player, areaKind: after.kind, target: opp };
     },
   },
   // 024 狂舞·凶弹业舞（充能）：选择任意玩家的 1 颗能力骰 → 移到该玩家的另一个区域（保留点数）
   'kuangwu.charge': {
-    run({ g, player, params }) {
-      const owner: PlayerId = params.owner === 'opponent' ? (player === 'A' ? 'B' : 'A') : player;
+    run({ g, player, params, target }) {
+      const owner: PlayerId =
+        g.rules?.id === '2v2'
+          ? resolvePolicyTarget(
+              g,
+              player,
+              'selfOrEnemy',
+              (target ?? params.target) as PlayerId | undefined,
+            )
+          : params.owner === 'opponent'
+            ? resolveEnemy(g, player)
+            : player;
       const dieId = params.dieId as string | undefined;
       const toKind = params.toKind as DiceKind | undefined;
       if (!dieId) throw new Error('must choose 1 die');
@@ -1146,8 +1186,8 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   // 024 狂舞·凶弹业舞（必杀）：6 区域各选最多 3 颗 → 按顺/逆时针整体移动到下一区域（可跨玩家）
   'kuangwu.ultimate': {
-    run({ g, player, params }) {
-      const opp: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, params, target }) {
+      const opp = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
       const groups = (params.groups as string[][] | undefined) ?? [];
       const dir = params.direction === 'ccw' ? 'ccw' : 'cw';
       // 挑战模式：「昔日传奇」**没有冥想骰区** → 只 **5 个区域**（跳过"对方冥想"这一格）
@@ -1346,8 +1386,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   /** 清算（激活）：发动者弃置对方 X 个能力骰（X=计数）；不足 X 则每个差 3 点真实伤害；随后计数 −1 */
   'ezhao.qingsuan': {
-    run({ g, player, artifact, params }) {
-      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+    run({ g, player, artifact, params, target }) {
+      const oppId = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
+      const damageTarget = params.damageTarget
+        ? resolveEnemy(g, player, params.damageTarget as PlayerId)
+        : oppId;
       const opp = g.players[oppId];
       const X = artifact.count;
       const oppDice = [...opp.areas.attack, ...opp.areas.defense, ...opp.areas.meditation];
@@ -1365,7 +1408,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       const shortfall = X - d;
       if (shortfall > 0 && g.phase !== 'gameOver') {
         logLine(g, `「清算」：对方只有 ${d} 颗，每差 1 颗 3 点 → 造成 ${shortfall * 3} 点真实伤害`);
-        dealTrueDamage(g, oppId, shortfall * 3, player);
+        dealTrueDamage(g, damageTarget, shortfall * 3, player);
       }
       artifact.count = Math.max(0, artifact.count - 1);
       logLine(g, `「清算」：本神器计数 → ${artifact.count}`);
@@ -1380,10 +1423,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   /** 恶意（启动）：消耗 1 个攻击骰 → 获得 2 个随机点数冥想骰 */
   'mengyan.eyi': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length !== 1) throw new Error('「恶意」需消耗恰好 1 个攻击骰位');
-      const eff = paySlots(g, player, [{ kind: 'attack' }], fills, reportConsumed, 'skill');
+      const eff = paySlots(g, player, [{ kind: 'attack' }], fills, 'skill');
       const gained = gainRandomDice(g, player, 'meditation', 2, rng);
       logLine(
         g,
@@ -1401,20 +1444,20 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   /** 死亡亦逝（充能）：生命“抹零”——对方下降至个位 0、自己尽可能回复至个位 0（非伤害、非真伤） */
   'diaoling.charge': {
     run({ g, player }) {
-      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
-      const opp = g.players[oppId];
+      const oppId = enemiesOf(g, player)[0];
       let oppDrop = 0; // 抹零造成的**实际下降量**（L11 邪灵序曲要按"生命下降"计数）
-      if (opp.life % 10 !== 0) {
-        const before = opp.life;
-        opp.life = Math.floor(opp.life / 10) * 10;
-        oppDrop = before - opp.life;
-        logLine(g, `${pname(oppId)} 的生命值下降（抹零）${before} → ${opp.life}`);
+      const oppBefore = lifeOf(g, oppId);
+      if (oppBefore % 10 !== 0) {
+        const next = Math.floor(oppBefore / 10) * 10;
+        setLife(g, oppId, next);
+        oppDrop = oppBefore - next;
+        logLine(g, `${pname(oppId)} 的生命值下降（抹零）${oppBefore} → ${next}`);
       }
-      const me = g.players[player];
-      if (me.life % 10 !== 0) {
-        const before = me.life;
-        me.life = Math.min(me.lifeMax, Math.ceil(me.life / 10) * 10);
-        logLine(g, `${pname(player)} 的生命值回复（抹零）${before} → ${me.life}`);
+      const meBefore = lifeOf(g, player);
+      if (meBefore % 10 !== 0) {
+        const next = Math.min(lifeMaxOf(g, player), Math.ceil(meBefore / 10) * 10);
+        setLife(g, player, next);
+        logLine(g, `${pname(player)} 的生命值回复（抹零）${meBefore} → ${next}`);
       }
       checkLifeEnd(g);
       // L05 复仇之灵：033 抹零是非伤害改值，但**生命十位数变化同样触发**
@@ -1444,32 +1487,44 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   /** 超度（启动）：消耗 2 个点数相同的冥想骰（支持真实之剑置换）→ 5 真伤 → 重掷任意玩家一区并按分布落区 */
   'qianjie.chaodu': {
-    run({ g, player, rng, params, reportConsumed }) {
+    run({ g, player, rng, params, target }) {
       const fills = (params.costSlots as SlotFill[] | undefined) ?? [];
       if (fills.length !== 2) throw new Error('「超度」需消耗恰好 2 个冥想骰位');
+      const damageTarget = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
+      const targetOwner: PlayerId =
+        g.rules?.id === '2v2'
+          ? resolvePolicyTarget(
+              g,
+              player,
+              'anySeat',
+              (params.rerollTarget as PlayerId | undefined) ?? damageTarget,
+            )
+          : params.targetOwner === 'opponent'
+            ? damageTarget
+            : player;
+      const targetKind = params.targetKind as DiceKind;
+      if (targetKind !== 'attack' && targetKind !== 'defense' && targetKind !== 'meditation') {
+        throw new Error('invalid target area');
+      }
       // 先校验（含置换值 5），非法则不改状态
       const values = fills.map((f) => {
         const ids = f.dieIds ?? [];
         if (ids.length === 2) return 5; // 置换
         if (ids.length === 1) {
-          const found = findDieOf(g, player, ids[0]);
-          if (!found) throw new Error(`not your die: ${ids[0]}`);
-          if (found.kind !== 'meditation') throw new Error('「超度」需消耗冥想骰');
-          return found.die.value;
+          // ⚠️ 必须用统一求值器（含 034/A03「破障」的存放骰，类型按第二列分布推）；
+          //    只查 `findDieOf` 会把存放骰判成"不是你的骰"（真实事故 2026-11-08：B-034-j1-5-3）。
+          const info = abilityDieInfo(g, player, ids[0]);
+          if (!info) throw new Error(`not your die: ${ids[0]}`);
+          if (info.kind !== 'meditation') throw new Error('「超度」需消耗冥想骰');
+          return info.value;
         }
         throw new Error('each slot needs 1 (real) or 2 (converted) dice');
       });
       if (values[0] !== values[1]) throw new Error('「超度」消耗的 2 颗冥想骰点数必须相同');
-      paySlots(g, player, [{ kind: 'meditation' }, { kind: 'meditation' }], fills, reportConsumed, 'skill');
-      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+      paySlots(g, player, [{ kind: 'meditation' }, { kind: 'meditation' }], fills, 'skill');
       logLine(g, `${pname(player)} 发动「超度」：消耗 2 颗同点数冥想骰（${values[0]} 点），造成 5 点真实伤害`);
-      dealTrueDamage(g, oppId, 5, player);
+      dealTrueDamage(g, damageTarget, 5, player);
       if ((g.phase as string) === 'gameOver') return;
-      const targetOwner: PlayerId = params.targetOwner === 'opponent' ? oppId : player;
-      const targetKind = params.targetKind as DiceKind;
-      if (targetKind !== 'attack' && targetKind !== 'defense' && targetKind !== 'meditation') {
-        throw new Error('invalid target area');
-      }
       const ids = g.players[targetOwner].areas[targetKind].map((d) => d.id);
       const kindCn = targetKind === 'attack' ? '攻击' : targetKind === 'defense' ? '防御' : '冥想';
       if (ids.length === 0) {
@@ -1483,8 +1538,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── 036 无相 ────────────────────────────────────────────────
   /** 万象俱灭（充能·必执行）：弃任意玩家 1 个能力骰，并使该玩家回复 3 点生命 */
   'wuxiang.charge': {
-    run({ g, player, params }) {
-      const owner: PlayerId = params.owner === 'opponent' ? (player === 'A' ? 'B' : 'A') : player;
+    run({ g, player, params, target }) {
+      const owner: PlayerId =
+        g.rules?.id === '2v2'
+          ? resolvePolicyTarget(
+              g,
+              player,
+              'selfOrEnemy',
+              (target ?? params.target) as PlayerId | undefined,
+            )
+          : params.owner === 'opponent'
+            ? resolveEnemy(g, player)
+            : player;
       const dieId = params.dieId as string | undefined;
       if (!dieId) throw new Error('「万象俱灭」需选择 1 颗能力骰');
       const found = findDieOf(g, owner, dieId);
@@ -1499,11 +1564,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   /** 万象俱灭（必杀）：保留 1–6 点各 1 个，弃置双方其余全部能力骰；真伤 = 被弃骰的不同点数之和 */
   'wuxiang.wanxiang.ultimate': {
-    run({ g, player, params }) {
+    run({ g, player, params, target }) {
       const keepIds = (params.keepIds as string[] | undefined) ?? [];
       if (new Set(keepIds).size !== 6) throw new Error('「万象俱灭」需为 1–6 点各保留 1 个能力骰');
+      const damageTarget = resolveEnemy(g, player, target ?? (params.target as PlayerId | undefined));
+      const owners = g.rules?.id === '2v2' ? [player, damageTarget] : rosterOf(g);
       const all: { who: PlayerId; kind: DiceKind; die: Die }[] = [];
-      for (const who of ['A', 'B'] as PlayerId[]) {
+      for (const who of owners) {
         for (const k of KINDS) {
           for (const d of g.players[who].areas[k]) all.push({ who, kind: k, die: d });
         }
@@ -1519,12 +1586,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }
       const distinct = new Set(discarded.map((x) => x.die.value));
       const dmg = [...distinct].reduce((a, b) => a + b, 0);
-      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
       logLine(
         g,
         `${pname(player)} 发动必杀「万象俱灭」：双方各保留 1–6 点骰 1 个，弃置其余全部能力骰；造成 ${dmg} 点真实伤害`,
       );
-      dealTrueDamage(g, oppId, dmg, player);
+      dealTrueDamage(g, damageTarget, dmg, player);
     },
   },
   // ── 034 金刚 ────────────────────────────────────────────────
@@ -1564,7 +1630,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
    *  对对方造成 **6×N 一次真伤** → 之后弃置这些区域中的全部能力骰。打死对方则不再处理弃置。 */
   'miyun.lidichengfo': {
     run({ g, player }) {
-      const oppId: PlayerId = player === 'A' ? 'B' : 'A';
+      const oppId: PlayerId = enemiesOf(g, player)[0];
       const regions = lidichengfoRegions(g); // 快照符合条件的区域（与界面"发动前预览"共用同一来源）
       const n = regions.length;
       logLine(
@@ -1574,13 +1640,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       if (n > 0) dealTrueDamage(g, oppId, 6 * n, player); // 6×N 作为**一次**真实伤害
       if ((g.phase as string) === 'gameOver') return; // 打死对方 → 之后不再处理弃置
       // 之后：弃置这些区域中的能力骰（双方；按"每个玩家一次效果"批量弃，保证 L01 雨落狂流只 +1）
-      const byPlayer: Record<PlayerId, Partial<Record<DiceKind, string[]>>> = { A: {}, B: {} };
+      const byPlayer: Record<string, Partial<Record<DiceKind, string[]>>> = { A: {}, B: {} };
       for (const r of regions) {
         const live = r.ids.filter((id) => g.players[r.who].areas[r.kind].some((d) => d.id === id));
         if (live.length) (byPlayer[r.who][r.kind] ??= []).push(...live);
       }
       const removedLidi: { kind: DiceKind; value: number }[] = [];
-      for (const who of ['A', 'B'] as PlayerId[]) {
+      for (const who of rosterOf(g)) {
         if (Object.keys(byPlayer[who]).length > 0) removedLidi.push(...consumeDiceByKind(g, g.players[who], byPlayer[who]));
       }
       if (n > 0) logLine(g, `「立地成佛」：弃置这 ${n} 个区域中的全部能力骰（${vals(removedLidi)}）`);

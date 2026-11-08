@@ -1,6 +1,7 @@
 import './ui/styles.css';
-import { createGame, createChallengeGame, applyAction, getLegalActions } from './core/engine/game';
+import { createGame, createChallengeGame, createTwoVTwoGame, applyAction, getLegalActions } from './core/engine/game';
 import { renderGame, setLocalViewPlayer, actorOf, lastFrameDurationMs, legendGoneList, type UiState } from './ui/render';
+import { render2v2Game } from './ui/battle2v2View';
 import { renderSetup, type SetupOptions } from './ui/setupScreen';
 import { renderLobby } from './ui/lobby';
 import { createOnlineShell, type OnlineShell } from './ui/online';
@@ -9,7 +10,7 @@ import { loadPrefs, savePrefs } from './ui/prefs';
 import type { Action, GameState, PlayerId } from './core/model/types';
 import { bindTurnTimer, unbindTurnTimer, setTurnTimerPaused } from './ui/turnTimer';
 import { hasSavedRoom, type NetSession } from './net/session';
-import { diag, isDiagEnabled, gameSnapshot } from './ui/diag';
+import { diag, diagPin, isDiagEnabled, setDumpProbe, snapshotForState } from './ui/diag';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
@@ -37,6 +38,49 @@ const ui: UiState = {
   detail: null,
   error: null,
 };
+
+/**
+ * 诊断是旁路观察：快照/序列化失败只能记一笔，绝不能阻断动作和重绘。
+ * `makeData` 用函数延迟构造，保证构造异常也被这里接住。
+ * `pinned=true` ＝ 这条不许被环形缓冲淘汰（开局种子、每条动作——少了就没法重放）。
+ */
+const diagSafe = (tag: string, makeData: () => unknown, pinned = false): void => {
+  if (!isDiagEnabled()) return;
+  try {
+    if (pinned) diagPin(tag, makeData());
+    else diag(tag, makeData());
+  } catch (e) {
+    try {
+      diag('diag-error', {
+        tag,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    } catch {
+      // 诊断自身再次失败时静默忽略；游戏流程优先。
+    }
+  }
+};
+
+/**
+ * 全局兜底：**点击处理器里抛出的异常**现在一个字节都不会留下
+ * （`dispatch` 的 catch 只写提示栏；handler 里更早抛出的连 catch 都没有）。
+ * 只在 `?diag=1` 时挂，默认零开销。
+ */
+if (isDiagEnabled()) {
+  const brief = (e: unknown): Record<string, unknown> => ({
+    message: e instanceof Error ? e.message : String(e),
+    stack:
+      e instanceof Error
+        ? (e.stack ?? '').split('\n').slice(0, 4).map((s) => s.trim()).join(' | ')
+        : null,
+  });
+  window.addEventListener('error', (e) => {
+    diag('ui-throw', { where: 'window', ...brief(e.error ?? e.message), file: e.filename ?? null, line: e.lineno ?? null });
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    diag('ui-throw', { where: 'promise', ...brief((e as PromiseRejectionEvent).reason) });
+  });
+}
 
 /** 每局随机种子（引擎内所有随机都走它；也便于将来做录像回放） */
 const newSeed = (): number => Math.floor(Math.random() * 1_000_000_000);
@@ -99,8 +143,9 @@ const dispatchAction = (a: Action): void => {
   if (online && actorOf(state) !== online.state.myPlayer) return;
   // 联机·对方掉线/退出（暂停中）→ 忽略本地动作（锁步下防分叉）
   if (online && (!online.state.peerOnline || online.state.peerLeft)) return;
-  // 【排查·?diag=1】只记挑战模式：动作 + 动作后的状态快照（"隐形骰子"排查用）
-  if (isDiagEnabled()) diag('action', { t: a.t, a });
+  // 【排查·?diag=1】动作 + 动作后的状态快照。
+  // **钉住**：这串动作是"用 seed 本地重放整局"的唯一依据，不能被后面的点击日志挤掉。
+  diagSafe('action', () => ({ t: a.t, a }), true);
   try {
     if (online) {
       // 本地动作：session.dispatch 内部会 emit（触发订阅者重绘）→ 先拦下，统一由本函数结尾渲染一次
@@ -116,7 +161,7 @@ const dispatchAction = (a: Action): void => {
   } catch (e) {
     ui.error = `非法操作：${e instanceof Error ? e.message : String(e)}`;
   }
-  if (isDiagEnabled()) diag('state', gameSnapshot(state, legendGoneList()));
+  diagSafe('state', () => snapshotForState(state!, legendGoneList()));
   render();
 };
 
@@ -176,6 +221,20 @@ const scheduleLegendBlock = (): void => {
 
 const render = (): void => {
   if (!state) return;
+  if (state.rules?.id === '2v2') {
+    render2v2Game(root, state, {
+      onAction: (a) => dispatchAction(a),
+      onBack: showSetup,
+      onRestart: () => {
+        if (lastLocalOpts) startLocal(lastLocalOpts);
+      },
+      requestRender: render,
+      error: ui.error,
+    });
+    return;
+  }
+  // 离开 2v2 → 解掉它的「导出时现场快照」探针（否则会读到上一局的过期闭包）。
+  setDumpProbe(null);
   renderGame(state, root, {
     ui,
     online: onlineUi(),
@@ -230,6 +289,24 @@ let lastLocalOpts: SetupOptions | null = null;
 const startLocal = (opts: SetupOptions): void => {
   // 记一份浅拷贝（数组也复制：界面后续可能改自己的对象）
   lastLocalOpts = { ...opts, heroA: [...opts.heroA] as SetupOptions['heroA'], heroB: [...opts.heroB] as SetupOptions['heroB'] };
+  if (opts.twoVTwo) {
+    const seed = newSeed();
+    state = createTwoVTwoGame({ ...opts.twoVTwo, seed });
+    // 【排查·?diag=1】**钉住**：拿这个 seed + 日志里的动作序列，可本地把这一局逐步重放到卡死那一刻。
+    diagSafe(
+      'game-start',
+      () => ({
+        mode: '2v2',
+        seed, // 真正建局用的种子（上面的 setup 里可能带旧 seed，以这个为准）
+        setup: opts.twoVTwo ?? null,
+      }),
+      true,
+    );
+    setLocalViewPlayer(null);
+    resetUi();
+    render();
+    return;
+  }
   if (opts.challengeCardId) {
     // 单人挑战：对手＝挑战卡自动机；固定视角＝挑战者恒在下方（本模式**不做 A/B 换位**）
     state = createChallengeGame({

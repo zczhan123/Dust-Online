@@ -207,6 +207,10 @@ body {
 .sub-delta { font-weight: 700; padding: 0 6px; border-radius: 999px; }
 .sub-delta.player-A { background: #dbeafe; color: #2563eb; }
 .sub-delta.player-B { background: #fee2e2; color: #dc2626; }
+.sub-delta.player-A1 { background: #dbeafe; color: #2563eb; }
+.sub-delta.player-A2 { background: #e0f2fe; color: #0284c7; }
+.sub-delta.player-B1 { background: #fee2e2; color: #dc2626; }
+.sub-delta.player-B2 { background: #fce7f3; color: #db2777; }
 /* 充能 y/x：旧黄色药丸；上下内边距同样为 0（满充能保持黄色，不另做绿色变体）
    + 内部进度条：`.sub-charge-fill` 用 `scaleX(y/x)` 从左侧生长（文字在 `.sub-charge-tx` 之上）。 */
 .sub-charge { position: relative; overflow: hidden; background: #fbe8c8; color: #8a5a05; font-weight: 700; padding: 0 7px; border-radius: 999px; }
@@ -294,6 +298,10 @@ body {
 }
 .die-A { background: #2563eb; }
 .die-B { background: #dc2626; }
+.die-A1 { background: #2563eb; color: #fff; }
+.die-A2 { background: #38bdf8; color: #fff; }
+.die-B1 { background: #dc2626; color: #fff; }
+.die-B2 { background: #f472b6; color: #fff; }
 
 /* ── 中央侧的一行 band：一端＝战术条（2 个神器宽），另一端＝生命条（三列对齐神器卡，镜像时交换） ── */
 .playband {
@@ -649,6 +657,22 @@ button.pay-die {
 .log-skill.player-A { color: #7db2ff; }
 .log-actor.player-B,
 .log-skill.player-B { color: #ff8f8f; }
+.log-actor.player-A1,
+.log-skill.player-A1,
+.hint-player.player-A1,
+.hint-skill.player-A1 { color: #2563eb; }
+.log-actor.player-A2,
+.log-skill.player-A2,
+.hint-player.player-A2,
+.hint-skill.player-A2 { color: #38bdf8; }
+.log-actor.player-B1,
+.log-skill.player-B1,
+.hint-player.player-B1,
+.hint-skill.player-B1 { color: #dc2626; }
+.log-actor.player-B2,
+.log-skill.player-B2,
+.hint-player.player-B2,
+.hint-skill.player-B2 { color: #f472b6; }
 .log-prefix { color: inherit; opacity: .72; }
 .sidebar .log {
   flex: 1;
@@ -969,6 +993,10 @@ button.pay-die {
 .pay-die.die-B {
   background: #dc2626;
 }
+.pay-die.die-A1 { background: #2563eb; }
+.pay-die.die-A2 { background: #38bdf8; }
+.pay-die.die-B1 { background: #dc2626; }
+.pay-die.die-B2 { background: #f472b6; }
 .pay-die.clickable {
   cursor: pointer;
 }
@@ -1034,6 +1062,43 @@ button.pay-die {
 .convertpick-hint {
   font-size: 12px;
   color: #4b5563;
+}
+/* 「真实之剑」置换面板里的"目标"组（2v2）：与骰片/取消**同一行**，不另起一行 */
+.convertpick-targets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* 2v2 专用两行布局（1v1 不加这个类 → 仍是单行，完全不变）
+   第 1 行＝文字（标题 + 提示），第 2 行＝按钮（骰片 + 目标 + 取消）。
+   不新增纵向留白：用紧凑的 padding/gap，避免把快速操作栏撑高。 */
+.convertpick--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px 8px;
+  padding: 5px 10px;
+}
+.convertpick--stacked .convertpick-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.convertpick--stacked .convertpick-head .convertpick-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.convertpick--stacked .convertpick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .pay-actions {
   display: flex;
@@ -1335,6 +1400,8 @@ button.pay-die {
 /* 只有 only 侧（第三列神器）：一行居中、不换行 */
 .skills--inline--only { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: center; gap: 4px; }
 .skills--inline--only .skill { flex-direction: row; }
+/* 第三列横向并排：清掉纵向列表的 margin-top，避免同一行里后面的条目往下掉。 */
+.skills--inline--only .skill-part { margin-top: 0; }
 /* 传奇面板·隐藏描述：维持原样（按技能名分组、横向换行），与神器「两列/居中」改动隔离 */
 .skills--inline-legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
 .skills--inline-legend .skill { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center; padding: 3px 6px; }
@@ -1502,7 +1569,7 @@ button.pay-die {
   font-weight: 400;
   font-display: swap;
   src: url("/fonts/zhimangxing-subset.woff2") format("woff2");
-  unicode-range: U+4e00, U+4e07-4e0b, U+4e0d-4e0e, U+4e14, U+4e16, U+4e1a, U+4e1d, U+4e24-4e25, U+4e2a, U+4e2d, U+4e32, U+4e38, U+4e3a-4e3b, U+4e45, U+4e48-4e49, U+4e4b, U+4e50, U+4e58, U+4e5d, U+4e5f, U+4e66, U+4e86, U+4e89, U+4e8c, U+4e8e, U+4e91-4e92, U+4e9b, U+4ea1, U+4ea4, U+4ea6-4ea7, U+4eab, U+4eae, U+4eba, U+4ec5, U+4ec7, U+4ecd-4ece, U+4ed3, U+4ee3-4ee5, U+4ef6, U+4efb, U+4efd, U+4f0f, U+4f1a, U+4f20, U+4f24, U+4f3c, U+4f46, U+4f4d-4f50, U+4f53, U+4f55, U+4f59, U+4f5b-4f5c, U+4f60, U+4f69, U+4f7f, U+4f8b, U+4f9b, U+4f9d, U+4fa7, U+4fbf, U+4fdd, U+4fe1, U+4fee, U+4ff1, U+500d, U+5019, U+503c, U+504f, U+505a, U+5076, U+50cf, U+50e7, U+5141, U+5145-5146, U+5148-5149, U+514d, U+5165, U+5168, U+5171, U+5173, U+5176-5178, U+517d, U+5185, U+518d, U+5199, U+51a0, U+51a5, U+51b2-51b3, U+51bd, U+51c0, U+51c6, U+51cb, U+51cf, U+51d1, U+51db, U+51f6, U+51fa-51fb, U+5200, U+5203, U+5206-5207, U+5211-5212, U+5217, U+5219-521b, U+521d, U+5220, U+5224, U+5229, U+522b, U+5230, U+5236-5237, U+523a-523b, U+524a, U+524d, U+5251, U+5269, U+526f, U+529b, U+529f-52a0, U+52a8, U+52ab, U+52fe-52ff, U+5315-5316, U+5319, U+5339-533a, U+5341, U+5343, U+5347, U+534a, U+534f, U+5355, U+5360-5361, U+5370, U+5373, U+5385-5386, U+538b, U+539f, U+53bb, U+53c2, U+53c8, U+53ca-53cd, U+53d1, U+53d6-53d8, U+53e0, U+53e3, U+53e5-53e6, U+53ea, U+53ef, U+53f2-53f3, U+53f7, U+5403-5404, U+5408, U+540c-540e, U+5411, U+541e, U+5426, U+542b-542c, U+542f, U+5438, U+547d, U+5486, U+548c, U+54c0, U+54cd, U+54ea, U+54ee, U+552f, U+5546, U+5668, U+56de, U+56e0, U+56f4, U+56fa, U+56fe, U+5706, U+5723, U+5728, U+5730, U+573a, U+5740, U+5747, U+5757, U+578b, U+57ce, U+57df, U+57fa, U+5806, U+5854, U+586b, U+5883, U+589e, U+58a8, U+58c1, U+58eb, U+58f0, U+58f3, U+5904, U+5907, U+590d, U+5916, U+591a, U+591c, U+5927, U+5929, U+5931, U+5934, U+5947, U+5951, U+5957, U+5973, U+597d, U+5982, U+59cb, U+5a01, U+5a03, U+5a31, U+5b50, U+5b57-5b58, U+5b64, U+5b83, U+5b87-5b88, U+5b8c, U+5b98, U+5b9a, U+5b9e, U+5ba1-5ba3, U+5bab, U+5bb0, U+5bb3, U+5bb6, U+5bb9, U+5bbd, U+5bd2, U+5bf0, U+5bf8-5bf9, U+5c01, U+5c04, U+5c06, U+5c0f, U+5c11, U+5c18, U+5c1a, U+5c31, U+5c3a, U+5c3c-5c3e, U+5c40, U+5c42, U+5c45, U+5c48, U+5c4f, U+5c55, U+5c5e, U+5c60, U+5de5-5de6, U+5dee, U+5df1-5df2, U+5df4, U+5e03, U+5e0c, U+5e26-5e27, U+5e37-5e38, U+5e55, U+5e72-5e73, U+5e76, U+5e7d, U+5e7f, U+5e8f, U+5e93-5e95, U+5e9f, U+5ea6, U+5efa, U+5f00, U+5f02-5f03, U+5f0f, U+5f15, U+5f20, U+5f25, U+5f31, U+5f39-5f3a, U+5f52-5f53, U+5f55, U+5f62, U+5f71, U+5f84-5f85, U+5f8b, U+5f97, U+5fa1, U+5faa, U+5fbd, U+5fc3, U+5fc5, U+5fcd, U+5fd7, U+5feb, U+5ff5, U+5ffd, U+6001, U+601c, U+6027, U+603b, U+6052, U+6055, U+606f-6070, U+6076, U+609f, U+60ac, U+60af, U+60b2, U+60bc, U+60c5, U+60ca, U+60e7, U+60e9, U+60f3, U+610f, U+6148, U+614e, U+620f-6212, U+6216, U+6218, U+621f, U+622a, U+6234, U+6237, U+623f-6240, U+624b, U+624d, U+6253, U+6263, U+6267, U+6269, U+626b, U+6279, U+627f-6280, U+6284, U+628a, U+6291, U+6295, U+62a4-62a5, U+62ab, U+62b5, U+62b9, U+62bd, U+62c6, U+62d4, U+62e6, U+62e9, U+62ff, U+6301-6302, U+6307, U+6309, U+6311, U+6321, U+6325, U+632f, U+6362, U+636e, U+6389, U+638c, U+6392, U+63a0, U+63a5, U+63a7, U+63b7, U+63cf-63d0, U+640f, U+642d, U+64ad, U+64cd-64ce, U+652f, U+6536, U+6539, U+653b, U+653e, U+6545, U+6548, U+654c, U+6551, U+6563, U+6570, U+6574, U+6587, U+6597, U+65a7, U+65a9, U+65ad, U+65b0, U+65b9, U+65c1, U+65e0, U+65e2, U+65e5-65e7, U+65e9, U+65f6, U+660e, U+6614, U+6620, U+662f, U+6635, U+663c, U+663e, U+6653, U+666e, U+6682, U+6697, U+66b4, U+66f2, U+66f4, U+66fe-6700, U+6709, U+671d, U+672a-672c, U+672f, U+673a, U+6740, U+6743, U+674e, U+6756, U+675f, U+6761, U+6765, U+677f, U+6781, U+6784, U+6790, U+679a, U+679c, U+67aa, U+67ad, U+67b7, U+67d0, U+67d3, U+67e5, U+6807, U+680f, U+6837, U+6839, U+683c, U+6846, U+6848, U+6863, U+68a6, U+68c0, U+699c, U+69db, U+69fd, U+6a21, U+6a2a, U+6b21, U+6b3e, U+6b4c, U+6b62-6b66, U+6b7b, U+6b87, U+6b8b, U+6bb5, U+6bcf, U+6bd4-6bd5, U+6c38, U+6c42, U+6c5d, U+6c60, U+6ca1, U+6cbf, U+6cd5, U+6ce8, U+6cea, U+6d3b, U+6d41, U+6d45, U+6d4b, U+6d4f, U+6d6e, U+6d88-6d89, U+6da4, U+6df1, U+6df7, U+6e05, U+6e21, U+6e32, U+6e38, U+6e90, U+6ee1, U+6ee4, U+6f06, U+6f0f, U+6f5c, U+6f78, U+6fc0, U+706b, U+706d, U+706f-7070, U+7075, U+70b9, U+70df, U+70ed, U+7136, U+7167, U+71ce, U+71e7, U+722a, U+7247-7248, U+724c, U+7252, U+7259, U+7269, U+7279, U+72b6, U+72c2, U+72ec, U+72f1, U+72fc, U+730e, U+731c, U+7389, U+738b, U+739b, U+73a9, U+73af-73b0, U+73e0, U+7406, U+74e6, U+751f, U+7528, U+7531-7532, U+7535, U+753b, U+754c, U+754f, U+7559, U+7565, U+75d5, U+767d, U+7684, U+76d1, U+76d6, U+76ee, U+76f4, U+76f8, U+76fe, U+7701, U+770b, U+771f, U+77e5, U+77ed, U+7801, U+7834, U+7840, U+786c, U+786e, U+793a, U+7956, U+795e, U+7965, U+796d, U+7981, U+7985, U+79bb, U+79cd, U+79d2, U+79f0, U+79fb, U+7a0b, U+7a7a, U+7a81, U+7a84, U+7a97, U+7acb, U+7ad6, U+7ad9, U+7aef, U+7af9, U+7b14, U+7b1b, U+7b26, U+7b2c, U+7b49, U+7b51, U+7b54, U+7b56, U+7b7e, U+7b97, U+7c7b, U+7cbe, U+7ea2, U+7ea7, U+7eaf, U+7eb3, U+7ebf, U+7ec4, U+7ec8, U+7ed1, U+7ed3, U+7ed8-7ed9, U+7edd, U+7edf, U+7ee7, U+7eed, U+7ef3, U+7eff, U+7f13, U+7f16, U+7f1a, U+7f29, U+7f3a, U+7f51, U+7f57, U+7f5a, U+7f6a, U+7f6e;
+  unicode-range: U+4e00, U+4e07-4e0b, U+4e0d-4e0e, U+4e13-4e14, U+4e16, U+4e1a, U+4e1d, U+4e24-4e25, U+4e2a, U+4e2d, U+4e32, U+4e34, U+4e38, U+4e3a-4e3b, U+4e45, U+4e48-4e49, U+4e4b, U+4e50, U+4e58, U+4e5d, U+4e5f, U+4e66, U+4e86, U+4e89, U+4e8c, U+4e8e, U+4e91-4e92, U+4e9b, U+4ea1, U+4ea4, U+4ea6-4ea7, U+4eab, U+4eae, U+4eba, U+4ec5, U+4ec7, U+4ecd-4ece, U+4ed3, U+4ee3-4ee5, U+4ef6, U+4efb, U+4efd, U+4f0d, U+4f0f, U+4f1a, U+4f20, U+4f24, U+4f3c, U+4f46, U+4f4d-4f50, U+4f53, U+4f55, U+4f59, U+4f5b-4f5c, U+4f60, U+4f69, U+4f7f, U+4f8b, U+4f9b, U+4f9d, U+4fa7, U+4fbf, U+4fdd, U+4fe1, U+4fee, U+4ff1, U+500d, U+5019, U+503c, U+504f, U+505a, U+5076, U+50cf, U+50e7, U+5141, U+5145-5146, U+5148-5149, U+514d, U+5165, U+5168, U+5171, U+5173, U+5176-5178, U+517c-517d, U+5185, U+518d, U+5199, U+51a0, U+51a5, U+51b2-51b3, U+51bd, U+51c0, U+51c6, U+51cb, U+51cf, U+51d1, U+51db, U+51f6, U+51fa-51fb, U+5200, U+5203, U+5206-5207, U+5211-5212, U+5217, U+5219-521b, U+521d, U+5220, U+5224, U+5229, U+522b, U+5230, U+5236-5237, U+523a-523b, U+524a, U+524d, U+5251, U+5269, U+526f, U+529b, U+529f-52a0, U+52a8, U+52ab, U+52fe-52ff, U+5315-5316, U+5319, U+5339-533a, U+5341, U+5343, U+5347, U+534a, U+534f, U+5355, U+5360-5361, U+5370, U+5373, U+5385-5386, U+538b, U+539f, U+53bb, U+53c2, U+53c8, U+53ca-53cd, U+53d1, U+53d6-53d8, U+53e0, U+53e3, U+53e5-53e6, U+53ea, U+53ef, U+53f2-53f3, U+53f7, U+5403-5404, U+5408, U+540c-540e, U+5411, U+541e, U+5426, U+542b-542c, U+542f, U+5438, U+547d, U+5486, U+548c, U+54c0, U+54cd, U+54ea, U+54ee, U+552f, U+5546, U+5668, U+56de, U+56e0, U+56e2, U+56f4, U+56fa, U+56fe, U+5706, U+5723, U+5728, U+5730, U+573a, U+5740, U+5747, U+5757, U+578b, U+57ce, U+57df, U+57fa, U+5806, U+5854, U+586b, U+5883, U+589e, U+58a8, U+58c1, U+58eb, U+58f0, U+58f3, U+5904, U+5907, U+590d, U+5916, U+591a, U+591c, U+5927, U+5929, U+5931, U+5934, U+5947, U+5951, U+5957, U+5973, U+597d, U+5982, U+59cb, U+5a01, U+5a03, U+5a31, U+5b50, U+5b57-5b58, U+5b64, U+5b83, U+5b87-5b88, U+5b8c, U+5b98, U+5b9a, U+5b9e, U+5ba1-5ba3, U+5bab, U+5bb0, U+5bb3, U+5bb6, U+5bb9, U+5bbd, U+5bc6, U+5bd2, U+5bf0, U+5bf8-5bf9, U+5c01, U+5c04, U+5c06, U+5c0f, U+5c11, U+5c18, U+5c1a, U+5c1d, U+5c31, U+5c3a, U+5c3c-5c3e, U+5c40, U+5c42, U+5c45, U+5c48, U+5c4f, U+5c55, U+5c5e, U+5c60, U+5de5-5de6, U+5dee, U+5df1-5df2, U+5df4, U+5e03, U+5e0c, U+5e26-5e27, U+5e37-5e38, U+5e55, U+5e72-5e73, U+5e76, U+5e7d, U+5e7f, U+5e8f, U+5e93-5e95, U+5e9f, U+5ea6, U+5efa, U+5f00, U+5f02-5f03, U+5f0f, U+5f15, U+5f20, U+5f25, U+5f31, U+5f39-5f3a, U+5f52-5f53, U+5f55, U+5f62, U+5f71, U+5f84-5f85, U+5f8b, U+5f97, U+5fa1, U+5faa, U+5fbd, U+5fc3, U+5fc5, U+5fcd, U+5fd7, U+5feb, U+5ff5, U+5ffd, U+6001, U+601c, U+6027, U+603b, U+6052, U+6055, U+606f-6070, U+6076, U+609f, U+60ac, U+60af, U+60b2, U+60bc, U+60c5, U+60ca, U+60e7, U+60e9, U+60f3, U+610f, U+6148, U+614e, U+620f-6212, U+6216, U+6218, U+621f, U+622a, U+6234, U+6237, U+623f-6240, U+624b, U+624d, U+6253, U+6263, U+6267, U+6269, U+626b, U+6279, U+627f-6280, U+6284, U+628a, U+6291, U+6295, U+6297, U+62a4-62a5, U+62ab, U+62b5, U+62b9, U+62bd, U+62c6, U+62d4, U+62e6, U+62e9, U+62ff, U+6301-6302, U+6307, U+6309, U+6311, U+6321, U+6325, U+632f, U+6362, U+636e, U+6388-6389, U+638c, U+6392, U+63a0, U+63a5, U+63a7, U+63b7, U+63cf-63d0, U+640f, U+642d, U+64ad, U+64cd-64ce, U+652f, U+6536, U+6539, U+653b, U+653e, U+6545, U+6548, U+654c, U+6551, U+6563, U+6570, U+6574, U+6587, U+6597, U+65a7, U+65a9, U+65ad, U+65b0, U+65b9, U+65c1, U+65e0, U+65e2, U+65e5-65e7, U+65e9, U+65f6, U+660e, U+6614, U+6620, U+662f, U+6635, U+663c, U+663e, U+6653, U+666e, U+6682, U+6697, U+66b4, U+66f2, U+66f4, U+66fe-6700, U+6709, U+671d, U+671f, U+672a-672c, U+672f, U+673a, U+6740, U+6743, U+674e, U+6756, U+675f, U+6761, U+6765, U+677f, U+6781, U+6784, U+6790, U+679a, U+679c, U+67aa, U+67ad, U+67b7, U+67d0, U+67d3, U+67e5, U+6807, U+680f, U+6837, U+6839, U+683c, U+6846, U+6848, U+684c, U+6863, U+68a6, U+68c0, U+699c, U+69db, U+69fd, U+6a21, U+6a2a, U+6b21, U+6b3e, U+6b4c, U+6b62-6b66, U+6b7b, U+6b87, U+6b8b, U+6bb5, U+6bcf, U+6bd4-6bd5, U+6c38, U+6c42, U+6c5d, U+6c60, U+6ca1, U+6cbf, U+6cd5, U+6ce8, U+6cea, U+6d3b, U+6d41, U+6d45, U+6d4b, U+6d4f, U+6d6e, U+6d88-6d89, U+6da4, U+6df1, U+6df7, U+6e05, U+6e21, U+6e32, U+6e38, U+6e90, U+6ee1, U+6ee4, U+6f06, U+6f0f, U+6f5c, U+6f78, U+6fc0, U+706b, U+706d, U+706f-7070, U+7075, U+70b9, U+70df, U+70ed, U+7136, U+7167, U+71ce, U+71e7, U+722a, U+7247-7248, U+724c, U+7252, U+7259, U+7269, U+7279, U+72b6, U+72c2, U+72ec, U+72f1, U+72fc, U+730e, U+731c, U+7389, U+738b, U+739b, U+73a9, U+73af-73b0, U+73e0, U+7406, U+74e6, U+751f, U+7528, U+7531-7532, U+7535, U+753b, U+754c, U+754f, U+7559, U+7565, U+75d5, U+767d, U+7684, U+76d1, U+76d6, U+76ee, U+76f4, U+76f8, U+76fe, U+7701, U+770b, U+771f, U+77e5, U+77ed, U+7801, U+7834, U+7840, U+786c, U+786e, U+793a, U+7956, U+795e, U+7965, U+796d, U+7981, U+7985, U+79bb, U+79cd, U+79d2, U+79d8, U+79f0, U+79fb, U+7a0b, U+7a7a, U+7a81, U+7a84, U+7a97, U+7acb, U+7ad6, U+7ad9, U+7aef, U+7af9, U+7b14, U+7b1b, U+7b26, U+7b2c, U+7b49, U+7b51, U+7b54, U+7b56, U+7b7e, U+7b97, U+7c7b, U+7cbe, U+7ea2, U+7ea7, U+7eaf, U+7eb3, U+7ebf, U+7ec4, U+7ec8, U+7ecf, U+7ed1, U+7ed3, U+7ed8-7ed9, U+7edd, U+7edf, U+7ee7;
 }
 @font-face {
   font-family: "Zhi Mang Xing";
@@ -1510,7 +1577,7 @@ button.pay-die {
   font-weight: 400;
   font-display: swap;
   src: url("/fonts/zhimangxing-subset-2.woff2") format("woff2");
-  unicode-range: U+7f8e, U+7fa4, U+7ffb, U+8005, U+800c, U+8017, U+804a, U+8054, U+80dc, U+80fd, U+817e, U+81ea, U+81f3-81f4, U+81fe, U+821e, U+8272, U+827e, U+8292, U+82b1, U+82c7, U+82e5, U+82f1, U+8303, U+8352, U+8361, U+836f, U+83b7, U+83dc, U+83e9, U+841d, U+8428, U+843d, U+846c, U+864e, U+8650, U+865a, U+86c7, U+86ee, U+874e, U+8840, U+884c, U+8863, U+8865, U+8868, U+88ab, U+88ad, U+88c1, U+8981, U+8986, U+89c1-89c2, U+89c4, U+89c6, U+89c8-89c9, U+89d2, U+89e3, U+89e6, U+8a00, U+8ba1, U+8ba4, U+8ba9, U+8bb0, U+8bb8, U+8bba, U+8bbe-8bbf, U+8bc6, U+8bd5, U+8bdd, U+8be2, U+8be5-8be6, U+8bed, U+8bf1, U+8bf4, U+8bf7, U+8bfb, U+8c01, U+8c03, U+8c28, U+8c61, U+8d2f, U+8d34, U+8d4e-8d4f, U+8d5b, U+8d70, U+8d74, U+8d77, U+8d85, U+8db3, U+8dd1, U+8de8, U+8def, U+8df3, U+8eab, U+8f66, U+8f6c, U+8f6e, U+8f70, U+8f7d, U+8f91, U+8f93, U+8fb9, U+8fbe, U+8fc2, U+8fc7, U+8fd0-8fd1, U+8fd4, U+8fd8-8fd9, U+8fdb-8fdc, U+8fde-8fdf, U+8ff0, U+8ff7, U+8ff9, U+8ffd, U+9000, U+9002, U+9009, U+9010, U+901a, U+901d, U+901f-9020, U+9022, U+903b, U+9041, U+904d, U+907f, U+90a3, U+90aa, U+90e8, U+90fd, U+914d, U+9192, U+91c7, U+91cc-91cf, U+91d1, U+9274, U+93d6, U+94a5, U+94a9, U+94ae, U+94c1, U+94e0, U+94f3, U+94fa, U+94fe, U+9501, U+950b, U+9519, U+952e, U+955c, U+9570, U+957f, U+95e8, U+95ed, U+95f2, U+95f4, U+95fb, U+9608, U+9632, U+9635-9636, U+9644-9645, U+964d, U+9650, U+9664, U+9668, U+9677, U+968f, U+969c, U+96c4, U+96c6, U+96e8, U+96f6-96f7, U+9700, U+9707, U+9759, U+975e, U+9760, U+9762, U+9798, U+97f3, U+9875-9876, U+9879-987b, U+987d, U+987f, U+9884, U+9886, U+9897-9898, U+989c-989d, U+98ce, U+98de, U+9976, U+9996, U+9a71, U+9aa4, U+9ab0, U+9ad8, U+9b3c, U+9b42, U+9b47, U+9b54, U+9e23, U+9ed1, U+9ed8, U+9f50, U+9f99;
+  unicode-range: U+7eed, U+7ef3, U+7eff, U+7f13, U+7f16, U+7f1a, U+7f29, U+7f3a, U+7f51, U+7f57, U+7f5a, U+7f6a, U+7f6e, U+7f8e, U+7fa4, U+7ffb, U+8005, U+800c, U+8017, U+804a, U+8054, U+80dc, U+80fd, U+817e, U+81ea, U+81f3-81f4, U+81fe, U+821e, U+8272, U+827e, U+8292, U+82b1, U+82c7, U+82e5, U+82f1, U+8303, U+8352, U+8361, U+836f, U+83b7, U+83dc, U+83e9, U+841d, U+8428, U+843d, U+846c, U+864e, U+8650, U+865a, U+86c7, U+86ee, U+874e, U+8840, U+884c, U+8863, U+8865, U+8868, U+88ab, U+88ad, U+88c1, U+8981, U+8986, U+89c1-89c2, U+89c4, U+89c6, U+89c8-89c9, U+89d2, U+89e3, U+89e6, U+8a00, U+8ba1, U+8ba4, U+8ba9, U+8bb0, U+8bb8, U+8bba, U+8bbe-8bbf, U+8bc6, U+8bd5, U+8bdd, U+8be2, U+8be5-8be6, U+8bed, U+8bf1, U+8bf4, U+8bf7, U+8bfb, U+8c01, U+8c03, U+8c28, U+8c61, U+8d25, U+8d2f, U+8d34, U+8d4e-8d4f, U+8d5b, U+8d70, U+8d74, U+8d77, U+8d85, U+8db3, U+8dd1, U+8de8, U+8def, U+8df3, U+8eab, U+8f66, U+8f6c, U+8f6e, U+8f70, U+8f7d, U+8f91, U+8f93, U+8fb9, U+8fbe, U+8fc2, U+8fc7, U+8fd0-8fd1, U+8fd4, U+8fd8-8fd9, U+8fdb-8fdc, U+8fde-8fdf, U+8ff0, U+8ff7, U+8ff9, U+8ffd, U+9000, U+9002, U+9009, U+9010, U+901a, U+901d, U+901f-9020, U+9022, U+903b, U+9041, U+904d, U+907f, U+90a3, U+90aa, U+90e8, U+90fd, U+914d, U+9192, U+91c7, U+91cc-91cf, U+91d1, U+9274, U+93d6, U+94a5, U+94a9, U+94ae, U+94c1, U+94e0, U+94f3, U+94fa, U+94fe, U+9501, U+950b, U+9519, U+952e, U+955c, U+9570, U+957f, U+95e8, U+95ed, U+95f2, U+95f4, U+95fb, U+9608, U+961f, U+9632, U+9635-9636, U+9644-9645, U+964d, U+9650, U+9664, U+9668, U+9677, U+968f, U+969c, U+96c4, U+96c6, U+96e8, U+96f6-96f7, U+9700, U+9707, U+9759, U+975e, U+9760, U+9762, U+9798, U+97f3, U+9875-9876, U+9879-987b, U+987d, U+987f, U+9884, U+9886, U+9897-9898, U+989c-989d, U+98ce, U+98de, U+9976, U+9988, U+9996, U+9a71, U+9aa4, U+9ab0, U+9ad8, U+9b3c, U+9b42, U+9b47, U+9b54, U+9e23, U+9ed1, U+9ed8, U+9f50, U+9f99;
 }
 /* @font-subset:end */
 #app.setup-page {
@@ -2574,6 +2641,10 @@ html[data-theme="mono"] .lifeline-track { background: #6b6b6b; }
 }
 .fx-die--A { background: #2563eb; }
 .fx-die--B { background: #dc2626; }
+.fx-die--A1 { background: #2563eb; }
+.fx-die--A2 { background: #38bdf8; }
+.fx-die--B1 { background: #dc2626; }
+.fx-die--B2 { background: #f472b6; }
 /* 存放骰飞行动效：**中性灰**（不染玩家色，与卡头/战术栏上的存放骰一致） */
 .fx-die--held { background: #64748b; }
 
@@ -2987,3 +3058,995 @@ html[data-theme] .detail-popover .skill-name, html[data-theme] .detail-popover .
 @media (max-width: 420px) {
   .about-kv { grid-template-columns: 1fr; row-gap: 1px; }
 }
+
+/* ===== 2v2 battle preview (scoped; does not affect 1v1) ===== */
+html.mode-2v2,
+html.mode-2v2 body { height: 100%; overflow: hidden; }
+html.mode-2v2 { scrollbar-gutter: auto; }
+
+.board--2v2 {
+  position: relative;
+  box-sizing: border-box;
+  height: 100vh;
+  padding: 8px 10px 8px 34px;
+  background: var(--tb-page, #f1f1f1);
+  color: var(--tb-ink, #1b1b1b);
+}
+.board--2v2 .main {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board--2v2 .side-row {
+  /* 只让 A1/A2、B1/B2 各自等高；不再把每组拉到整个侧区高度。 */
+  flex: 0 0 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 8px;
+}
+.board--2v2 .side-row + .team-row,
+.board--2v2 .team-row + .side-row { margin-top: -6px; }
+
+.board--2v2 .team-row {
+  /* 生命条＝中间两块骰区 + 两名队友之间的 8px 缝：
+     56px = 两个面板左右内缩 4×7px + 两面板内骰区缝 4×7px。 */
+  --team-col-gap: 8px;
+  --team-life-inset: 56px;
+  --team-life-w: calc((100% - var(--team-col-gap) - var(--team-life-inset)) / 3 + var(--team-col-gap));
+  position: relative;
+  flex: 0 0 30px;
+  height: 30px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--team-col-gap);
+}
+.board--2v2 .lifeline--team {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: var(--team-life-w);
+  max-width: calc(100% - 24px);
+  height: 100%;
+  box-sizing: border-box;
+  background: #a7a7a7;
+  border-color: rgba(0, 0, 0, .18);
+  padding: 0 10px;
+}
+.board--2v2 .lifeline--team .lifeline-hp { color: #1b1b1b; }
+.board--2v2 .lifeline--team .lifeline-track { height: 10px; background: #6b6b6b; border-color: rgba(255, 255, 255, .35); }
+.board--2v2 .team-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 10px;
+  font-weight: 700;
+  font-size: 13px;
+  background: var(--tb-mat, rgba(0, 0, 0, .035));
+  border: 1px solid var(--line, rgba(0, 0, 0, .18));
+  color: var(--tb-panel-ink, #1b1b1b);
+}
+.board--2v2 .team-head--top { border-radius: 10px 10px 0 0; border-bottom: 0; margin-bottom: -1px; }
+.board--2v2 .team-head--bottom { border-radius: 0 0 10px 10px; border-top: 0; margin-top: -1px; }
+.board--2v2 .team-head--right { justify-content: flex-end; }
+.board--2v2 .team-head .ptag { font-size: 11px; font-weight: 400; color: var(--muted, #6f6f6f); }
+.board--2v2 .team-head .ph-right { font-size: 11px; font-weight: 400; color: var(--muted, #6f6f6f); white-space: nowrap; }
+.board--2v2 .team-head .dot { background: var(--pc, #6b7280); }
+
+.board--2v2 .player {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 5px 6px;
+}
+.board--2v2 .player .pbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #9a9a9a transparent;
+}
+.board--2v2 .player .pbody > * { flex: 0 0 auto; }
+.board--2v2 .player .cards { gap: 7px; }
+.board--2v2 .player .card { padding: 5px 6px; gap: 3px; min-width: 0; }
+.board--2v2 .player .card-art--thumb .card-art-img { aspect-ratio: 900 / 230; object-position: top center; }
+.board--2v2 .player .card-head { flex-wrap: nowrap; gap: 6px; }
+.board--2v2 .player .card-head .card-name { flex: 0 0 auto; font-size: 13px; }
+.board--2v2 .player .card-head .badge { flex: 0 0 auto; font-size: 9px; padding: 0 5px; }
+.board--2v2 .player .card-head .card-sub { flex: 1 1 auto; min-width: 0; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board--2v2 .player .skills--inline { gap: 2px 5px; }
+.board--2v2 .player .skills--inline--only { flex-wrap: wrap; }
+.board--2v2 .player .skills--inline--only .skill { flex-direction: row; }
+.board--2v2 .player .skill { padding: 2px 4px; border-radius: 5px; }
+.board--2v2 .player .skill-part { padding: 1px 3px; border-left-width: 3px; }
+.board--2v2 .player .skill-type { font-size: 9px; padding: 0 3px; }
+.board--2v2 .player .skill-name { font-size: 10px; }
+.board--2v2 .player .skill-text { font-size: 11px; line-height: 1.35; }
+.board--2v2 .player .area-label { font-size: 10px; white-space: nowrap; }
+.board--2v2 .player .areas {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+.board--2v2 .player .area {
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+}
+.board--2v2 .player .dice { gap: 2px; max-height: none; }
+.board--2v2 .player .die { width: 22px; height: 22px; font-size: 11px; border-radius: 5px; }
+.board--2v2 .player .card-held { display: flex; flex-wrap: wrap; gap: 3px; padding: 2px 0; }
+.board--2v2 .player .card-held .pay-die--held { width: 20px; height: 20px; min-width: 0; padding: 0; font-size: 11px; border-radius: 5px; }
+.board--2v2 .player .dot { background: var(--pc, #6b7280); }
+
+/* 座位骰色由 ui/seatColors.ts 在渲染时写入，避免两套色板。 */
+
+.board--2v2 .lgbar {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-height: 56px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #0a0a0b;
+  border: 1px solid #33333a;
+}
+.board--2v2 .lgbar-art { flex: 0 0 auto; width: 48px; height: 48px; background: #000; border-radius: 6px; overflow: hidden; display: block; }
+.board--2v2 .lgbar-art img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 50%; }
+.board--2v2 .lgbar-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.board--2v2 .lgbar-line { display: flex; align-items: center; flex-wrap: nowrap; gap: 3px 6px; min-width: 0; }
+.board--2v2 .lgbar-nm { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: #f5f4f0; white-space: nowrap; }
+.board--2v2 .lgbar-line .tactic-bar { flex: 1 1 auto; margin: 0; padding: 0 4px; gap: 4px; min-width: 0; min-height: 18px; }
+.board--2v2 .lgbar-line .tactic-bar-name { min-height: 16px; padding: 0 6px; font-size: 11px; }
+.board--2v2 .lgbar-line .tactic-bar-eff { font-size: 10px; line-height: 1.3; -webkit-line-clamp: 1; }
+.board--2v2 .lgbar .skills--inline-legend { gap: 3px; }
+.board--2v2 .lgbar .skills--inline-legend .skill { padding: 0 2px; }
+.board--2v2 .lgbar .skill-type { font-size: 9px; padding: 0 4px; }
+.board--2v2 .lgbar .skill-name { font-size: 10px; }
+.board--2v2 .lgbar .skill-text { font-size: 10px; line-height: 1.3; }
+
+.board--2v2 .centerband { flex: 0 0 auto; min-height: 0; }
+.board--2v2 .centerband-left { min-width: 0; }
+.board--2v2 .centerband-right { flex: 0 0 168px; width: 168px; }
+.board--2v2 .actionzone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "hint side" "list side";
+  align-content: stretch;
+  align-items: center;
+  gap: 4px 10px;
+}
+.board--2v2 .actionzone > .hint { grid-area: hint; }
+.board--2v2 .actionzone > .actionlist { grid-area: list; }
+.board--2v2 .zone-side { grid-area: side; align-self: stretch; display: flex; align-items: flex-start; gap: 8px; }
+.board--2v2 .zone-side .hint-dust { align-self: flex-start; }
+.board--2v2 .stance-token {
+  flex: 0 0 auto;
+  width: calc(var(--actionzone-min-h, 104px) - 16px);
+  height: calc(var(--actionzone-min-h, 104px) - 16px);
+  align-self: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, .22);
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  display: block;
+  line-height: 0;
+}
+.board--2v2 .stance-token img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.board--2v2 .stance-token:hover { border-color: rgba(0, 0, 0, .45); }
+
+.board--2v2 .lograil { position: fixed; left: 0; top: 0; bottom: 0; width: 26px; z-index: 60; background: var(--panel, #fbf9f4); border-right: 1px solid var(--line); transition: width .18s ease; overflow: hidden; }
+.board--2v2 .lograil.open { width: 286px; box-shadow: 2px 0 12px rgba(0, 0, 0, .08); }
+.board--2v2 .lograil-tab { position: absolute; left: 0; top: 0; bottom: 0; width: 26px; z-index: 2; display: flex; align-items: center; justify-content: center; writing-mode: vertical-rl; letter-spacing: 3px; font-size: 12px; color: var(--muted); background: transparent; border: 0; font-family: inherit; cursor: pointer; }
+.board--2v2 .lograil.open .lograil-tab { background: #efeade; color: #3d3a33; }
+.board--2v2 .lograil-body { position: absolute; left: 26px; top: 0; bottom: 0; width: 260px; padding: 10px 10px 10px 8px; overflow: auto; font-size: 12px; line-height: 1.7; color: #4b5563; }
+
+.board--2v2 .preview-toggles {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(255, 253, 248, .97);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #4b5563;
+  opacity: .72;
+  transition: opacity .15s ease;
+}
+.board--2v2 .preview-toggles:hover { opacity: 1; }
+.board--2v2 .preview-toggles label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .board--2v2 .lograil, .board--2v2 .preview-toggles { transition: none; }
+}
+
+/* ===== 2v2 preview correction pass ===== */
+.board--2v2 { display: flex; gap: 10px; padding: 8px 10px; }
+.board--2v2 .main { flex: 1 1 auto; min-width: 0; }
+.board--2v2 .sidebar { flex: 0 0 300px; min-width: 0; height: 100%; position: static; }
+.board--2v2 .sidebar .log { max-height: none; min-height: 0; flex: 1 1 auto; }
+.board--2v2 .log-tab { display: flex; }
+.board--2v2 .player { box-sizing: border-box; }
+.board--2v2.density-compact { --actionzone-min-h: 104px; }
+.board--2v2.density-comfortable { --actionzone-min-h: 128px; }
+.board--2v2 .actionzone { min-height: var(--actionzone-min-h, 104px); }
+.board--2v2 .lifeline--team { background: rgba(0, 0, 0, .28); border-color: rgba(255, 255, 255, .14); }
+.board--2v2 .lifeline--team .lifeline-hp { color: #f3f0e8; }
+.board--2v2 .player .skill { padding: 4px 6px; }
+.board--2v2 .player .skill-part { padding: 3px 5px; border-left-width: 4px; }
+.board--2v2 .player .skill-type { font-size: 11px; padding: 0 6px; }
+.board--2v2 .player .skill-name { font-size: 11px; }
+.board--2v2 .player .card-head .badge { font-size: 10px; padding: 1px 7px; }
+.board--2v2 .lgbar { flex: 0 0 auto; }
+.board--2v2 .lgbar-body { gap: 2px; }
+.board--2v2 .lgbar-meta { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.board--2v2 .lgbar--tactic-only { min-height: 28px; padding: 2px 6px; align-items: center; }
+.board--2v2 .lgbar--tactic-only .lgbar-body { justify-content: center; }
+.board--2v2 .lgbar--tactic-only .lgbar-line { width: 100%; }
+.board--2v2 .log-drawer .log { border-radius: 0; }
+.board--2v2 .detail-popover { max-height: 86vh; overflow: auto; }
+
+.board--2v2 .player .card-head { flex-wrap: wrap; align-items: baseline; }
+.board--2v2 .player .card-head .card-sub { flex: 1 1 auto; white-space: normal; overflow: visible; text-overflow: clip; }
+
+.board--2v2 .player .card-head .card-held--head { gap: 1px; }
+.board--2v2 .player .card-head .card-held--head .pay-die--held { width: 16px; height: 16px; min-width: 16px; padding: 0; font-size: 9px; border-radius: 4px; }
+.board--2v2 .lgbar { min-height: 48px; padding: 3px 6px; gap: 6px; }
+.board--2v2 .lgbar-art { width: 44px; height: 44px; }
+
+.board--2v2 .player .card-head .badge { font-size: 9px; padding: 0 4px; }
+.board--2v2 .player .card-head .card-held--head .pay-die--held { width: 14px; height: 14px; min-width: 14px; font-size: 8px; }
+.board--2v2 .lgbar { padding: 2px 5px; min-height: 44px; gap: 4px; }
+.board--2v2 .lgbar-art { width: 40px; height: 40px; }
+.board--2v2 .lgbar .skill-part { padding: 1px 3px; border-left-width: 3px; }
+
+.board--2v2 .player .card-head { flex-wrap: nowrap; }
+.board--2v2 .player .card-head .card-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.board--2v2 .player .card-head .card-held--head { flex-wrap: nowrap; }
+.board--2v2 .lgbar { padding: 2px 4px; gap: 3px; min-height: 40px; }
+.board--2v2 .lgbar-art { width: 36px; height: 36px; }
+.board--2v2 .lgbar .skills--inline-legend { gap: 2px; }
+.board--2v2 .lgbar .skill-part { padding: 0 2px; border-left-width: 3px; }
+
+.board--2v2 .player .card-art--thumb .card-art-img { aspect-ratio: 900 / 210; }
+
+.board--2v2 .player .card { padding: 4px 5px; }
+
+.board--2v2 .player .card-head .card-held--head .pay-die--held { width: 12px; height: 12px; min-width: 12px; font-size: 7px; }
+
+.board--2v2 .player .card-head .card-sub { font-size: 8px; }
+.board--2v2 .player .card-head .card-held--head .pay-die--held { width: 11px; height: 11px; min-width: 11px; font-size: 7px; }
+
+.board--2v2 .player .card-head--held { flex-wrap: wrap; }
+.board--2v2 .player .card-head--held .card-sub { white-space: normal; overflow: visible; text-overflow: clip; }
+.board--2v2 .player .die { width: 21px; height: 21px; }
+.board--2v2 .player .dice { gap: 1px; }
+
+.board--2v2 .lgbar { align-items: stretch; }
+.board--2v2 .lgbar-art { width: 44px; height: auto; align-self: stretch; }
+.board--2v2 .lgbar-line--skills { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.board--2v2 .lgbar-line--skills > .badge { flex: 0 0 auto; }
+.board--2v2 .lgbar-line--skills > .skills { flex: 1 1 auto; min-width: 0; }
+.board--2v2 .player .skill-name { min-width: 0; }
+.board--2v2 .player .skill-name--short { white-space: nowrap; }
+.board--2v2 .player .skill-name--long { white-space: normal; overflow-wrap: anywhere; }
+.board--2v2:not(.show-text):not(.card-art-full) .player .pbody { overflow-y: hidden; }
+.board--2v2.show-text .player .pbody,
+.board--2v2.card-art-full .player .pbody { overflow-y: auto; }
+
+/* ===== 2v2 卡头间距：对齐 1v1 的紧凑排列（去掉已激活徽标后不再留大缝） ===== */
+.board--2v2 .player .card-head { gap: 4px; }
+
+/* ===== 2v2 UI 壳修正（最后覆盖早期临时值） ===== */
+/* 计数紧跟状态文字，不再被 card-sub 的 flex-grow 推到右端。 */
+.board--2v2 .player .card-head .card-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 传奇计数药丸：与神器卡头同口径，紧凑但保持 1v1 的桃色计数样式。 */
+.board--2v2 .lgbar .badge-count {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 10px;
+  padding: 1px 7px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 4 字以内：类型 + 名字整块不换行；超过 4 字才允许自然换行。 */
+.board--2v2:not(.show-text) .player .skill-part-head--short { white-space: nowrap; }
+.board--2v2.show-text .player .skill-part-head--short { white-space: normal; }
+.board--2v2.show-text .player .skill-part-head--short .skill-type,
+.board--2v2.show-text .player .skill-part-head--short .skill-name { white-space: nowrap; }
+.board--2v2 .player .skill-text { white-space: normal; overflow-wrap: anywhere; }
+.board--2v2 .player .skill-part-head--long { white-space: normal; }
+.board--2v2 .player .skill-part-head--short .skill-type {
+  font-size: 9px;
+  padding: 0 3px;
+  margin-right: 3px;
+}
+.board--2v2 .player .skill-part-head--short .skill-name { font-size: 10px; }
+.board--2v2 .player .skills--inline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.board--2v2 .player .skills--inline .skill { min-width: 0; }
+
+@media (max-width: 1366px) {
+  .board--2v2 .lgbar .badge-count { font-size: 9px; padding: 0 4px; }
+  .board--2v2 .player .skill-part-head--short .skill-type { font-size: 8px; padding: 0 2px; margin-right: 2px; }
+  .board--2v2 .player .skill-part-head--short .skill-name { font-size: 9px; }
+  .board--2v2 .player .skill { padding: 2px 3px; }
+  .board--2v2 .player .skill-part { padding: 1px 2px; border-left-width: 2px; }
+}
+
+/* 预览浮层不参与整屏缩放（详情/设置/战报使用视口坐标）。 */
+.preview-overlays {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+.preview-overlays > * { pointer-events: auto; }
+
+/* ===== 2v2 等高布局：内容 / 弹性空隙 / 骰区（组件不放大） ===== */
+.board--2v2 .player {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.board--2v2 .player .pbody {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+}
+.board--2v2 .player-gap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.board--2v2 .player .areas { flex: 0 0 auto; }
+
+/* 团队血量条：实色深底，不使用半透明。 */
+.board--2v2 .lifeline--team {
+  background: #1b1b1b;
+  border-color: #3a3a40;
+  opacity: 1;
+}
+
+/* 快速操作栏维持 1v1 的 104/128；攻守图片不得成为额外高度来源。 */
+.board--2v2 .stance-token {
+  width: 72px;
+  height: 72px;
+}
+
+/* 只开传奇时，第一行保留与「传奇+战术」一致的战术行高（黑条不增高 5px）。 */
+.board--2v2 .lgbar:not(.lgbar--tactic-only) > .lgbar-body > .lgbar-line:first-child {
+  min-height: 20px;
+}
+
+/* 只有打开技能描述时才把玩家框高度限住，内容溢出在玩家框内滚动。
+   卡图=完整不套这套约束。 */
+.board--2v2.show-text .side-row {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.board--2v2.show-text .player .pbody {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.board--2v2.show-text .player-gap {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.board--2v2.show-text .player .pbody::-webkit-scrollbar {
+  width: 6px;
+}
+.board--2v2.show-text .player .pbody::-webkit-scrollbar-thumb {
+  background: #9a9a9a;
+  border-radius: 3px;
+}
+
+/* 行动中：名字框透明绿色底 + 绿色边线；药丸保留。 */
+.board--2v2 .team-head--acting {
+  background: rgba(29, 122, 77, .12);
+  border-color: #1d7a4d;
+  box-shadow: inset 3px 0 0 #1d7a4d;
+}
+.board--2v2 .team-head--acting .team-seat { color: #1d6b43; }
+.board--2v2 .team-head--acting .dot { background: #1d7a4d; }
+
+/* 行动中：实心绿色药丸 + 亮点，比纯文字更醒目。 */
+.board--2v2 .team-head .ph-right--active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  background: #1d7a4d;
+  border: 1px solid #0f5f35;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+.board--2v2 .team-head .ph-right--active::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b7f7cc;
+}
+
+/* 全 only 侧（如孤王三技能）：能并排就并排，不够就自动 2+1，不截断。 */
+.board--2v2 .player .skills--inline--only > .skill {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+  gap: 2px 4px;
+}
+.board--2v2 .player .skills--inline--only .skill-part {
+  flex: 0 0 auto;
+  min-width: 0;
+  /* 上下继承普通技能条目的 padding，保证第三列整块药丸同高。 */
+  padding-left: 2px;
+  padding-right: 2px;
+  border-left-width: 2px;
+}
+.board--2v2 .player .skills--inline--only .skill-type {
+  padding: 0 2px;
+  margin-right: 2px;
+}
+
+/* ===== 2v2 玩家身份色：边框/淡染/座位号/卡顶/骰区/传奇条 ===== */
+html[data-theme] .board--2v2 .player {
+  border-color: color-mix(in srgb, var(--pc) 30%, var(--tb-mat-line, rgba(0, 0, 0, .18)));
+}
+html[data-theme] .board--2v2 .player--enemy {
+  border-top: 4px solid var(--pc);
+}
+html[data-theme] .board--2v2 .player--self {
+  border-bottom: 4px solid var(--pc);
+}
+
+.board--2v2 .team-head {
+  border-color: color-mix(in srgb, var(--pc) 35%, var(--tb-mat-line, rgba(0, 0, 0, .18)));
+}
+.board--2v2 .team-head .team-seat {
+  color: color-mix(in srgb, var(--pc) 68%, #111 32%);
+  font-weight: 800;
+}
+
+.board--2v2 .player .card {
+  box-shadow: inset 0 2px 0 var(--pc), var(--tb-card-shadow, 0 1px 6px rgba(0, 0, 0, .1));
+}
+.board--2v2 .player .area {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--pc) 55%, transparent);
+}
+html[data-theme] .board--2v2 .player .lgbar {
+  border-left: 4px solid var(--pc);
+}
+
+/* ===== 2v2 选择界面 ===== */
+#app.setup-page.setup-2v2 { height: 100vh; min-height: 0; overflow: hidden; }
+#app.setup-page.setup-2v2 .pick-surface { height: 100%; min-height: 0; }
+#app.setup-page .pick-board.lunxuan2 {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3.2fr) minmax(0, 1fr);
+  gap: 14px;
+}
+#app.setup-page .pick-cards--4 { grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 6px; }
+#app.setup-page .pick-stack {
+  flex: 1 1 auto; min-height: 0; display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 6px;
+}
+#app.setup-page .pick-pair {
+  min-height: 0; display: grid;
+  grid-template-rows: 14px minmax(0, 1fr) minmax(0, 1fr); gap: 4px;
+}
+#app.setup-page .pick-pairlab { font-size: var(--fs-4); color: var(--t2); opacity: .75; line-height: 1; }
+#app.setup-page .pick-pair .pick-slot.empty { font-size: 0; background: rgba(255, 255, 255, .035); }
+#app.setup-page .pick-slot--full .pick-art { opacity: .38; }
+#app.setup-page .pick-slot--full { cursor: not-allowed; }
+#app.setup-page .pick-slot--full::after {
+  content: "本队已满"; position: absolute; left: 6px; bottom: 5px;
+  font: 700 var(--fs-4) var(--pick-ui); color: #ffb4a2; pointer-events: none;
+}
+#app.setup-page .pick-dots--12 { flex-wrap: nowrap; max-width: none; }
+#app.setup-page .pick-step-who.A1,
+#app.setup-page .pick-step-who.A2,
+#app.setup-page .pick-step-who.B1,
+#app.setup-page .pick-step-who.B2 { font-weight: 800; }
+#app.setup-page .team-name.A { color: #6aa8e8; }
+#app.setup-page .team-name.B { color: #e8827a; }
+
+#app.setup-page .assign-stage {
+  position: relative; z-index: 2; flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0 18px 8px; padding: 14px 22px;
+  border-radius: var(--r-md); background: var(--panel); border: 1.5px solid var(--line-strong);
+}
+#app.setup-page .assign-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  font-weight: 700; font-size: var(--fs-2);
+}
+#app.setup-page .assign-head .who-a { color: var(--pa); }
+#app.setup-page .assign-head .who-b { color: var(--pb); }
+#app.setup-page .assign-hint { margin-left: 4px; font-weight: 400; font-size: var(--fs-4); color: var(--t2); }
+#app.setup-page .assign-head .assign-lock { margin-left: auto; flex: 0 0 auto; }
+#app.setup-page .assign-rows {
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 8px;
+}
+#app.setup-page .assign-row {
+  min-height: 0; display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; gap: 10px;
+}
+#app.setup-page .assign-collab { font-size: var(--fs-4); color: var(--t2); align-self: center; }
+#app.setup-page .assign-colhead {
+  flex: 0 0 auto; display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: center;
+}
+#app.setup-page .assign-colhead .seat {
+  justify-self: start; display: inline-flex; align-items: center; justify-content: center;
+  padding: 1px 10px; border-radius: 5px; font: 700 var(--fs-4) var(--pick-ui);
+  color: var(--pc); border: 1px solid color-mix(in srgb, var(--pc) 50%, transparent);
+}
+#app.setup-page .assign-slot {
+  position: relative; min-height: 0; display: flex; cursor: pointer;
+  align-items: center; justify-content: center;
+  outline: 2px solid color-mix(in srgb, var(--pc) 50%, transparent); outline-offset: 2px;
+  transition: outline-color .12s var(--pick-ease);
+}
+#app.setup-page .assign-slot:hover { outline-color: var(--pc); }
+#app.setup-page .assign-slot .pick-art {
+  flex: 0 0 auto; width: 100%; height: auto; aspect-ratio: 900 / 305;
+  max-width: 100%; max-height: 100%; box-sizing: border-box;
+  background: color-mix(in srgb, var(--pc) 82%, #0a0a0b);
+  border: 2px solid var(--pc);
+}
+#app.setup-page .assign-slot .pick-art-inner { width: 100%; height: 100%; max-width: none; max-height: none; }
+#app.setup-page .assign-slot .pick-art img { width: 100%; height: 100%; object-fit: contain; }
+
+#app.setup-page .reveal-stage {
+  position: relative; z-index: 2; flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 12px; margin: 0 18px 12px; padding: 16px;
+}
+#app.setup-page .reveal-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 14px;
+  font-family: var(--menu-brush); font-size: var(--fs-1); color: var(--t1);
+}
+#app.setup-page .reveal-head .reveal-meta {
+  margin-left: auto; font: 400 var(--fs-4) var(--pick-ui); color: var(--t2); white-space: nowrap;
+}
+#app.setup-page .reveal-grid {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;
+}
+#app.setup-page .reveal-side {
+  min-height: 0; display: grid; grid-template-rows: 24px minmax(0, 1fr); gap: 8px;
+  padding: 10px 12px 12px; border-radius: var(--r-md);
+  border: 2px solid var(--pc);
+  background: color-mix(in srgb, var(--pc) 10%, transparent);
+}
+#app.setup-page .reveal-side.A { --pc: var(--pa); }
+#app.setup-page .reveal-side.B { --pc: var(--pb); }
+#app.setup-page .reveal-side .side-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font: 700 var(--fs-3) var(--pick-ui); color: var(--pc);
+}
+#app.setup-page .reveal-side .side-head .sub { font: 400 var(--fs-4) var(--pick-ui); color: var(--t2); }
+#app.setup-page .reveal-pairs { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#app.setup-page .reveal-team {
+  min-height: 0; display: grid; grid-template-rows: 20px repeat(3, minmax(0, 1fr)); gap: 6px;
+}
+#app.setup-page .reveal-team .rt-head { display: flex; align-items: center; gap: 6px; font: 700 var(--fs-4) var(--pick-ui); }
+#app.setup-page .reveal-team .rt-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pc); }
+#app.setup-page .assign-head .assign-lock {
+  flex: 0 0 auto;
+  border: 1.5px solid #274a33;
+  border-radius: var(--r-md);
+  background: var(--green);
+  color: #fff;
+  font: 700 var(--fs-3) var(--pick-ui);
+  cursor: pointer;
+  box-shadow: var(--shadow-ink);
+}
+#app.setup-page .assign-head .assign-lock:active { transform: scale(.96); }
+#app.setup-page .assign-colhead .seat { gap: 5px; }
+#app.setup-page .assign-seat-code {
+  color: var(--t2);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: .75;
+}
+#app.setup-page .reveal-head {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(10, 10, 11, .72);
+  border: 1px solid rgba(255, 255, 255, .16);
+  color: #f3f0e8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+#app.setup-page .reveal-head .reveal-title { color: #f3f0e8; }
+#app.setup-page .reveal-head .reveal-meta { color: #d8d3c8; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
+
+/* 2v2 M2A：快速操作栏里的攻守目标/双票面板 */
+.m2a-bar { display: contents; }
+.m2a-vote {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0;
+}
+.m2a-vote-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.m2a-vote-label {
+  flex: 0 0 auto;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 700;
+}
+.m2a-vote-row .btn {
+  min-height: 28px;
+  padding: 2px 10px;
+}
+
+/* ===== 2v2 battle shell (Phase 0.6) ===== */
+.battle2v2-root { height: 100vh; min-height: 0; }
+.b2v2-vote {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px dashed #cfc8ba;
+  border-radius: 8px;
+  padding: 4px 7px;
+  background: rgba(255, 255, 255, .35);
+}
+/* 提示 + 两个投票人：**有位置就同一行**；不够时自然换行（提示独占一行、按钮下一行），绝不压字。
+   操作栏是 min-height 不是固定高度 → 折行不会裁内容（用户 2026-11-07 定）。 */
+.b2v2-vote-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.b2v2-vote-tip {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4b5563;
+  overflow-wrap: anywhere;
+}
+.b2v2-vote-arrow { flex: 0 0 auto; font-size: 11px; color: #8a8578; }
+.b2v2-vote-col { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 0 auto; }
+/* 两个投票组**永远同进退**：折行时只会在"提示 / 两组"之间断，不会把两组拆开 */
+.b2v2-vote-groups {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.b2v2-vote-who { flex: 0 0 auto; font-size: 11px; font-weight: 800; }
+.b2v2-vote-col .option-row { display: flex; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.b2v2-vote-col .option-btn { padding: 1px 7px; min-height: 22px; font-size: 11px; }
+/* 投票行里被要求"黑色加粗"的数字（N 点 / N 伤害） */
+.b2v2-strong { color: #111; font-weight: 800; }
+@media (max-width: 900px) {
+  .b2v2-vote-col { align-items: flex-start; }
+}
+
+/* 投票面板并入快速操作栏，不再单独占一条。 */
+.board--2v2 .actionlist .b2v2-vote {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+.board--2v2 .actionlist .b2v2-vote-col { flex: 0 0 auto; }
+
+/* A2/B2 旧版浅色骰文字阴影（骰色由 seatColors.ts 写入）。 */
+.board--2v2 .player[data-player='A2'] .die,
+.board--2v2 .player[data-player='B2'] .die { text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+
+/* 药丸态：全 only 侧左右居中（1v1 第三列规则）；3 个自动 2+1。 */
+.board--2v2 .player .skills--inline--only {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.board--2v2 .player .skills--inline--only > .skill {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  flex: 1 1 100%;
+  width: auto;
+  min-width: 0;
+  gap: 2px 4px;
+}
+
+/* 1v1 行内流：类型 + 名字 + 描述同一行。 */
+.board--2v2 .player .skill-part-head { display: block; }
+.board--2v2 .player .skills--inline--only .skill-type,
+.board--2v2 .player .skill-part-head .skill-type,
+.board--2v2 .player .skill-part-head--short .skill-type,
+.board--2v2 .player .skill-part-head--long .skill-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.6em;
+  box-sizing: border-box;
+  margin-right: 6px;
+  padding: 0 6px;
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.board--2v2 .player .skill-line { display: inline; }
+.board--2v2 .player .skills--inline--only .skill-name,
+.board--2v2 .player .skill-part-head .skill-name,
+.board--2v2 .player .skill-part-head--short .skill-name,
+.board--2v2 .player .skill-part-head--long .skill-name {
+  display: inline;
+  min-width: 0;
+  margin: 0 6px 0 0;
+  font-size: 10px;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.board--2v2 .player .skill-text {
+  display: inline;
+  width: auto;
+  margin-top: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* 长名字（5–7 字）只让类型和名字不换行，描述仍可自然换行。 */
+.board--2v2 .player .skill-part-head--nowrap .skill-type,
+.board--2v2 .player .skill-part-head--nowrap .skill-name { white-space: nowrap; }
+
+/* 长名字卡：两列按内容借位；宽屏保持正常间距，只有窄屏才横向收紧。
+   放不下时右侧整组换到下一行，名字本身仍不断行。 */
+.board--2v2 .player .skills--inline.skills--borrow {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px 5px;
+}
+.board--2v2 .player .skills--inline.skills--borrow > .skill {
+  flex: 0 1 auto;
+  min-width: auto;
+}
+.board--2v2 .player .skills--inline.skills--borrow > .skill--right { margin-left: auto; }
+
+@media (max-width: 1900px) {
+  .board--2v2 .player .skills--inline.skills--borrow { column-gap: 4px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill { padding-left: 2px; padding-right: 2px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-part { padding-left: 2px; padding-right: 2px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-type { padding: 0 4px; margin-right: 4px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-name { margin-right: 0; }
+}
+
+@media (max-width: 1550px) {
+  .board--2v2 .player .skills--inline.skills--borrow { column-gap: 2px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill { padding-left: 0; padding-right: 0; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-part { padding-left: 0; padding-right: 0; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-type { padding: 0 2px; margin-right: 2px; }
+  .board--2v2 .player .skills--inline.skills--borrow .skill-name { margin-right: 0; }
+}
+
+@media (max-width: 1366px) {
+  .board--2v2 .player .skills--inline--only .skill-type,
+  .board--2v2 .player .skill-part-head .skill-type,
+  .board--2v2 .player .skill-part-head--short .skill-type,
+  .board--2v2 .player .skill-part-head--long .skill-type {
+    margin-right: 4px;
+    padding: 0 4px;
+    font-size: 8px;
+  }
+  .board--2v2 .player .skills--inline--only .skill-name,
+  .board--2v2 .player .skill-part-head .skill-name,
+  .board--2v2 .player .skill-part-head--short .skill-name,
+  .board--2v2 .player .skill-part-head--long .skill-name {
+    margin-right: 4px;
+    font-size: 9px;
+  }
+}
+
+/* 不用传奇/战术时，让内容区自动补位（不保留空槽）。 */
+.board--2v2 .player .pbody { flex: 1 1 auto; }
+
+/* 2v2 micro-interactions */
+
+.battle2v2-root .btn {
+  transition: transform 120ms cubic-bezier(0.4, 0, 0.2, 1), opacity 120ms ease;
+}
+.battle2v2-root .btn:active {
+  transform: scale(0.96);
+}
+.board--2v2 .lifeline-fill {
+  width: 100%;
+  transform-origin: left center;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* ⚠️ 不要给 2v2 的选择器/投票/浮层加"入场动画"：整块面板每次操作都会重绘，
+ *    入场动画会随重绘反复复播 → 用户看到"操作时闪一闪"（真实事故）。
+ *    1v1 的 `.selector` 也没有入场动画，2v2 必须一致。 */
+@media (prefers-reduced-motion: reduce) {
+  .board--2v2 .card,
+  .battle2v2-root .btn,
+  .board--2v2 .lifeline-fill {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+/* 2v2 game over */
+.b2v2-gameover {
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+.b2v2-gameover-winner {
+  font-size: 22px;
+  font-weight: 700;
+}
+.b2v2-gameover .settings-actions {
+  justify-content: center;
+  gap: 10px;
+}
+/* 2v2 操作区：恢复左右布局；尘落/提示在左，攻守标记在右，不被挤到下一行 */
+.board--2v2 .actionzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  /* 右侧给攻守标记留位，但不让侧栏参与行高；提示第一行因此贴顶。 */
+  padding-right: 92px;
+}
+.board--2v2 .actionzone > .hint {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 0;
+  padding-right: 16px;
+  box-sizing: border-box;
+}
+.board--2v2 .actionzone > .actionlist {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 0;
+}
+.board--2v2 .actionzone > .zone-side {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.board--2v2 .actionzone > .zone-side .stance-token {
+  width: auto;
+  height: 100%;
+  max-height: calc(var(--actionzone-min-h, 104px) - 16px);
+  aspect-ratio: 1;
+}
+.board--2v2 .actionzone .option-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* 纯选对象型待决策＝**必须单行**：`目标 [玩家B1] [玩家B2] [不发动「杀意」]`。
+   （2026-11-07 用户要求：目标与「不发动」同一行，不许折行） */
+.board--2v2 .actionzone .option-row--decide {
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+.board--2v2 .actionzone .option-row--decide .selector-hint {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.board--2v2 .actionzone .option-row--decide .option-btn,
+.board--2v2 .actionzone .option-row--decide > .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* 守方投票面板上的"这一刀"说明（点数/伤害/加成/不可抵挡） */
+.board--2v2 .actionlist .b2v2-vote-info {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--tb-cell-ink, #1b1b1b);
+  overflow-wrap: anywhere;
+}
+/* 投票面板本身要能占满一行（否则内部"提示＋按钮"没有横向空间，会被挤到下一行） */
+.board--2v2 .actionlist .b2v2-vote {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* ===== 2v2 test-only deck ===== */
+.setup-2v2-test .b2v2-test-surface { width: min(620px, 94vw); margin: 7vh auto 0; }
+.setup-2v2-test .b2v2-test-head { display: flex; align-items: center; gap: 16px; }
+.setup-2v2-test .b2v2-test-title { font-size: 24px; font-weight: 800; color: #1b1b1b; }
+.setup-2v2-test .b2v2-test-panel { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; padding: 18px; background: #f7f7f7; border: 1px solid #cfcfcf; border-radius: 10px; }
+.setup-2v2-test .b2v2-test-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-left: 4px solid var(--pc); background: #fff; border-radius: 6px; }
+.setup-2v2-test .b2v2-test-seat { font-weight: 800; color: var(--pc); }
+.setup-2v2-test .b2v2-test-select { min-width: 0; padding: 6px 8px; font: inherit; border: 1px solid #aaa; border-radius: 6px; background: #fff; }
+.setup-2v2-test .b2v2-test-alt { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #555; white-space: nowrap; }
+.setup-2v2-test .b2v2-test-message { min-height: 18px; font-size: 12px; color: #b91c1c; }
+.setup-2v2-test .b2v2-test-start { align-self: flex-start; }
+
+.settings-zoom-input { width: 64px; padding: 4px 6px; font: inherit; font-size: 13px; text-align: right; border: 1px solid #9dc0e0; border-radius: 6px; background: #fff; color: #23405c; }
+
+
+.b2v2-vote .option-btn.player-A1 { color: #fff; background: #2563eb; border-color: #2563eb; }
+.b2v2-vote .option-btn.player-A2 { color: #fff; background: #38bdf8; border-color: #38bdf8; }
+.b2v2-vote .option-btn.player-B1 { color: #fff; background: #dc2626; border-color: #dc2626; }
+.b2v2-vote .option-btn.player-B2 { color: #fff; background: #f472b6; border-color: #f472b6; }
+.b2v2-vote .option-btn.player-A1.option-btn--on { background: #1d4ed8; border-color: #1d4ed8; }
+.b2v2-vote .option-btn.player-A2.option-btn--on { background: #0ea5e9; border-color: #0ea5e9; }
+.b2v2-vote .option-btn.player-B1.option-btn--on { background: #b91c1c; border-color: #b91c1c; }
+.b2v2-vote .option-btn.player-B2.option-btn--on { background: #db2777; border-color: #db2777; }
+.board--2v2 .b2v2-target.player-A1 { color: #fff; background: #2563eb; border-color: #2563eb; }
+.board--2v2 .b2v2-target.player-A2 { color: #fff; background: #38bdf8; border-color: #38bdf8; }
+.board--2v2 .b2v2-target.player-B1 { color: #fff; background: #dc2626; border-color: #dc2626; }
+.board--2v2 .b2v2-target.player-B2 { color: #fff; background: #f472b6; border-color: #f472b6; }
+.board--2v2 .b2v2-target.option-btn--on { filter: brightness(.86); }
